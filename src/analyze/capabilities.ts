@@ -14,12 +14,87 @@ export const PARAM_SIGNALS: Readonly<Record<SchemaSignal, readonly string[]>> = 
   credentials: ["token", "apikey", "api_key", "secret", "password", "env"],
 };
 
+/** Credential words that mean "environment variables" rather than a secret value. */
+const ENV_WORDS: ReadonlySet<string> = new Set(["env"]);
+
+/** Words that turn "token" into a pagination cursor (pageToken, nextPageToken), not a secret. */
+const PAGINATION_WORDS: ReadonlySet<string> = new Set(["page", "next", "continuation", "cursor"]);
+
+/** Invisible format characters a server could use to split a name past the matcher. */
+const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
+
 /**
- * TODO: return a CapabilitySet with every flag false, every list empty, scope "none" and
- * declared {}. The baseline each pass widens from.
+ * Lowercase words of an identifier or sentence: splits camelCase, PascalCase, acronyms,
+ * snake_case, kebab-case and punctuation, after NFKC folding and removing invisible characters.
+ */
+function splitWords(text: string): string[] {
+  return text
+    .normalize("NFKC")
+    .replace(IGNORABLE, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 0);
+}
+
+/** True when `word` is `stem` or a regular plural of it (paths, directories). */
+function isFormOf(word: string, stem: string): boolean {
+  if (word === stem) return true;
+  if (word.endsWith("ies")) return word.slice(0, -3) + "y" === stem;
+  return word.length > 3 && word.endsWith("s") && word.slice(0, -1) === stem;
+}
+
+/** Normalized table entries: "api_key" is matched as "apikey". */
+const SIGNAL_STEMS: ReadonlyArray<readonly [SchemaSignal, string]> = Object.entries(PARAM_SIGNALS).flatMap(
+  ([signal, names]) => names.map((name) => [signal as SchemaSignal, splitWords(name).join("")] as const),
+);
+
+/** One matched signal: which capability and which table word triggered it. */
+export interface SignalMatch {
+  signal: SchemaSignal;
+  word: string;
+}
+
+/**
+ * Pass 1 name matching. Case-insensitive; matches each word of the parameter name and the
+ * name with separators removed, so `file_path`, `targetDir`, `webhookURL` and `API_KEY` all
+ * match. Plurals match their stem. "token" preceded by a pagination word (pageToken) is not a
+ * credential. Returns each signal at most once, in PARAM_SIGNALS order.
+ */
+export function matchParamSignals(name: string): SignalMatch[] {
+  const parts = splitWords(name);
+  const candidates = [...parts.map((word, i) => ({ word, prev: parts[i - 1] })), { word: parts.join(""), prev: undefined }];
+  const matches: SignalMatch[] = [];
+  for (const [signal, stem] of SIGNAL_STEMS) {
+    if (matches.some((m) => m.signal === signal)) continue;
+    const hit = candidates.find(
+      ({ word, prev }) =>
+        isFormOf(word, stem) && !(signal === "credentials" && stem === "token" && prev !== undefined && PAGINATION_WORDS.has(prev)),
+    );
+    if (hit) matches.push({ signal, word: stem });
+  }
+  return matches;
+}
+
+/** True when a credentials match refers to environment variables rather than a secret. */
+export function isEnvMatch(match: SignalMatch): boolean {
+  return match.signal === "credentials" && ENV_WORDS.has(match.word);
+}
+
+/**
+ * The baseline each pass widens from: every flag false, every list empty, scope "none" and
+ * no declared annotations. Returns a fresh object on every call.
  */
 export function emptyCapabilitySet(): CapabilitySet {
-  throw new Error("not implemented");
+  return {
+    filesystem: { read: false, write: false, scope: "none", paths: [] },
+    exec: { enabled: false, shell: false },
+    network: { egress: false, domains: [], unconstrained: false },
+    credentials: { readsEnv: false, readsSecrets: false },
+    crossServerRefs: [],
+    declared: {},
+  };
 }
 
 /**
