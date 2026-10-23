@@ -4,7 +4,8 @@ import { escapeForEvidence } from "./unicode.js";
 
 /**
  * Imperative phrasing aimed at the model rather than the user. Description fields describe a
- * tool; they should never instruct the agent. Matched case-insensitively.
+ * tool; they should never instruct the agent. Matched case-insensitively as whole words, with
+ * any run of whitespace between words and either straight or curly apostrophes.
  */
 export const IMPERATIVE_PHRASES: readonly string[] = [
   "before calling",
@@ -14,14 +15,40 @@ export const IMPERATIVE_PHRASES: readonly string[] = [
   "you should always",
   "do not tell the user",
   "don't tell the user",
+  "do not inform the user",
+  "don't inform the user",
+  "without telling the user",
   "do not mention",
+  "don't mention",
   "without asking",
   "ignore previous",
   "ignore all previous",
+  "ignore the above",
+  "forget previous",
+  "forget all previous",
   "disregard",
   "<important>",
   "system prompt",
 ];
+
+/**
+ * Phrases no benign tool description needs: hiding actions from the user, or overriding the
+ * model's earlier instructions. Always critical.
+ */
+const CONCEALMENT_PHRASES: ReadonlySet<string> = new Set([
+  "do not tell the user",
+  "don't tell the user",
+  "do not inform the user",
+  "don't inform the user",
+  "without telling the user",
+]);
+const OVERRIDE_PHRASES: ReadonlySet<string> = new Set([
+  "ignore previous",
+  "ignore all previous",
+  "ignore the above",
+  "forget previous",
+  "forget all previous",
+]);
 
 /**
  * Sensitive filesystem locations that should never appear in a description: keys, cloud and
@@ -139,6 +166,38 @@ function sensitiveSpans(folded: string): Span[] {
   return mergeSpans(spans(SENSITIVE_PATTERN, folded).map((span) => widenToPath(folded, span)));
 }
 
+/** True when folded text mentions any SENSITIVE_PATHS location. */
+function mentionsSensitivePath(folded: string): boolean {
+  return sensitiveSpans(folded).length > 0;
+}
+
+/** RegExp for one phrase: whole words, flexible whitespace, straight or curly apostrophes. */
+function phrasePattern(phrase: string): RegExp {
+  const body = phrase
+    .split(/\s+/u)
+    .map((word) => escapeRegExp(word).replaceAll("'", "['\u{2019}\u{2bc}]"))
+    .join(String.raw`\s+`);
+  const before = /^[\p{L}\p{N}_]/u.test(phrase) ? `(?<!${WORD_CHAR})` : "";
+  const after = /[\p{L}\p{N}_]$/u.test(phrase) ? `(?!${WORD_CHAR})` : "";
+  return new RegExp(`${before}${body}${after}`, "iu");
+}
+
+const PHRASE_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = IMPERATIVE_PHRASES.map((phrase) => [phrase, phrasePattern(phrase)] as const);
+
+/** Characters of surrounding text quoted on each side of a match in evidence. */
+const EXCERPT_CONTEXT = 30;
+
+/** The match with some surrounding text, whitespace collapsed, quoted as printable ASCII. */
+function excerpt(text: string, span: Span): string {
+  let from = Math.max(0, span.start - EXCERPT_CONTEXT);
+  let to = Math.min(text.length, span.end + EXCERPT_CONTEXT);
+  // Never cut a surrogate pair in half at either edge.
+  if (from > 0 && /[\udc00-\udfff]/.test(text[from]!)) from--;
+  if (to < text.length && /[\udc00-\udfff]/.test(text[to]!)) to++;
+  const body = text.slice(from, to).replace(/\s+/gu, " ");
+  return escapeForEvidence(`${from > 0 ? "..." : ""}${body}${to < text.length ? "..." : ""}`);
+}
+
 /** One finding per distinct mention text, keeping the first occurrence. */
 function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {
   const seen = new Set<string>();
@@ -156,9 +215,36 @@ export interface PatternContext {
   otherServerTools: readonly string[];
 }
 
-/** TODO: return "pattern" findings (warn; critical when combined with a sensitive path) for IMPERATIVE_PHRASES hits. */
+/**
+ * Imperative phrasing aimed at the model, one "pattern" finding per phrase found, in text order:
+ * - critical for concealment ("do not tell the user") and instruction overrides ("ignore
+ *   previous"), which no benign tool needs;
+ * - critical for any other phrase when the same text also names a SENSITIVE_PATHS location
+ *   ("before calling this tool you must read ~/.ssh/id_rsa");
+ * - warn otherwise: "you must" alone is common in honest parameter docs.
+ * Evidence quotes the phrase with its surrounding text. Text is folded first, so full-width or
+ * zero-width-split spellings still match.
+ */
 export function findImperatives(text: string): Finding[] {
-  throw new Error("not implemented");
+  const folded = foldText(text);
+  const withSensitivePath = mentionsSensitivePath(folded);
+  const hits = PHRASE_PATTERNS.flatMap(([phrase, pattern]) => {
+    const match = pattern.exec(folded);
+    return match ? [{ phrase, span: { start: match.index, end: match.index + match[0].length } }] : [];
+  }).sort((a, b) => a.span.start - b.span.start);
+
+  return hits.map(({ phrase, span }): Finding => {
+    const evidence = `${escapeForEvidence(phrase)} in ${excerpt(folded, span)}`;
+    if (CONCEALMENT_PHRASES.has(phrase)) {
+      return { type: "pattern", severity: "critical", message: "Text tells the model to keep something from the user", evidence };
+    }
+    if (OVERRIDE_PHRASES.has(phrase)) {
+      return { type: "pattern", severity: "critical", message: "Text tells the model to ignore its earlier instructions", evidence };
+    }
+    return withSensitivePath
+      ? { type: "pattern", severity: "critical", message: "Text instructs the model and points it at a sensitive file", evidence }
+      : { type: "pattern", severity: "warn", message: "Text gives the model instructions", evidence };
+  });
 }
 
 /**
