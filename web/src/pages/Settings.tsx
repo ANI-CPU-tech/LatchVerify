@@ -140,7 +140,7 @@ export function Settings() {
               return (
                 <label
                   key={option.id}
-                  className={`relative cursor-pointer rounded-lg border p-2 transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring ${
+                  className={`relative cursor-pointer rounded-lg border p-2 transition-[color,background-color,border-color,transform] duration-200 ease-out motion-safe:hover:-translate-y-0.5 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring ${
                     checked ? "border-primary bg-primary/5" : "hover:border-input"
                   }`}
                 >

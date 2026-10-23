@@ -11,7 +11,7 @@ import { useCountUp } from "../lib/useCountUp";
 function Metric({ label, value, link, icon, tone = "neutral" }: { label: string; value: number | null; link: string; icon: ReactNode; tone?: Tone }) {
   const shown = useCountUp(value);
   return (
-    <a href={link} className="group flex items-center gap-3 rounded-lg border bg-card-glass backdrop-blur-sm p-3 shadow-card transition-colors hover:border-primary/50 sm:p-4">
+    <a href={link} className="group flex items-center gap-3 rounded-lg border bg-card-glass backdrop-blur-sm p-3 shadow-card transition-[border-color,transform] duration-200 ease-out hover:border-primary/50 motion-safe:hover:-translate-y-0.5 sm:p-4">
       <span className={`hidden text-2xl sm:inline ${tone === "neutral" ? "text-accent" : TONE_TEXT[tone]}`}>{icon}</span>
       <span className="min-w-0 flex-1">
         {/* Counts up to the value as data arrives; screen readers get the final value only. */}
