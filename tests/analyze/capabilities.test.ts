@@ -7,6 +7,8 @@ import {
   deriveFromSchema,
   emptyCapabilitySet,
   extractCapabilities,
+  findToolMentions,
+  foldText,
   isEnvMatch,
   matchParamSignals,
   readDeclared,
@@ -643,5 +645,38 @@ describe("extractCapabilities", () => {
     const before = structuredClone(tool);
     expect(extractCapabilities(tool, ["send_email"])).toEqual(extractCapabilities(tool, ["send_email"]));
     expect(tool).toEqual(before);
+  });
+});
+
+describe("foldText", () => {
+  it("folds compatibility forms and removes invisible characters", () => {
+    expect(foldText("\u{ff59}\u{ff4f}\u{ff55} mu\u{200b}st \u{fb01}le")).toBe("you must file");
+  });
+
+  it("leaves ordinary text, case and whitespace alone", () => {
+    expect(foldText("Get The Weather\n\tNow")).toBe("Get The Weather\n\tNow");
+  });
+});
+
+describe("findToolMentions", () => {
+  it("returns names mentioned as whole words, deduplicated and sorted", () => {
+    expect(findToolMentions("call send_email then list_files, send_email again", ["send_email", "list_files", "send_email", "absent"])).toEqual([
+      "list_files",
+      "send_email",
+    ]);
+  });
+
+  it("does not match a name that continues into other name characters", () => {
+    expect(findToolMentions("send_email_v2 resend_email send_email-batch send_emails", ["send_email"])).toEqual([]);
+    expect(findToolMentions("(send_email). 'send_email'", ["send_email"])).toEqual(["send_email"]);
+  });
+
+  it("is case-sensitive, ignores empty names and treats regex syntax literally", () => {
+    expect(findToolMentions("SEND_EMAIL fetchXjson", ["send_email", "", "fetch.json"])).toEqual([]);
+    expect(findToolMentions("use fetch.json now", ["fetch.json", "a+b"])).toEqual(["fetch.json"]);
+  });
+
+  it("accepts any iterable of names", () => {
+    expect(findToolMentions("use read_file", new Set(["read_file"]))).toEqual(["read_file"]);
   });
 });
