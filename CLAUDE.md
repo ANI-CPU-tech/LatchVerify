@@ -124,10 +124,11 @@ shows the last `tools_listed` event instead.
   `latch.theme`, with every access wrapped in try/catch.
 
 **Artwork.** `web/src/art/landscape.ts` generates an original pixel-art landscape from
-seeded noise: a setting sun with dithered afterglow, clouds, a snowy far range and forested
-mid range (each with sunlit and shadowed faces), a lake that mirrors them with the sun's
-glitter path, pine shores and birds. `AppShell` shows it as a full-width footer below every
-page. `PixelLandscape.tsx` draws it as inline SVG with `crispEdges`, anchored at the bottom
+seeded noise: a setting sun with dithered afterglow, clouds, a hazy distant range, a snowy
+far range and forested mid range (each with sunlit and shadowed faces), a lake that mirrors
+them with the sun's glitter path, a canoe, pine shores with a cabin, jetty, rocks and reeds,
+and birds. `AppShell` shows it as a footer across the content column below every page; the
+sidebar stays plain. `PixelLandscape.tsx` draws it as inline SVG with `crispEdges`, anchored at the bottom
 (`xMidYMax slice`), colored by the `--art-*` tokens of each theme; Minimal uses muted greys.
 The art is decorative only: `aria-hidden`,
 `pointer-events-none`, and never placed over content. The favicon,
