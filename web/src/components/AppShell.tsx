@@ -58,10 +58,16 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
       setBox(link ? { x: link.offsetLeft, y: link.offsetTop, width: link.offsetWidth, height: link.offsetHeight } : null);
     };
     measure();
+    // The phone strip scrolls sideways: bring the active link into view.
+    const link = root.querySelector<HTMLElement>('[aria-current="page"]');
+    if (layout === "strip" && link) {
+      const smooth = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      link.scrollIntoView({ block: "nearest", inline: "center", behavior: smooth ? "smooth" : "auto" });
+    }
     const observer = new ResizeObserver(measure);
     observer.observe(root);
     return () => observer.disconnect();
-  }, [current]);
+  }, [current, layout]);
 
   return (
     <div ref={wrapper} className="relative">
