@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { PixelLandscape, StarrySky } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
 import { useTheme } from "../lib/theme";
-import { isDarkTheme } from "../lib/themes";
+import { sceneFor } from "../lib/themes";
 import { href, type Page } from "../lib/router";
 import { GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
@@ -66,7 +66,7 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
 export function AppShell({ current, children }: { current: Page; children: ReactNode }) {
   const { api, busy, reload } = useData();
   const { theme } = useTheme();
-  const night = isDarkTheme(theme);
+  const scene = sceneFor(theme);
   const status = API_STATUS[api];
   return (
     <div className="flex min-h-screen flex-col">
@@ -123,8 +123,8 @@ export function AppShell({ current, children }: { current: Page; children: React
       */}
       <div className="pointer-events-none fixed inset-0 top-14 -z-10 flex flex-col justify-end bg-gradient-to-b from-art-sky to-art-horizon md:left-56">
         {/* Stars thin out toward the top, where page headings sit on the sky without a card. */}
-        {night && <StarrySky className="block min-h-0 w-full flex-1 [mask-image:linear-gradient(to_bottom,transparent,black_75%)]" />}
-        <PixelLandscape time={night ? "night" : "day"} className="block h-auto min-h-40 w-full shrink-0" />
+        {scene.time === "night" && <StarrySky className="block min-h-0 w-full flex-1 [mask-image:linear-gradient(to_bottom,transparent,black_75%)]" />}
+        <PixelLandscape time={scene.time} extra={scene.extra} className="block h-auto min-h-40 w-full shrink-0" />
       </div>
     </div>
   );

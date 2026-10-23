@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ART_COLORS, ART_LAYERS, landscape, starrySky, type ArtTime, type PixelArt } from "../../web/src/art/landscape.js";
+import { ART_COLORS, ART_EXTRAS, ART_LAYERS, landscape, starrySky, type ArtTime, type PixelArt } from "../../web/src/art/landscape.js";
 import { THEMES } from "../../web/src/lib/themes.js";
 
 const css = readFileSync(new URL("../../web/src/index.css", import.meta.url), "utf8");
@@ -73,6 +73,23 @@ describe("day and night", () => {
     const names = (art: PixelArt) => art.layers.map((layer) => layer.name);
     expect(names(landscape("day"))).toEqual(expect.arrayContaining(["clouds", "glint-a", "glint-b", "smoke-a", "smoke-b", "birds-a", "birds-b"]));
     expect(names(landscape("night"))).toEqual(expect.arrayContaining(["stars-a", "stars-b", "stars-c", "glint-a", "glint-b", "window"]));
+  });
+});
+
+describe.each(ART_EXTRAS.flatMap((extra) => (["day", "night"] as ArtTime[]).map((time) => [extra, time] as const)))("extra %s by %s", (extra, time) => {
+  const art = landscape(time, extra);
+  const base = landscape(time);
+
+  it("only adds layers to the shared scene, inside the canvas and below the top row", () => {
+    const names = art.layers.map((layer) => layer.name);
+    expect(names).toEqual(ART_LAYERS.filter((name) => names.includes(name)));
+    expect(names.length).toBeGreaterThan(base.layers.length);
+    for (const layer of base.layers) expect(art.layers).toContainEqual(layer);
+    for (const run of allRuns(art)) {
+      expect(run.x + run.w).toBeLessThanOrEqual(art.width);
+      expect(run.y).toBeGreaterThan(0);
+      expect(run.y).toBeLessThan(art.height);
+    }
   });
 });
 

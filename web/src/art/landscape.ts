@@ -30,6 +30,10 @@ export type ArtColor = (typeof ART_COLORS)[number];
 /** Day shows the setting sun; night, for dark themes, a moon and stars. */
 export type ArtTime = "day" | "night";
 
+/** Each theme's special touch, drawn on top of the shared scene. */
+export const ART_EXTRAS = ["balloon"] as const;
+export type ArtExtra = (typeof ART_EXTRAS)[number];
+
 /** Layers in paint order. A layer that is empty in a scene is left out of it. */
 export const ART_LAYERS = [
   "stars-a",
@@ -37,6 +41,7 @@ export const ART_LAYERS = [
   "stars-c",
   "sky",
   "clouds",
+  "balloon",
   "land",
   "glint-a",
   "glint-b",
@@ -64,6 +69,8 @@ export interface PixelArt {
 }
 
 type Grid = Array<ArtColor | null>;
+/** Returns a setter that paints into the named layer. */
+type Painter = (name: ArtLayer) => (x: number, y: number, color: ArtColor) => void;
 
 const WIDTH = 512;
 const HEIGHT = 96;
@@ -179,11 +186,11 @@ function shoreAt(x: number): number {
   return SHORE[SHORE.length - 1]![1];
 }
 
-export function landscape(time: ArtTime = "day"): PixelArt {
+export function landscape(time: ArtTime = "day", extra: ArtExtra | null = null): PixelArt {
   const night = time === "night";
   const grids = new Map<ArtLayer, Grid>();
   /** A setter that paints into one layer. */
-  const on = (name: ArtLayer) => {
+  const on: Painter = (name) => {
     if (!grids.has(name)) grids.set(name, new Array(WIDTH * HEIGHT).fill(null));
     const grid = grids.get(name)!;
     return (x: number, y: number, color: ArtColor) => {
@@ -429,9 +436,30 @@ export function landscape(time: ArtTime = "day"): PixelArt {
     }
   }
 
+  if (extra) EXTRAS[extra](on, night);
+
   const layers = ART_LAYERS.filter((name) => grids.has(name)).map((name) => toLayer(name, grids.get(name)!, WIDTH, HEIGHT));
   return { width: WIDTH, height: HEIGHT, layers: layers.filter((layer) => layer.runs.length > 0) };
 }
+
+/** Hot-air balloon drifting high over the right-hand peaks: striped envelope, ropes, basket. */
+function balloon(on: Painter) {
+  const set = on("balloon");
+  const [cx, cy] = [360, 14];
+  // Half-widths of the envelope from its crown (cy - 6) down to the neck.
+  const halves = [2, 4, 5, 5, 6, 6, 6, 6, 5, 5, 4, 3, 2, 1];
+  halves.forEach((half, i) => {
+    const dy = i - 6;
+    for (let dx = -half; dx <= half; dx++) {
+      const highlight = dx === -half + 1 && dy >= -4 && dy <= 0;
+      set(cx + dx, cy + dy, highlight ? "snow" : Math.floor((dx + 7) / 2) % 2 ? "sun" : "glow");
+    }
+  });
+  for (const dx of [-2, 2]) for (const dy of [8, 9]) set(cx + dx, cy + dy, "tree");
+  for (let dy = 10; dy <= 11; dy++) for (let dx = -2; dx <= 2; dx++) set(cx + dx, cy + dy, "near");
+}
+
+const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon };
 
 /** A grid of pixels as horizontal runs of one color. */
 function toLayer(name: ArtLayer, grid: Grid, width: number, height: number): PixelLayer {

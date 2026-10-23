@@ -399,6 +399,9 @@
   .art-canoe {
     animation: art-bob 3.2s steps(1) infinite;
   }
+  .art-balloon {
+    animation: art-float 40s ease-in-out infinite alternate;
+  }
   .art-window {
     animation: art-flicker 5s linear infinite;
   }
@@ -444,6 +447,11 @@
     }
     50% {
       opacity: 0.35;
+    }
+  }
+  @keyframes art-float {
+    to {
+      transform: translate(36px, -5px);
     }
   }
   @keyframes art-bob {

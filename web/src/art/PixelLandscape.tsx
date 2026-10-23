@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ART_COLORS, landscape, starrySky, type ArtTime, type PixelArt } from "./landscape";
+import { ART_COLORS, landscape, starrySky, type ArtExtra, type ArtTime, type PixelArt } from "./landscape";
 
 /**
  * Pixel art as inline SVG: one <g> per layer, classed .art-<layer> so index.css can animate it,
@@ -38,8 +38,8 @@ function PixelSvg({ art, className }: { art: PixelArt; className: string }) {
   );
 }
 
-export function PixelLandscape({ time = "day", className = "" }: { time?: ArtTime; className?: string }) {
-  const art = useMemo(() => landscape(time), [time]);
+export function PixelLandscape({ time = "day", extra = null, className = "" }: { time?: ArtTime; extra?: ArtExtra | null; className?: string }) {
+  const art = useMemo(() => landscape(time, extra), [time, extra]);
   return <PixelSvg art={art} className={className} />;
 }
 
