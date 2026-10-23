@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PARAM_SIGNALS,
+  anchoredPrefix,
   emptyCapabilitySet,
   isEnvMatch,
   matchParamSignals,
@@ -100,5 +101,48 @@ describe("matchParamSignals", () => {
     expect(signals("pa\u200bth")).toEqual(["filesystem"]);
     expect(signals("com\u2060mand")).toEqual(["exec"]);
     expect(signals("\uff30\uff21\uff34\uff28")).toEqual(["filesystem"]); // full-width PATH
+  });
+});
+
+describe("anchoredPrefix", () => {
+  it("returns the literal text after ^ up to the first regex syntax", () => {
+    expect(anchoredPrefix("^/data/.*")).toEqual({ prefix: "/data/", exact: false });
+    expect(anchoredPrefix("^/srv/app/[a-z]+\\.log$")).toEqual({ prefix: "/srv/app/", exact: false });
+    expect(anchoredPrefix("^https://api\\.weather\\.gov/")).toEqual({ prefix: "https://api.weather.gov/", exact: false });
+  });
+
+  it("marks a fully literal pattern ending in $ as exact", () => {
+    expect(anchoredPrefix("^/etc/app\\.conf$")).toEqual({ prefix: "/etc/app.conf", exact: true });
+  });
+
+  it("unescapes escaped punctuation", () => {
+    expect(anchoredPrefix("^C:\\\\Users\\\\")).toEqual({ prefix: "C:\\Users\\", exact: false });
+    expect(anchoredPrefix("^\\/srv")).toEqual({ prefix: "/srv", exact: false });
+    expect(anchoredPrefix("^a\\$b\\(c\\)")).toEqual({ prefix: "a$b(c)", exact: false });
+  });
+
+  it("drops a character made optional by ?, * or {", () => {
+    expect(anchoredPrefix("^/tmps?/")).toEqual({ prefix: "/tmp", exact: false });
+    expect(anchoredPrefix("^/a*")).toEqual({ prefix: "/", exact: false });
+    expect(anchoredPrefix("^/ab{0,2}")).toEqual({ prefix: "/a", exact: false });
+  });
+
+  it("keeps a character repeated by + and stops after it", () => {
+    expect(anchoredPrefix("^/a+/b")).toEqual({ prefix: "/a", exact: false });
+  });
+
+  it("returns null when nothing is provably fixed", () => {
+    for (const pattern of ["", "^", "^$", ".*", "/data/.*", "^.*", "^[/]data", "^\\d+", "^\\u002Fdata", "^(/data)", "^/data/|.*", "^a?"]) {
+      expect(anchoredPrefix(pattern)).toBeNull();
+    }
+  });
+
+  it("treats any alternation as unconstrained, even inside a group", () => {
+    expect(anchoredPrefix("^/data/(a|b)")).toBeNull();
+  });
+
+  it("handles characters outside the Basic Multilingual Plane as one unit", () => {
+    expect(anchoredPrefix("^/\u{1f600}/x")).toEqual({ prefix: "/\u{1f600}/x", exact: false });
+    expect(anchoredPrefix("^/\u{1f600}?")).toEqual({ prefix: "/", exact: false });
   });
 });

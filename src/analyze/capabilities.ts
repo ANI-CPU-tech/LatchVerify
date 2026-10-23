@@ -82,6 +82,53 @@ export function isEnvMatch(match: SignalMatch): boolean {
   return match.signal === "credentials" && ENV_WORDS.has(match.word);
 }
 
+/** Literal text every match of a pattern must start with. */
+export interface AnchoredPrefix {
+  prefix: string;
+  /** True when the pattern matches exactly `prefix` and nothing longer. */
+  exact: boolean;
+}
+
+const REGEX_SYNTAX = new Set([".", "^", "$", "|", "?", "*", "+", "(", ")", "[", "]", "{", "}", "\\"]);
+const OPTIONAL_QUANTIFIERS = new Set(["?", "*", "{"]);
+
+/**
+ * The fixed text a JSON Schema `pattern` forces at the start of every value, or null when the
+ * pattern does not pin one. Conservative by design: anything not provably fixed (no leading
+ * `^`, any alternation, a class or escape like `\d` before the first literal) returns null, so
+ * an unclear pattern is treated as unconstrained, never as narrower than it is.
+ */
+export function anchoredPrefix(pattern: string): AnchoredPrefix | null {
+  if (!pattern.startsWith("^") || pattern.includes("|")) return null;
+  let prefix = "";
+  let i = 1;
+  while (i < pattern.length) {
+    const ch = pattern[i]!;
+    let literal: string;
+    let width: number;
+    if (ch === "\\") {
+      const next = pattern[i + 1];
+      // Escaped punctuation is literal; \d, \w, A and friends are classes or encodings.
+      if (next === undefined || /[\p{L}\p{N}]/u.test(next)) break;
+      literal = next;
+      width = 2;
+    } else if (REGEX_SYNTAX.has(ch)) {
+      if (ch === "$" && i === pattern.length - 1) return prefix ? { prefix, exact: true } : null;
+      break;
+    } else {
+      literal = String.fromCodePoint(pattern.codePointAt(i)!);
+      width = literal.length;
+    }
+    const after = pattern[i + width];
+    // "a?" / "a*" / "a{0,}" make this character optional, so it is not part of the fixed prefix.
+    if (after !== undefined && OPTIONAL_QUANTIFIERS.has(after)) break;
+    prefix += literal;
+    i += width;
+    if (after === "+") break;
+  }
+  return prefix ? { prefix, exact: false } : null;
+}
+
 /**
  * The baseline each pass widens from: every flag false, every list empty, scope "none" and
  * no declared annotations. Returns a fresh object on every call.
