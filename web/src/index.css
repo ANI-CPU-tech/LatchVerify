@@ -13,6 +13,7 @@
  *
  * primary: buttons, links, the active nav item; dark enough for AA text on background.
  * accent:  brand orange for decoration only (icons, artwork, highlights), never for body text.
+ * art-*:   the pixel-art landscape (web/src/art/landscape.ts), recolored per theme.
  */
 @layer base {
   :root,
@@ -46,6 +47,13 @@
     --terminal-muted: 30 14% 62%;
     --terminal-accent: 22 90% 62%;
     --shadow: 0 1px 2px hsl(28 30% 20% / 0.06), 0 2px 8px hsl(28 30% 20% / 0.05);
+    --art-glow: 30 95% 70%;
+    --art-sun: 19 87% 54%;
+    --art-far: 20 42% 62%;
+    --art-snow: 40 100% 97%;
+    --art-near: 24 32% 27%;
+    --art-tree: 25 35% 15%;
+    --art-bird: 28 25% 25%;
   }
 
   [data-theme="warm"] {
@@ -78,6 +86,13 @@
     --terminal-muted: 30 16% 60%;
     --terminal-accent: 28 75% 60%;
     --shadow: 0 1px 2px hsl(25 35% 20% / 0.07), 0 2px 6px hsl(25 35% 20% / 0.05);
+    --art-glow: 35 80% 72%;
+    --art-sun: 24 70% 54%;
+    --art-far: 28 30% 60%;
+    --art-snow: 45 70% 95%;
+    --art-near: 25 30% 30%;
+    --art-tree: 25 35% 18%;
+    --art-bird: 25 30% 28%;
   }
 
   [data-theme="sunset"] {
@@ -110,6 +125,13 @@
     --terminal-muted: 20 18% 62%;
     --terminal-accent: 18 90% 64%;
     --shadow: 0 1px 2px hsl(15 40% 25% / 0.07), 0 2px 8px hsl(15 40% 25% / 0.06);
+    --art-glow: 32 95% 70%;
+    --art-sun: 14 88% 55%;
+    --art-far: 10 48% 60%;
+    --art-snow: 30 100% 95%;
+    --art-near: 12 35% 28%;
+    --art-tree: 15 40% 16%;
+    --art-bird: 15 30% 22%;
   }
 
   [data-theme="terminal"] {
@@ -142,6 +164,13 @@
     --terminal-muted: 30 12% 58%;
     --terminal-accent: 22 90% 62%;
     --shadow: 0 1px 2px hsl(0 0% 0% / 0.4), 0 2px 8px hsl(0 0% 0% / 0.25);
+    --art-glow: 28 70% 32%;
+    --art-sun: 22 90% 58%;
+    --art-far: 24 26% 30%;
+    --art-snow: 38 45% 72%;
+    --art-near: 25 18% 19%;
+    --art-tree: 22 22% 13%;
+    --art-bird: 38 30% 62%;
   }
 
   [data-theme="minimal"] {
@@ -174,6 +203,13 @@
     --terminal-muted: 0 0% 62%;
     --terminal-accent: 19 70% 64%;
     --shadow: none;
+    --art-glow: 30 15% 88%;
+    --art-sun: 19 45% 72%;
+    --art-far: 30 6% 78%;
+    --art-snow: 0 0% 100%;
+    --art-near: 30 5% 58%;
+    --art-tree: 30 6% 40%;
+    --art-bird: 30 5% 45%;
   }
 
   [data-theme="forest"] {
@@ -206,6 +242,13 @@
     --terminal-muted: 90 12% 60%;
     --terminal-accent: 80 45% 62%;
     --shadow: 0 1px 2px hsl(140 25% 15% / 0.07), 0 2px 8px hsl(140 25% 15% / 0.05);
+    --art-glow: 35 85% 75%;
+    --art-sun: 24 80% 52%;
+    --art-far: 85 18% 56%;
+    --art-snow: 48 60% 96%;
+    --art-near: 150 30% 24%;
+    --art-tree: 150 40% 15%;
+    --art-bird: 140 20% 25%;
   }
 
   :root {
@@ -237,9 +280,3 @@
   }
 }
 
-@layer components {
-  /* Decorative artwork; the Minimal theme leaves it out. */
-  [data-theme="minimal"] .latch-art {
-    display: none;
-  }
-}
