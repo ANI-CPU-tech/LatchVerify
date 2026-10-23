@@ -153,7 +153,8 @@ sky is plain. The favicon,
 5. `proxy/transport.ts`, then `proxy/blocker.ts`, then `proxy/interceptor.ts` and
    `proxy/index.ts`. Integration-test with `demo/evil-server.ts`.
 6. `store/pending.ts`, `store/events.ts`.
-7. Commands: `verify` (the CI contract), then `inspect`, `init`, `review`.
+7. Commands: `verify` (the CI contract), then `inspect`, `init`, `review`, `add` (one
+   server; shares `pinServer` and `proxiedEntry` with `init`).
 8. `ui/` routes and wiring `web/` to `lib/api.ts`.
 9. `analyze/llm.ts` last. It is optional and off by default.
 

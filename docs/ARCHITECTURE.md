@@ -19,7 +19,8 @@ every message in between and steps in at three points.
                               └────────────────────┘
 ```
 
-`latch init` rewrites each server entry in the client config. This:
+`latch init` (or `latch add`, for one server) rewrites each server entry in the client
+config. This:
 
 ```json
 { "command": "node", "args": ["weather.js"] }
@@ -28,8 +29,12 @@ every message in between and steps in at three points.
 becomes this:
 
 ```json
-{ "command": "latch", "args": ["proxy", "--server", "weather", "--", "node", "weather.js"] }
+{ "command": "/usr/bin/node", "args": ["/path/to/latchverify/dist/cli.js", "proxy", "--server", "weather", "--", "node", "weather.js"] }
 ```
+
+The entry names node and `dist/cli.js` by absolute path: clients start servers without
+the user's shell setup, so a `latch` on the user's PATH (or a shell function) may not be
+visible to them. An entry of the form `latch proxy ...` is still recognized as wrapped.
 
 The client launches `latch proxy`. The proxy launches the original command as a
 child process with `child_process.spawn` and piped stdio. The child's stderr passes

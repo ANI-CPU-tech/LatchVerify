@@ -11,6 +11,7 @@ Commands are written for bash or zsh; fish equivalents are noted where they diff
 | CI check against `latch.lock` | `latch verify` (`--json`) | works |
 | Read-only analysis of a tool list | `latch inspect` (`--json`) | works |
 | Wrap client configs and pin tools | `latch init` (`--dry-run`) | works |
+| Add one server and pin its tools | `latch add <name> -- <command>` (`--dry-run`) | works |
 | Approve or reject queued changes | `latch review` (terminal) | works |
 | Browser review screen | `latch review --ui`, or `pnpm ui` for development | works |
 | Demo servers (benign and rug pull) | `pnpm demo:benign`, `pnpm demo:evil` | works |
@@ -30,8 +31,9 @@ pnpm typecheck && pnpm test                       # everything should pass
 ```
 
 `pnpm build` only compiles the CLI; the web UI needs the separate `vite build` step.
-`latch` must be on PATH for client configs written by `latch init`; without
-`pnpm link --global`, run `node dist/cli.js` instead of `latch` in the commands below.
+Client configs written by `latch init` and `latch add` start the proxy by absolute path,
+so they do not need `latch` on PATH. For the commands below, without
+`pnpm link --global`, run `node dist/cli.js` instead of `latch`.
 
 ## 2. Environment variables: none are required
 
