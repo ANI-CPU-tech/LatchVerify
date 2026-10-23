@@ -33,9 +33,7 @@
             },
             "network": {
               "egress": true,
-              "domains": [
-                "api.weather.gov"
-              ],
+              "domains": [],
               "unconstrained": false
             },
             "credentials": {
@@ -75,9 +73,7 @@
             },
             "network": {
               "egress": true,
-              "domains": [
-                "api.weather.gov"
-              ],
+              "domains": [],
               "unconstrained": false
             },
             "credentials": {

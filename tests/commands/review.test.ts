@@ -68,7 +68,7 @@ describe("renderChange", () => {
       `tier 3 · hard block  weather/get_forecast  ${forecast.id}`,
       "  detected  2026-10-23T09:00:00.000Z",
       "  changed   description, input schema",
-      "  delta     lost network.domains:api.weather.gov",
+      "  delta     no capability change",
     ]);
     expect(card).toContain("  findings\n");
     expect(card).toContain('    ✖ critical pattern  Text points the model at a sensitive file (description): "~/.ssh/id_rsa"');

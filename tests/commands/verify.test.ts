@@ -119,11 +119,11 @@ describe("runVerify", () => {
     expect(text).toMatch(/✖ get_forecast\s+tier 2/);
   });
 
-  it("exits 0 for a tier-1 change and for a removed tool, but reports both", async () => {
+  it("exits 0 for a tier-0 change and for a removed tool, but reports both", async () => {
     const [forecast] = benignTools;
     const { code, text } = await verify(await lockfile(listing([{ ...forecast, description: "Fetch the forecast for a location." }])));
     expect(code).toBe(VERIFY_EXIT.ok);
-    expect(text).toMatch(/~ get_forecast\s+tier 1 {2}Narrowed: network\.domains:api\.weather\.gov/);
+    expect(text).toMatch(/~ get_forecast\s+tier 0 {2}Text changed \(description\); capabilities unchanged/);
     expect(text).toMatch(/- get_alerts\s+removed from the server/);
   });
 
@@ -210,8 +210,7 @@ describe("runVerify --json", () => {
     ]);
     const forecast = tools[0]!;
     expect(forecast.reason).toMatch(/^Critical pattern finding/);
-    // latch.lock.example pins a domain the fixture cannot derive (PERSON1_HANDOFF.md, follow-up 4).
-    expect(forecast.capabilityDelta).toEqual({ gained: [], lost: ["network.domains:api.weather.gov"], loosened: [] });
+    expect(forecast.capabilityDelta).toEqual({ gained: [], lost: [], loosened: [] });
     expect(forecast.findings!.some((f) => f.severity === "critical" && f.evidence.includes("~/.ssh/id_rsa"))).toBe(true);
   });
 
