@@ -1,5 +1,14 @@
+import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { isNotification, isRequest, isResponse, parseLine, type JsonRpcMessage } from "../../src/proxy/transport.js";
+import {
+  isNotification,
+  isRequest,
+  isResponse,
+  parseLine,
+  serialize,
+  writeLine,
+  type JsonRpcMessage,
+} from "../../src/proxy/transport.js";
 
 /** Parse a line that must be a JSON-RPC message. */
 const message = (line: string): JsonRpcMessage => {
@@ -119,5 +128,136 @@ describe("message type guards", () => {
       const kinds = Object.values(classify(line)).filter(Boolean);
       expect(kinds.length, line).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+/** Everything written to `stream` so far, as text. */
+const collect = (stream: PassThrough): (() => string) => {
+  const chunks: Buffer[] = [];
+  stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+  return () => Buffer.concat(chunks).toString("utf8");
+};
+
+/** A Writable that holds every chunk until the test releases it. */
+function stalledWritable() {
+  const written: string[] = [];
+  const held: Array<() => void> = [];
+  const stream = new Writable({
+    highWaterMark: 1,
+    write(chunk: Buffer, _encoding, callback) {
+      held.push(() => {
+        written.push(chunk.toString("utf8"));
+        callback();
+      });
+    },
+  });
+  const releaseOne = () => held.shift()?.();
+  return { stream, written, releaseOne, heldCount: () => held.length };
+}
+
+/** Resolves on the next macrotask, after every pending stream callback has run. */
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+describe("serialize", () => {
+  it("writes one compact line that parses back to the message", () => {
+    const msg: JsonRpcMessage = { jsonrpc: "2.0", id: 7, error: { code: -32001, message: "blocked" }, "x-extra": [1] };
+    const line = serialize(msg);
+    expect(line).toBe('{"jsonrpc":"2.0","id":7,"error":{"code":-32001,"message":"blocked"},"x-extra":[1]}\n');
+    expect(parseLine(line.slice(0, -1)).message).toEqual(msg);
+  });
+
+  it("never emits a line break inside the line", () => {
+    const line = serialize({ jsonrpc: "2.0", method: "a\nb\rc\u2028d", params: { text: "x\r\ny" } });
+    expect(line.slice(0, -1)).not.toMatch(/[\r\n]/);
+    expect(line.endsWith("\n")).toBe(true);
+  });
+
+  it("throws on values JSON cannot represent", () => {
+    expect(() => serialize({ jsonrpc: "2.0", method: "x", params: 1n })).toThrow(TypeError);
+  });
+});
+
+describe("writeLine", () => {
+  it("terminates a raw line with exactly one newline", async () => {
+    const out = new PassThrough();
+    const text = collect(out);
+    await writeLine(out, '{"jsonrpc":"2.0","method":"x"}');
+    await writeLine(out, "");
+    await writeLine(out, "not json");
+    expect(text()).toBe('{"jsonrpc":"2.0","method":"x"}\n\nnot json\n');
+  });
+
+  it("does not double the newline of a serialize() result", async () => {
+    const out = new PassThrough();
+    const text = collect(out);
+    await writeLine(out, serialize({ jsonrpc: "2.0", id: 1, result: {} }));
+    expect(text()).toBe('{"jsonrpc":"2.0","id":1,"result":{}}\n');
+  });
+
+  it("writes non-ASCII text as UTF-8 unchanged", async () => {
+    const out = new PassThrough();
+    const text = collect(out);
+    const line = '{"jsonrpc":"2.0","method":"café 😀 \u200b \u2028"}';
+    await writeLine(out, line);
+    expect(text()).toBe(`${line}\n`);
+  });
+
+  it("rejects a line with an embedded line break and writes nothing", async () => {
+    const out = new PassThrough();
+    const text = collect(out);
+    for (const line of ['{"a":1}\n{"b":2}', "a\rb", "a\r\n", "\n\n", "a\r"]) {
+      await expect(writeLine(out, line), JSON.stringify(line)).rejects.toThrow(TypeError);
+    }
+    expect(text()).toBe("");
+  });
+
+  it("resolves only after the stream has flushed the line", async () => {
+    const { stream, written, releaseOne } = stalledWritable();
+    let done = false;
+    const pending = writeLine(stream, "one").then(() => {
+      done = true;
+    });
+    await tick();
+    expect(done).toBe(false);
+    expect(written).toEqual([]);
+    releaseOne();
+    await pending;
+    expect(written).toEqual(["one\n"]);
+  });
+
+  it("keeps the order of concurrent writes, one chunk per line", async () => {
+    const { stream, written, releaseOne, heldCount } = stalledWritable();
+    const writes = ["a", "b", "c"].map((line) => writeLine(stream, line));
+    while (written.length < 3) {
+      await tick();
+      expect(heldCount()).toBeLessThanOrEqual(1);
+      releaseOne();
+    }
+    await Promise.all(writes);
+    expect(written).toEqual(["a\n", "b\n", "c\n"]);
+  });
+
+  it("rejects when the stream is destroyed", async () => {
+    const out = new PassThrough();
+    out.on("error", () => {});
+    out.destroy();
+    await expect(writeLine(out, "x")).rejects.toThrow();
+  });
+
+  it("rejects when the stream has ended", async () => {
+    const out = new PassThrough();
+    out.on("error", () => {});
+    out.end();
+    await expect(writeLine(out, "x")).rejects.toThrow(/write after end/);
+  });
+
+  it("rejects when the underlying write fails", async () => {
+    const out = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback(new Error("EPIPE"));
+      },
+    });
+    out.on("error", () => {});
+    await expect(writeLine(out, "x")).rejects.toThrow("EPIPE");
   });
 });

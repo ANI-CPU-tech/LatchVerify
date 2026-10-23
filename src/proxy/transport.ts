@@ -67,9 +67,15 @@ export function parseLine(line: string): Frame {
   return { raw: line, message: isMessage ? (parsed as JsonRpcMessage) : null };
 }
 
-/** TODO: JSON.stringify plus "\n". Used only for messages the proxy rewrites or synthesizes. */
+/**
+ * One message as a newline-terminated line. Used only for messages the proxy rewrites or
+ * synthesizes; everything else is forwarded as Frame.raw. JSON.stringify escapes control
+ * characters inside strings, so the result never contains a line break before the final "\n".
+ *
+ * @throws TypeError as JSON.stringify does (bigint values, cyclic structures).
+ */
 export function serialize(message: JsonRpcMessage): string {
-  throw new Error("not implemented");
+  return `${JSON.stringify(message)}\n`;
 }
 
 /**
@@ -80,9 +86,25 @@ export function readFrames(input: Readable, onFrame: (frame: Frame) => void): ()
   throw new Error("not implemented");
 }
 
-/** TODO: write one line to `output`, respecting backpressure. Resolves when flushed. */
+/**
+ * Write one line to `output` and resolve once the stream has flushed it, so a caller that
+ * awaits each write never buffers more than one line ahead of a slow reader.
+ *
+ * Takes either a Frame.raw (no terminator) or a serialize() result (ends in "\n") and writes it
+ * with exactly one trailing "\n", in a single write so concurrent lines never interleave.
+ *
+ * @throws TypeError, before writing anything, when the line contains another "\n" or "\r": a
+ * reader would split it into several frames, which would let one message smuggle in another.
+ * Rejects with the stream's error when the write fails (destroyed or ended stream, EPIPE).
+ */
 export async function writeLine(output: Writable, line: string): Promise<void> {
-  throw new Error("not implemented");
+  const body = line.endsWith("\n") ? line.slice(0, -1) : line;
+  if (/[\r\n]/.test(body)) {
+    throw new TypeError("writeLine: line contains a line break and would be read as several frames");
+  }
+  await new Promise<void>((resolve, reject) => {
+    output.write(`${body}\n`, (error) => (error ? reject(error) : resolve()));
+  });
 }
 
 /**
