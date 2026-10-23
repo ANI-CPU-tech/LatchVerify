@@ -98,6 +98,12 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
 - `components/PageTransition.tsx` fades the old page out and the new one in when the page
   changes (160 ms each way, opacity only, instant under reduced motion); changes within a page
   show at once.
+- Small UI motion, all `motion-safe`: a page's sections rise in staggered (`.page-stagger`, with
+  `backwards` fill so nothing keeps a transform; it is a later rule than Tailwind's utilities,
+  so a direct child of a page cannot animate itself), buttons lift and press, tabs slide their
+  underline, Overview numbers count up (`lib/motion.ts`, `lib/useCountUp.ts`), clickable cards
+  lift, loading states spin, the API status dot pulses, and colors cross-fade on a theme change
+  (`html.theme-switching`, 400 ms). Keyframes: `ui-rise` and `ui-fade` in `index.css`.
 - `lib/data.tsx` loads the queue, lockfile, events and git status once and shares them
   with every page. It polls every 3 s while the API is connected. Refresh, or a decision,
   reloads all four.
