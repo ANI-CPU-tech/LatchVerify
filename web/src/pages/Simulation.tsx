@@ -2,6 +2,7 @@ import type { SimulationResult } from "@schema/index.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CapabilityDiff } from "../components/CapabilityDiff";
 import { FindingList } from "../components/FindingList";
+import { Select } from "../components/Select";
 import { SimFlow } from "../components/SimFlow";
 import { FlaskIcon, PauseIcon, PlayIcon, RefreshIcon, StepBackIcon, StepForwardIcon } from "../components/icons";
 import { TextDiff } from "../components/TextDiff";
@@ -73,7 +74,7 @@ export function Simulation() {
     if (steps.length === 0) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      if (event.target instanceof Element && event.target.closest("a, button, input, select, textarea, [contenteditable], [role=tab]")) return;
+      if (event.target instanceof Element && event.target.closest("a, button, input, select, textarea, [contenteditable], [role=tab], [role=listbox]")) return;
       const action = playerKey(event.key);
       if (action === null) return;
       event.preventDefault();
@@ -140,16 +141,16 @@ export function Simulation() {
             <button type="button" onClick={() => setIndex((i) => Math.min(last, i + 1))} disabled={index === last} className={buttonClass("secondary", "sm")} aria-label="Next step">
               <StepForwardIcon />
             </button>
-            <label className="ml-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <label htmlFor="sim-speed" className="ml-2 text-xs text-muted-foreground">
               Speed
-              <select value={speed} onChange={(event) => setSpeed(Number(event.target.value) as (typeof SPEEDS)[number])} className="rounded-md border border-input bg-card px-2 py-1 text-xs text-foreground">
-                {SPEEDS.map((value) => (
-                  <option key={value} value={value}>
-                    {value}x
-                  </option>
-                ))}
-              </select>
             </label>
+            <Select
+              id="sim-speed"
+              size="sm"
+              value={String(speed)}
+              options={SPEEDS.map((value) => ({ value: String(value), label: `${value}x` }))}
+              onChange={(value) => setSpeed(Number(value) as (typeof SPEEDS)[number])}
+            />
             <span className="ml-auto flex items-center gap-3 font-mono text-xs text-muted-foreground">
               <span className="hidden lg:inline">Space play/pause · ← → step</span>
               <span>

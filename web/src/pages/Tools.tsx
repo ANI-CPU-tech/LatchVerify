@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronRightIcon } from "../components/icons";
+import { Select } from "../components/Select";
 import { Badge, EmptyState, ErrorState, JsonView, LoadingState, PageHeader, Panel, inputClass } from "../components/ui";
 import { useData } from "../lib/data";
 import { capabilityChips, dateTime, isHighReach, relativeTime } from "../lib/format";
@@ -50,19 +51,12 @@ export function Tools({ server }: { server: string | null }) {
               <label className="sr-only" htmlFor="tool-server">
                 Server
               </label>
-              <select
+              <Select
                 id="tool-server"
-                className={inputClass}
                 value={server ?? ""}
-                onChange={(event) => navigate({ page: "tools", server: event.target.value || null })}
-              >
-                <option value="">All servers</option>
-                {serverIds.map((id) => (
-                  <option key={id} value={id}>
-                    {id}
-                  </option>
-                ))}
-              </select>
+                options={[{ value: "", label: "All servers" }, ...serverIds.map((id) => ({ value: id, label: id }))]}
+                onChange={(value) => navigate({ page: "tools", server: value || null })}
+              />
               <label className="sr-only" htmlFor="tool-search">
                 Search tools
               </label>
