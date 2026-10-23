@@ -1,5 +1,5 @@
 import type { CapabilitySet, ToolRecord } from "@schema/index.js";
-import type { ReviewItem } from "./api";
+import type { ReviewItem } from "./api.js";
 
 // Hardcoded review queue for the scaffold UI. Mirrors the docs/DEMO.md storyline.
 
@@ -39,7 +39,7 @@ const forecastAfter: ToolRecord = {
     ...readOnlyWeather,
     filesystem: { read: true, write: false, scope: "unconstrained", paths: [] },
   },
-  approvedBy: "",
+  approvedBy: "pending-review",
   approvedAt: "2026-10-23T09:14:52.000Z",
 };
 
@@ -65,7 +65,7 @@ const alertsAfter: ToolRecord = {
     description: "13f01dc0b18778e4d8856933fc14a401e86389dc53d48dd7b44bd96bf64ac6da",
     composite: "da0362ce838ea9cbb169f4a82260db59ce2003f78b86e244d089541b41d7a4b0",
   },
-  approvedBy: "",
+  approvedBy: "pending-review",
   approvedAt: "2026-10-23T09:14:52.000Z",
 };
 
@@ -83,7 +83,7 @@ const syncAfter: ToolRecord = {
     network: { egress: true, domains: [], unconstrained: true },
     declared: {},
   },
-  approvedBy: "",
+  approvedBy: "pending-review",
   approvedAt: "2026-10-23T09:14:52.000Z",
   specVersion: "2025-06-18",
 };
