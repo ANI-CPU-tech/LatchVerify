@@ -50,6 +50,20 @@ describe("explainChange", () => {
     expect(explainChange(alerts).details.join(" ")).toContain("auto-passed");
   });
 
+  it("never reads as all-clear for a blocked change whose capabilities did not move", () => {
+    const poisonedText = { ...forecast, capabilityDelta: { gained: [], lost: [], loosened: [] } };
+    const explained = explainChange(poisonedText);
+    expect(explained.tone).toBe("destructive");
+    expect(explained.headline).toBe("Its capabilities did not change, but its text has 2 critical findings.");
+    const review = explainChange({ ...poisonedText, tier: 2 as const, findings: [] });
+    expect(review).toMatchObject({ tone: "warning", headline: "Its capabilities did not change, but it still needs review." });
+  });
+
+  it("is a success only when the change auto-passes, and destructive when capabilities grew", () => {
+    expect(explainChange(alerts).tone).toBe("success");
+    expect(explainChange(forecast).tone).toBe("destructive");
+  });
+
   it("reports narrowing", () => {
     const narrowed = { ...alerts, tier: 1 as const, capabilityDelta: { gained: [], lost: ["network.egress"], loosened: [] } };
     expect(explainChange(narrowed).headline).toBe("Its capabilities only narrowed.");

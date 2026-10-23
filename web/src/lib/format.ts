@@ -46,22 +46,33 @@ const list = (items: string[]): string =>
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-/** A one-paragraph explanation of a pending change for the reviewer. */
-export function explainChange(change: PendingChange): { headline: string; details: string[] } {
+/**
+ * A one-paragraph explanation of a pending change for the reviewer, and the tone to show it in.
+ * The tone follows the tier as well as the capabilities: a blocked change never reads as an
+ * all-clear just because its capabilities did not move (hidden instructions keep them as is).
+ */
+export function explainChange(change: PendingChange): { headline: string; details: string[]; tone: Tone } {
   const gained = [...change.capabilityDelta.gained, ...change.capabilityDelta.loosened].map(capabilityLabel);
   const lost = change.capabilityDelta.lost.map(capabilityLabel);
   const critical = change.findings.filter((finding) => finding.severity === "critical").length;
   const tier = TIER_INFO[change.tier];
 
   const subject = change.before === null ? "This tool is new and was never approved." : "This tool changed since it was approved.";
-  const headline = gained.length > 0 ? `It can now ${list(gained)}.` : lost.length > 0 ? "Its capabilities only narrowed." : "Its capabilities did not change.";
+  const blocked = change.tier >= 2;
+  const headline =
+    gained.length > 0 ? `It can now ${list(gained)}.`
+    : lost.length > 0 && !blocked ? "Its capabilities only narrowed."
+    : !blocked ? "Its capabilities did not change."
+    : critical > 0 ? `Its capabilities did not change, but its text has ${plural(critical, "critical finding")}.`
+    : "Its capabilities did not change, but it still needs review.";
+  const tone: Tone = gained.length > 0 || change.tier === 3 ? "destructive" : blocked ? "warning" : "success";
   const details = [subject];
   if (lost.length > 0) details.push(`It can no longer ${list(lost)}.`);
   if (change.findings.length > 0) {
     details.push(`${plural(change.findings.length, "finding")}${critical > 0 ? `, ${critical} critical` : ""}.`);
   }
   details.push(`The proxy ${tier.action} calls to it${change.tier >= 2 ? " until you approve this definition" : ""}.`);
-  return { headline, details };
+  return { headline, details, tone };
 }
 
 /** Short capability tags for a tool, for tables. */

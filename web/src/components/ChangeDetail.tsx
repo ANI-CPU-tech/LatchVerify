@@ -1,13 +1,22 @@
 import { useState } from "react";
 import type { ReviewItem } from "../lib/api";
 import { describeError } from "../lib/data";
-import { dateTime, explainChange, relativeTime } from "../lib/format";
+import { dateTime, explainChange, relativeTime, type Tone } from "../lib/format";
 import { CapabilityDiff } from "./CapabilityDiff";
 import { FindingList } from "./FindingList";
 import { AlertIcon, CheckIcon } from "./icons";
 import { TextDiff } from "./TextDiff";
 import { TierBadge } from "./TierBadge";
-import { JsonView, Tabs, buttonClass } from "./ui";
+import { JsonView, TONE_TEXT, Tabs, buttonClass } from "./ui";
+
+/** The explanation box, in the tone explainChange picked from the tier and capabilities. */
+const CALLOUT: Record<Tone, string> = {
+  neutral: "border-border bg-muted/40",
+  success: "border-success/30 bg-success/10",
+  warning: "border-warning/30 bg-warning/10",
+  destructive: "border-destructive/30 bg-destructive/10",
+  info: "border-info/30 bg-info/10",
+};
 
 const SEGMENTS = [
   ["name", "Name"],
@@ -62,7 +71,6 @@ export function ChangeDetail({ item, actions }: { item: ReviewItem; actions?: Ch
   // Tier 3 is a hard block (hidden instructions, exec or credential access): approving takes two clicks.
   const needsConfirmation = change.tier === 3;
   const explanation = explainChange(change);
-  const gained = change.capabilityDelta.gained.length + change.capabilityDelta.loosened.length > 0;
 
   const run = async (action: "approve" | "reject") => {
     if (!actions) return;
@@ -99,14 +107,10 @@ export function ChangeDetail({ item, actions }: { item: ReviewItem; actions?: Ch
         </p>
       </header>
 
-      <div
-        className={`flex gap-3 rounded-md border p-3 text-sm ${
-          gained ? "border-destructive/30 bg-destructive/10" : "border-success/30 bg-success/10"
-        }`}
-      >
-        <span className={`mt-0.5 text-base ${gained ? "text-destructive" : "text-success"}`}>{gained ? <AlertIcon /> : <CheckIcon />}</span>
+      <div className={`flex gap-3 rounded-md border p-3 text-sm ${CALLOUT[explanation.tone]}`}>
+        <span className={`mt-0.5 text-base ${TONE_TEXT[explanation.tone]}`}>{explanation.tone === "success" ? <CheckIcon /> : <AlertIcon />}</span>
         <div className="space-y-1">
-          <p className={`font-semibold ${gained ? "text-destructive" : "text-success"}`}>{explanation.headline}</p>
+          <p className={`font-semibold ${TONE_TEXT[explanation.tone]}`}>{explanation.headline}</p>
           <p className="text-foreground">{explanation.details.join(" ")}</p>
         </div>
       </div>
