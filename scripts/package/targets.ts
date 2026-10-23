@@ -162,7 +162,8 @@ async function buildPortableTarball(ctx: BuildContext, app: string, dest: string
   await run(
     which("tar")!,
     ["--sort=name", "--owner=0", "--group=0", "--numeric-owner", `--mtime=@${ctx.sourceDateEpoch}`, "-czf", archive, "-C", base, `latchverify-${ctx.version}`],
-    { cwd: base, env: buildEnv({ GZIP: "-n" }), log: ctx.log },
+    // gzip reading a pipe stores no name and a zero timestamp, so the archive is reproducible.
+    { cwd: base, env: buildEnv(), log: ctx.log },
   );
   return archive;
 }

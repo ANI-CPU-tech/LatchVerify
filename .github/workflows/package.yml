@@ -34,18 +34,31 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # bsdtar writes the Windows zip; desktop-file-validate checks the desktop entry.
+      - name: Install packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools desktop-file-utils
       - name: Build packages
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
+        # Build every target, then fail the job if any of them failed.
         run: |
+          failed=""
           for target in ${{ matrix.targets }}; do
-            pnpm package "$target" --version "$VERSION"
+            pnpm package "$target" --version "$VERSION" || failed="$failed $target"
           done
+          if [ -n "$failed" ]; then
+            echo "::error::failed targets:$failed"
+            exit 1
+          fi
+      # Uploads whatever succeeded, even when another target failed.
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
         with:
           name: latchverify-${{ inputs.version }}-${{ matrix.os }}
           path: |
             build/packages/*/*/*
-            !build/packages/.work
-          if-no-files-found: error
+            !build/packages/.work/**
+            !build/packages/.jobs/**
+          if-no-files-found: warn
