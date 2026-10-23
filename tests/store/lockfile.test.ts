@@ -2,7 +2,14 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LockfileError, emptyLockfile, readLockfile, serializeLockfile, writeLockfile } from "../../src/store/lockfile.js";
+import {
+  LockfileError,
+  emptyLockfile,
+  findRecord,
+  readLockfile,
+  serializeLockfile,
+  writeLockfile,
+} from "../../src/store/lockfile.js";
 import { LOCKFILE_VERSION, LockFileSchema, type LockFile } from "../../src/schema/index.js";
 
 const EXAMPLE_PATH = new URL("../../latch.lock.example", import.meta.url);
@@ -200,5 +207,32 @@ describe("writeLockfile", () => {
     const final = await readLockfile(out);
     expect(versions).toContainEqual(final);
     expect(await readdir(dir)).toEqual(["latch.lock"]);
+  });
+});
+
+describe("findRecord", () => {
+  it("returns the pinned record for a server and tool", async () => {
+    const lock = await loadExample();
+    expect(findRecord(lock, "weather", "get_forecast")).toBe(lock.servers.weather!.tools.find((t) => t.name === "get_forecast"));
+  });
+
+  it("returns undefined for an unpinned tool or an unknown server", async () => {
+    const lock = await loadExample();
+    expect(findRecord(lock, "weather", "read_config")).toBeUndefined();
+    expect(findRecord(lock, "mail", "get_forecast")).toBeUndefined();
+    expect(findRecord(emptyLockfile(), "weather", "get_forecast")).toBeUndefined();
+  });
+
+  it("never resolves server ids to Object.prototype members", async () => {
+    const lock = await loadExample();
+    for (const id of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      expect(findRecord(lock, id, "get_forecast")).toBeUndefined();
+    }
+  });
+
+  it("matches tool names exactly", async () => {
+    const lock = await loadExample();
+    expect(findRecord(lock, "weather", "GET_FORECAST")).toBeUndefined();
+    expect(findRecord(lock, "weather", "get_forecast ")).toBeUndefined();
   });
 });

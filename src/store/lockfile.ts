@@ -127,9 +127,14 @@ export async function writeLockfile(path: string, lock: LockFile): Promise<void>
   await syncDirectory(dir);
 }
 
-/** TODO: return the pinned record for serverId/toolName, or undefined if unpinned. */
+/**
+ * The pinned record for serverId/toolName, or undefined when the tool is not pinned. Only the
+ * lockfile's own entries count: an id such as "constructor" never resolves to an Object.prototype
+ * member.
+ */
 export function findRecord(lock: LockFile, serverId: string, toolName: string): ToolRecord | undefined {
-  throw new Error("not implemented");
+  if (!Object.hasOwn(lock.servers, serverId)) return undefined;
+  return lock.servers[serverId]!.tools.find((tool) => tool.name === toolName);
 }
 
 /**
