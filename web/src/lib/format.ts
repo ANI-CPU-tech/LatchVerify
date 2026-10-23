@@ -44,6 +44,9 @@ const splitOnce = (text: string, separator: string): [string, string | undefined
 const list = (items: string[]): string =>
   items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 
+/** `text` ending in a full stop, so another sentence can follow it; ., ? and ! endings are kept. */
+export const sentence = (text: string): string => (/[.?!]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
+
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**

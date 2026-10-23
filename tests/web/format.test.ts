@@ -14,6 +14,7 @@ import {
   isHighReach,
   lastApproval,
   relativeTime,
+  sentence,
   serverSummaries,
 } from "../../web/src/lib/format.js";
 import { mockReviewItems } from "../../web/src/lib/mock.js";
@@ -218,5 +219,13 @@ describe("VERIFY_EXIT_CODES", () => {
       hard_block: VERIFY_EXIT.hardBlock,
       error: VERIFY_EXIT.error,
     });
+  });
+});
+
+describe("sentence", () => {
+  it("ends text with a full stop unless it already ends a sentence", () => {
+    expect(sentence("The LatchVerify review API is not running (HTTP 502 from the proxy)")).toBe("The LatchVerify review API is not running (HTTP 502 from the proxy).");
+    expect(sentence("is the review API running?")).toBe("is the review API running?");
+    expect(sentence("Done. ")).toBe("Done.");
   });
 });
