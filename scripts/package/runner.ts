@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   BuildJobSchema,
   BuildRequestSchema,
@@ -73,8 +73,9 @@ export class BuildService {
     return join(this.outputRoot, ".jobs");
   }
 
+  /** Repository-relative path with "/" separators, so a record written on Windows reads on Linux. */
   private relative(path: string): string {
-    return relative(REPO_ROOT, path) || ".";
+    return relative(REPO_ROOT, path).split(sep).join("/") || ".";
   }
 
   /** Every target with its prerequisites checked on this machine. */

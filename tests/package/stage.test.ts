@@ -97,6 +97,17 @@ describe("target configuration", () => {
     }
   });
 
+  it("an Arch build refuses a shared portable archive for another version", async () => {
+    const wrong = join(dir, "latchverify-9.9.9-linux-portable.tar.gz");
+    await writeFile(wrong, "x");
+    process.env.LATCH_PORTABLE_TARBALL = wrong;
+    try {
+      await expect(TARGETS.arch.package(ctx, await fakeApp())).rejects.toThrow("LATCH_PORTABLE_TARBALL must be latchverify-0.1.0-linux-portable.tar.gz");
+    } finally {
+      delete process.env.LATCH_PORTABLE_TARBALL;
+    }
+  });
+
   it("the Linux launcher is valid POSIX sh", () => {
     expect(() => execFileSync("sh", ["-n", new URL("../../packaging/linux/latchverify-review", import.meta.url).pathname])).not.toThrow();
   });

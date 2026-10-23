@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { BuildCheck, BuildTargetId } from "../../src/schema/index.js";
 import {
   APP_ID,
@@ -166,6 +166,25 @@ async function buildPortableTarball(ctx: BuildContext, app: string, dest: string
     { cwd: base, env: buildEnv(), log: ctx.log },
   );
   return archive;
+}
+
+/**
+ * The portable archive an Arch or Flatpak build packages. CI builds it once (linux-tarball) and
+ * points LATCH_PORTABLE_TARBALL at it, so the PKGBUILD and Flatpak manifest checksums match the
+ * archive that is actually released. Without it, the archive is built here.
+ */
+async function portableSource(ctx: BuildContext, app: string, dir: string): Promise<{ path: string; shared: boolean }> {
+  const given = process.env.LATCH_PORTABLE_TARBALL?.trim();
+  if (!given) return { path: await buildPortableTarball(ctx, app, dir), shared: false };
+  const source = resolve(given);
+  if (basename(source) !== portableName(ctx.version)) {
+    throw new Error(`LATCH_PORTABLE_TARBALL must be ${portableName(ctx.version)}, got ${basename(source)}`);
+  }
+  await mkdir(dir, { recursive: true });
+  const copy = join(dir, basename(source));
+  await copyFile(source, copy);
+  ctx.log(`using the portable archive from LATCH_PORTABLE_TARBALL: ${source} (sha256 ${await sha256(copy)})`);
+  return { path: copy, shared: true };
 }
 
 const LINUX_REQUIRED = (root: string) => [
@@ -380,7 +399,7 @@ Settings > Apps > Installed apps > LatchVerify > Uninstall. This also removes th
     },
     async package(ctx, app) {
       const dir = join(ctx.workDir, "arch");
-      const source = await buildPortableTarball(ctx, app, dir);
+      const { path: source, shared } = await portableSource(ctx, app, dir);
       const pkgbuild = await pkgbuildFor(ctx.version, await sha256(source));
       await writeFile(join(dir, "PKGBUILD"), pkgbuild);
       await run(which("makepkg")!, ["--nodeps", "--noconfirm", "--force", "--cleanbuild", "--nosign"], {
@@ -396,8 +415,11 @@ Settings > Apps > Installed apps > LatchVerify > Uninstall. This also removes th
         }),
       });
       await copyFile(join(dir, "PKGBUILD"), join(ctx.outDir, "PKGBUILD"));
+      const artifacts = [join(ctx.outDir, `latchverify-${archPkgver(ctx.version)}-1-any.pkg.tar.zst`), join(ctx.outDir, "PKGBUILD")];
+      // A shared archive ships with the linux-tarball build; otherwise keep the PKGBUILD's source with it.
+      if (shared) return artifacts;
       await copyFile(source, join(ctx.outDir, portableName(ctx.version)));
-      return [join(ctx.outDir, `latchverify-${archPkgver(ctx.version)}-1-any.pkg.tar.zst`), join(ctx.outDir, "PKGBUILD"), join(ctx.outDir, portableName(ctx.version))];
+      return [...artifacts, join(ctx.outDir, portableName(ctx.version))];
     },
     async verify(ctx, [pkg]) {
       const entries = await listArchive(pkg!);
@@ -538,13 +560,13 @@ sudo apt remove latchverify
     },
     async package(ctx, app) {
       const dir = join(ctx.workDir, "flatpak");
-      const source = await buildPortableTarball(ctx, app, dir);
+      const { path: source } = await portableSource(ctx, app, dir);
       const manifest = join(dir, `${APP_ID}.yml`);
       await writeFile(manifest, await flatpakManifestFor(ctx.version, await sha256(source)));
       const env = buildEnv();
-      await run(which("flatpak-builder")!, ["--disable-download", "--force-clean", "--repo=repo", "--state-dir=state", "build-dir", manifest], { cwd: dir, log: ctx.log, env });
+      await run(which("flatpak-builder")!, ["--disable-download", "--disable-rofiles-fuse", "--force-clean", "--repo=repo", "--state-dir=state", "build-dir", manifest], { cwd: dir, log: ctx.log, env });
       const bundle = join(ctx.outDir, `latchverify-${ctx.version}.flatpak`);
-      await run(which("flatpak")!, ["build-bundle", "repo", bundle, APP_ID], { cwd: dir, log: ctx.log, env });
+      await run(which("flatpak")!, ["build-bundle", "--runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo", "repo", bundle, APP_ID], { cwd: dir, log: ctx.log, env });
       await copyFile(manifest, join(ctx.outDir, `${APP_ID}.yml`));
       return [bundle, join(ctx.outDir, `${APP_ID}.yml`)];
     },
