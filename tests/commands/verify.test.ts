@@ -158,9 +158,9 @@ describe("runVerify", () => {
   });
 
   it("never prints a server's control characters to the terminal", async () => {
-    const hostile = { name: "evil\u001b[2J‮tool", description: "x", inputSchema: { type: "object" } };
+    const hostile = { name: "evil\u001b[2J\u202etool", description: "x", inputSchema: { type: "object" } };
     const { text } = await verify(await lockfile(listing([...benignTools, hostile])));
-    expect(text).not.toMatch(/[\u001b‮]/);
+    expect(text).not.toMatch(/[\u001b\u202e]/);
     expect(text).toContain("evil[U+001B][2J[U+202E]tool");
   });
 });

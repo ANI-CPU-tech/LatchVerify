@@ -59,7 +59,7 @@ describe("shouldBlock", () => {
 
   it("matches tool and server names exactly", () => {
     const unpinned = { blocked: true, reason: { kind: "unpinned" } };
-    for (const name of ["Get_Forecast", "get_forecast ", " get_forecast", "get_forecas", "get_forecast​", ""]) {
+    for (const name of ["Get_Forecast", "get_forecast ", " get_forecast", "get_forecas", "get_forecast\u200b", ""]) {
       expect(shouldBlock("weather", name, exampleLock(), []), name).toEqual(unpinned);
     }
     expect(shouldBlock("Weather", "get_forecast", exampleLock(), [])).toEqual(unpinned);
