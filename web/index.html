@@ -3,7 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LatchVerify Review</title>
+    <title>LatchVerify</title>
+    <script>
+      // Apply the saved theme before first paint. Mirrors src/lib/themes.ts (storage key, ids and
+      // the "system" mapping); tests/web/themes.test.ts keeps the two in step.
+      try {
+        var pref = localStorage.getItem("latch.theme");
+        if (pref === "system") pref = matchMedia("(prefers-color-scheme: dark)").matches ? "terminal" : "light";
+        if (["light", "warm", "sunset", "terminal", "minimal", "forest"].indexOf(pref) !== -1) {
+          document.documentElement.setAttribute("data-theme", pref);
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
