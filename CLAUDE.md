@@ -107,6 +107,11 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
   each step's messages between agent, proxy and server. Every verdict, tier, finding and error
   on that page comes from `POST /api/simulate`; without the API the page shows an error, never
   sample data.
+- The nav (`components/AppShell.tsx`) is animated, all `motion-safe`: one highlight slides to
+  the active link, links enter staggered, icons pop and nudge, the phone strip scrolls to the
+  active link, and the Review Queue count pings while a tier-3 change waits. The highlight is
+  placed from the `<li>` offsets, not the link's: a transformed `<li>` becomes the link's
+  offset parent.
 - `pages/` holds one file per sidebar entry. `components/ui.tsx` holds the shared pieces
   (Panel, Badge, Tabs, Terminal, buttonClass), and `components/icons.tsx` holds inline SVG
   icons (no icon dependency).
