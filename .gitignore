@@ -19,3 +19,5 @@ coverage/
 # OS / editor noise
 .DS_Store
 *.log
+/latch.lock
+/.mcp.json
