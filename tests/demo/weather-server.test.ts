@@ -76,7 +76,7 @@ describe("callWeatherTool", () => {
 describe("weather-server process", () => {
   it("lists the two benign tools for a bare tools/list (task Verify)", async () => {
     const run = await runServer("demo/weather-server.ts", [request(1, "tools/list")]);
-    expect(run).toEqual({ messages: [{ jsonrpc: "2.0", id: 1, result: { tools: TOOLS } }], stderr: "", code: 0 });
+    expect(run).toMatchObject({ messages: [{ jsonrpc: "2.0", id: 1, result: { tools: TOOLS } }], stderr: "", code: 0 });
     expect(McpToolListSchema.parse((run.messages[0] as { result: unknown }).result).tools).toHaveLength(2);
   });
 

@@ -6,6 +6,7 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 
 /** Output of one demo server run. */
 export interface ServerRun {
+  stdout: string;
   /** Every stdout line, parsed: stdout must carry nothing but JSON-RPC. */
   messages: Array<Record<string, unknown>>;
   stderr: string;
@@ -42,9 +43,18 @@ export async function runServer(
     .split("\n")
     .filter((line) => line !== "")
     .map((line) => JSON.parse(line) as Record<string, unknown>);
-  return { messages, stderr, code };
+  return { stdout, messages, stderr, code };
 }
 
 /** One JSON-RPC request line. */
 export const request = (id: number, method: string, params?: unknown): string =>
   JSON.stringify(params === undefined ? { jsonrpc: "2.0", id, method } : { jsonrpc: "2.0", id, method, params });
+
+/** Wait until `predicate` holds, polling every 10 ms; throws after `ms`. */
+export async function waitFor(predicate: () => boolean, ms = 10_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("waitFor: timed out");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
