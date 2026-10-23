@@ -95,6 +95,9 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
 **Web** (`web/src`):
 - `App.tsx` routes by hash (`lib/router.ts` parses, `lib/useRoute.ts` follows `hashchange`: `#/review/<id>`, `#/tools/<server>`, ...)
   so the same bundle works under Vite and under `latch review --ui`.
+- `components/PageTransition.tsx` fades the old page out and the new one in when the page
+  changes (160 ms each way, opacity only, instant under reduced motion); changes within a page
+  show at once.
 - `lib/data.tsx` loads the queue, lockfile, events and git status once and shares them
   with every page. It polls every 3 s while the API is connected. Refresh, or a decision,
   reloads all four.
@@ -154,7 +157,8 @@ The art is drawn in named layers (`ART_LAYERS`), each a `<g class="art-<layer>">
 `index.css` only under `prefers-reduced-motion: no-preference`; second copies and alternate
 poses are hidden by default, so the still scene is complete. Each theme names its own extra
 in `themes.ts` (`art`): Default Light a balloon, Warm Retro a sailboat, Sunset sun rays and
-geese, Terminal Dark fireflies and a shooting star, Minimal snowfall, Forest Green a stag and
+geese (the rays thin out along their length, toward the top and the fan's edges), Terminal
+Dark fireflies and a shooting star, Minimal snowfall, Forest Green a stag and
 lake mist. `sceneFor(theme)` gives the time and extra; a test keeps the mapping one to one.
 `AppShell` shows it as a fixed backdrop behind the content column on every page (the sidebar
 stays plain): the art whole at the bottom, its sky stretched to the top as a gradient
