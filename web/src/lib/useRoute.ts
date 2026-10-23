@@ -12,6 +12,11 @@ export function useRoute(): Route {
   return route;
 }
 
-export const navigate = (route: Exclude<Route, { page: "not-found" }>): void => {
-  window.location.hash = href(route);
+/**
+ * Goes to `route`. With `replace`, the current history entry is replaced instead of a new one
+ * pushed, for moves that should not each become a Back step (stepping through a list by key).
+ */
+export const navigate = (route: Exclude<Route, { page: "not-found" }>, { replace = false }: { replace?: boolean } = {}): void => {
+  if (replace) window.location.replace(href(route));
+  else window.location.hash = href(route);
 };
