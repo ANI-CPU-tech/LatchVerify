@@ -9,7 +9,7 @@ import { TierBadge } from "../components/TierBadge";
 import { Badge, ErrorState, JsonView, LoadingState, PageHeader, Panel, StatusDot, buttonClass } from "../components/ui";
 import { simulateRugPull } from "../lib/api";
 import type { Tone } from "../lib/format";
-import { RUG_PULL, descriptionDiff, simulationSteps, type SimStep } from "../lib/simulation";
+import { RUG_PULL, descriptionDiff, playerKey, simulationSteps, type SimStep } from "../lib/simulation";
 
 /** Milliseconds a step stays on screen at 1x. */
 const STEP_MS = 2600;
@@ -66,6 +66,27 @@ export function Simulation() {
     const timer = window.setTimeout(() => setIndex((i) => Math.min(i + 1, last)), STEP_MS / speed);
     return () => window.clearTimeout(timer);
   }, [playing, index, last, speed, steps.length]);
+
+  // Keyboard: Space or K plays and pauses, the left and right arrows step. Only when nothing
+  // interactive has focus, so links, buttons, the speed menu and the nav keep their own keys.
+  useEffect(() => {
+    if (steps.length === 0) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.target instanceof Element && event.target.closest("a, button, input, select, textarea, [contenteditable], [role=tab]")) return;
+      const action = playerKey(event.key);
+      if (action === null) return;
+      event.preventDefault();
+      if (action === "previous") setIndex((i) => Math.max(0, i - 1));
+      else if (action === "next") setIndex((i) => Math.min(last, i + 1));
+      else {
+        if (index >= last) setIndex(0);
+        setPlaying((p) => !p || index >= last);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [steps.length, last, index]);
 
   const step = steps[index];
   const swapAt = steps.findIndex((entry) => entry.id === "swap");
@@ -128,8 +149,11 @@ export function Simulation() {
                 ))}
               </select>
             </label>
-            <span className="ml-auto font-mono text-xs text-muted-foreground">
-              Step {index + 1} of {steps.length}
+            <span className="ml-auto flex items-center gap-3 font-mono text-xs text-muted-foreground">
+              <span className="hidden lg:inline">Space play/pause · ← → step</span>
+              <span>
+                Step {index + 1} of {steps.length}
+              </span>
             </span>
           </div>
           <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
