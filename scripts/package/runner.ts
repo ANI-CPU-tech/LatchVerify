@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   BuildJobSchema,
   BuildRequestSchema,
@@ -15,6 +15,7 @@ import {
 import { OUTPUT_ROOT, REPO_ROOT } from "./config.js";
 import { capture, resolvePnpm, type Log } from "./process.js";
 import { buildProject, stageApp, type StageContext } from "./stage.js";
+import { assembleRelease, ReleaseError } from "./release.js";
 import { TARGETS, sha256, type BuildContext, type Target } from "./targets.js";
 
 const STEPS = ["Prerequisites", "Configuration", "Build app", "Package", "Verify", "Checksums"] as const;
@@ -73,8 +74,9 @@ export class BuildService {
     return join(this.outputRoot, ".jobs");
   }
 
+  /** Repository-relative path with "/" separators, so a record written on Windows reads on Linux. */
   private relative(path: string): string {
-    return relative(REPO_ROOT, path) || ".";
+    return relative(REPO_ROOT, path).split(sep).join("/") || ".";
   }
 
   /** Every target with its prerequisites checked on this machine. */
@@ -305,40 +307,24 @@ export class BuildService {
   }
 
   /**
-   * Writes RELEASE_NOTES.md and SHA256SUMS for every successful build of `version`, after
-   * re-hashing each artifact. Local files only: nothing is uploaded, tagged or published.
+   * Assembles build/packages/<version>/release (every package once, SHA256SUMS, optional
+   * SHA256SUMS.asc) and RELEASE_NOTES.md from the successful builds of `version`, after
+   * re-hashing each file. Local files only: nothing is uploaded, tagged or published.
    */
   async prepareRelease(version: string): Promise<ReleaseReport> {
     const request = parseRequest({ target: "linux-tarball", version, arch: "noarch" });
-    const versionDir = join(this.outputRoot, request.version);
-    const builds: BuildJob[] = [];
-    for (const id of Object.keys(this.targets)) {
-      try {
-        const job = BuildJobSchema.parse(JSON.parse(await readFile(join(versionDir, id, "build.json"), "utf8")));
-        if (job.status === "succeeded") builds.push(job);
-      } catch {
-        // not built
-      }
+    try {
+      const release = await assembleRelease({ outputRoot: this.outputRoot, version: request.version, targets: this.targets, now: this.now() });
+      return {
+        version: request.version,
+        files: [...release.assets, release.notesFile].map((f) => this.relative(f)),
+        notes: release.notes,
+        targets: release.targets,
+      };
+    } catch (error) {
+      if (error instanceof ReleaseError) throw new BuildRequestError(409, error.message);
+      throw error;
     }
-    if (builds.length === 0) throw new BuildRequestError(409, `no successful builds of ${version} to release; build a package first`);
-
-    for (const build of builds) {
-      for (const artifact of build.artifacts) {
-        const actual = await sha256(resolve(REPO_ROOT, artifact.path)).catch(() => null);
-        if (actual !== artifact.sha256) throw new BuildRequestError(409, `${artifact.path} changed or disappeared since it was built; rebuild ${build.target}`);
-      }
-    }
-
-    const sums = builds.flatMap((b) => b.artifacts.map((a) => `${a.sha256}  ${b.target}/${a.name}\n`)).join("");
-    const notes = releaseNotes(version, builds, this.targets, this.now());
-    await writeFile(join(versionDir, "SHA256SUMS"), sums);
-    await writeFile(join(versionDir, "RELEASE_NOTES.md"), notes);
-    return {
-      version,
-      files: [join(versionDir, "RELEASE_NOTES.md"), join(versionDir, "SHA256SUMS")].map((f) => this.relative(f)),
-      notes,
-      targets: builds.map((b) => b.target),
-    };
   }
 }
 
@@ -359,36 +345,4 @@ async function commitOf(): Promise<string | null> {
   if (!head || head.code !== 0) return null;
   const status = await capture("git", ["status", "--porcelain"], { cwd: REPO_ROOT, timeoutMs: 30_000 }).catch(() => null);
   return `${head.stdout.trim()}${status?.stdout.trim() ? "-dirty" : ""}`;
-}
-
-const formatSize = (bytes: number): string => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
-
-function releaseNotes(version: string, builds: BuildJob[], targets: Record<BuildTargetId, Target>, now: Date): string {
-  const commits = [...new Set(builds.map((b) => b.commit ?? "unknown"))];
-  const rows = builds.flatMap((b) =>
-    b.artifacts.map((a) => `| ${targets[b.target].platform} | \`${b.target}/${a.name}\` | ${formatSize(a.size)} | \`${a.sha256}\` |`),
-  );
-  const install = builds.map((b) => targets[b.target].install(version).replace(/^# /m, "### ").replace(/^## /gm, "#### ")).join("\n");
-  return `# LatchVerify ${version}
-
-Prepared ${now.toISOString().slice(0, 10)} from commit ${commits.map((c) => `\`${c}\``).join(", ")}.
-${commits.some((c) => c.endsWith("-dirty")) ? "\n> **Warning:** at least one package was built from a work tree with uncommitted changes.\n" : ""}
-These files are prepared locally. Nothing has been uploaded or published: attach them to a
-release yourself when you are ready.
-
-## Packages
-
-| Platform | File | Size | SHA-256 |
-|---|---|---|---|
-${rows.join("\n")}
-
-Check a download with \`sha256sum -c SHA256SUMS\` in this directory.
-
-## What's changed
-
-<!-- Summarize the changes since the previous release here. -->
-
-## Install
-
-${install}`;
 }

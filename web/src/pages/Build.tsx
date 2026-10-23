@@ -410,8 +410,9 @@ export function Build({ jobId }: { jobId: string | null }) {
       >
         <div className="space-y-3 text-sm">
           <p className="text-muted-foreground">
-            Writes RELEASE_NOTES.md (packages, checksums, install steps) and SHA256SUMS for every successful build of this version,
-            after re-hashing each file. Publishing stays a separate, manual step.
+            Collects every successful build of this version into <code className="font-mono">release/</code> with SHA256SUMS (signed
+            when a GPG key is configured), and writes RELEASE_NOTES.md, after re-hashing each file. Publishing happens in the
+            release workflow when a version tag is pushed, never from this page.
           </p>
           {release.error && <ErrorState title="Release notes were not written." error={release.error} />}
           {release.report && (

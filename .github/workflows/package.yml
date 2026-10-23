@@ -1,6 +1,13 @@
-# Builds LatchVerify packages on native runners, for the targets a Linux workstation cannot
-# build (the Windows installer) or may lack tools for (.deb). Manual trigger only. It keeps the
-# packages as workflow-run artifacts; it never creates a release, tag or upload anywhere else.
+# Builds every LatchVerify package on native runners with scripts/package (the same code as
+# `pnpm package` locally) and keeps them as workflow artifacts. Run it by hand to test a
+# version, or let release.yml call it for a tagged release. It never publishes anything.
+#
+# Windows signing (Smart App Control and SmartScreen block unsigned installers), either:
+#   secrets WINDOWS_CERTIFICATE_PFX_BASE64 + WINDOWS_CERTIFICATE_PASSWORD
+#     an OV/EV code-signing certificate from a CA in Microsoft's Trusted Root Program, or
+#   secrets AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID (OIDC federated
+#   credential) + variables AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_PROFILE
+#     Azure Artifact Signing.
 name: package
 
 on:
@@ -10,22 +17,51 @@ on:
         description: "Package version (1.2.3 or 1.2.3-rc.1)"
         required: true
         type: string
+      require_signing:
+        description: "Fail unless the Windows installer is code-signed"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      require_signing:
+        type: boolean
+        default: true
+    secrets:
+      WINDOWS_CERTIFICATE_PFX_BASE64:
+        required: false
+      WINDOWS_CERTIFICATE_PASSWORD:
+        required: false
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_SUBSCRIPTION_ID:
+        required: false
 
 permissions:
   contents: read
 
+env:
+  VERSION: ${{ inputs.version }}
+
 jobs:
-  package:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            targets: linux-tarball deb windows-zip
-          # GitHub's Windows images include Inno Setup 6 (ISCC.exe).
-          - os: windows-latest
-            targets: windows-installer
-    runs-on: ${{ matrix.os }}
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})(-[0-9A-Za-z]{1,20}(\.[0-9A-Za-z]{1,20}){0,4})?$'; then
+            echo "::error::version must look like 1.2.3 or 1.2.3-rc.1, got '$VERSION'"
+            exit 1
+          fi
+
+  # Portable archive, .deb and Windows zip. The archive is reused by the arch and flatpak jobs.
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -34,18 +70,178 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # bsdtar writes the zip; desktop-file-validate and appstreamcli check the metadata.
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools desktop-file-utils appstream
       - name: Build packages
-        shell: bash
-        env:
-          VERSION: ${{ inputs.version }}
         run: |
-          for target in ${{ matrix.targets }}; do
-            pnpm package "$target" --version "$VERSION"
+          failed=""
+          for target in linux-tarball deb windows-zip; do
+            pnpm package "$target" --version "$VERSION" || failed="$failed $target"
           done
+          if [ -n "$failed" ]; then
+            echo "::error::failed targets:$failed"
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: latchverify-${{ inputs.version }}-${{ matrix.os }}
-          path: |
-            build/packages/*/*/*
-            !build/packages/.work
+          name: packages-linux
+          # Rooted at the version directory, so linux-tarball/, deb/ and windows-zip/ are kept.
+          path: build/packages/${{ inputs.version }}
+          if-no-files-found: error
+
+  # pacman package for Arch Linux, CachyOS and Manjaro. makepkg refuses to run as root.
+  arch:
+    needs: linux
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install build tools
+        run: pacman -Syu --noconfirm --needed nodejs npm git desktop-file-utils appstream
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        run: npm install -g "pnpm@$(node -p 'require("./package.json").packageManager.split("@")[1]')"
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-linux
+          path: build/packages/${{ inputs.version }}
+      - name: Create the build user
+        run: |
+          useradd --create-home builder
+          chown -R builder: "$GITHUB_WORKSPACE"
+          sudo -H -u builder git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build package
+        run: |
+          tarball="$GITHUB_WORKSPACE/build/packages/$VERSION/linux-tarball/latchverify-$VERSION-linux-portable.tar.gz"
+          sudo -H -u builder pnpm install --frozen-lockfile
+          sudo -H -u builder env LATCH_PORTABLE_TARBALL="$tarball" pnpm package arch --version "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-arch
+          path: build/packages/${{ inputs.version }}/arch
+          if-no-files-found: error
+
+  # Local Flatpak bundle, built offline from the portable archive.
+  flatpak:
+    needs: linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Flatpak tools and the freedesktop runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder desktop-file-utils appstream
+          # Ubuntu 24.04 blocks the unprivileged user namespaces bubblewrap needs.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive -y flathub \
+            org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08 org.freedesktop.Sdk.Extension.node22//24.08
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-linux
+          path: build/packages/${{ inputs.version }}
+      - name: Build bundle
+        run: |
+          LATCH_PORTABLE_TARBALL="$GITHUB_WORKSPACE/build/packages/$VERSION/linux-tarball/latchverify-$VERSION-linux-portable.tar.gz" \
+            pnpm package flatpak --version "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-flatpak
+          path: build/packages/${{ inputs.version }}/flatpak
+          if-no-files-found: error
+
+  # Per-user Inno Setup installer, Authenticode-signed when a certificate is configured.
+  windows:
+    needs: version
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write # Azure Artifact Signing signs in with OIDC
+    env:
+      HAS_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
+      HAS_AZURE: ${{ vars.AZURE_SIGNING_ACCOUNT != '' }}
+      LATCH_WIN_SIGN_REQUIRED: ${{ inputs.require_signing && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Inno Setup 6 if the image lacks it
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+          }
+
+      - name: Import the code-signing certificate
+        if: env.HAS_PFX == 'true'
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:PFX_BASE64))
+          try {
+            $password = ConvertTo-SecureString $env:PFX_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $password |
+              Where-Object { $_.HasPrivateKey } | Select-Object -First 1
+            if (-not $cert) { throw "the PFX holds no certificate with a private key" }
+            "LATCH_WIN_SIGN_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          } finally {
+            Remove-Item $path -Force
+          }
+
+      - name: Sign in to Azure
+        if: env.HAS_AZURE == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Set up Azure Artifact Signing
+        if: env.HAS_AZURE == 'true'
+        shell: pwsh
+        env:
+          SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "artifact-signing"
+          nuget install Microsoft.ArtifactSigning.Client -Version 1.0.146 -OutputDirectory $root -NonInteractive
+          $dlib = Join-Path $root "Microsoft.ArtifactSigning.Client.1.0.146\bin\x64\Azure.CodeSigning.Dlib.dll"
+          if (-not (Test-Path $dlib)) { throw "Azure.CodeSigning.Dlib.dll not found at $dlib" }
+          $metadata = Join-Path $root "metadata.json"
+          @{
+            Endpoint = $env:SIGNING_ENDPOINT
+            CodeSigningAccountName = $env:SIGNING_ACCOUNT
+            CertificateProfileName = $env:SIGNING_PROFILE
+          } | ConvertTo-Json | Set-Content -Path $metadata -Encoding utf8
+          "LATCH_WIN_SIGN_DLIB=$dlib" >> $env:GITHUB_ENV
+          "LATCH_WIN_SIGN_METADATA=$metadata" >> $env:GITHUB_ENV
+
+      - name: Build installer
+        shell: bash
+        run: pnpm package windows-installer --version "$VERSION"
+
+      - name: Remove the certificate
+        if: always() && env.LATCH_WIN_SIGN_THUMBPRINT != ''
+        shell: pwsh
+        run: Remove-Item "Cert:\CurrentUser\My\$env:LATCH_WIN_SIGN_THUMBPRINT" -Force -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-windows
+          path: build/packages/${{ inputs.version }}/windows-installer
           if-no-files-found: error

@@ -1,0 +1,116 @@
+# Publishes a GitHub Release when a version tag (v1.2.3, v1.2.3-rc.1) is pushed:
+#   1. package.yml builds every package; the Windows installer must be code-signed
+#      (set the repository variable LATCH_ALLOW_UNSIGNED_WINDOWS=true to release without).
+#   2. scripts/package assembles release/ (packages, SHA256SUMS, SHA256SUMS.asc when the
+#      RELEASE_GPG_PRIVATE_KEY secret is set) and RELEASE_NOTES.md.
+#   3. Every file gets a signed build-provenance attestation (gh attestation verify).
+#   4. The release is created; a version with a pre-release suffix is marked pre-release.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          if ! printf '%s' "$version" | grep -Eq '^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})(-[0-9A-Za-z]{1,20}(\.[0-9A-Za-z]{1,20}){0,4})?$'; then
+            echo "::error::tag $TAG is not v<version> (v1.2.3 or v1.2.3-rc.1)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  package:
+    needs: version
+    uses: ./.github/workflows/package.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      require_signing: ${{ vars.LATCH_ALLOW_UNSIGNED_WINDOWS != 'true' }}
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
+
+  publish:
+    needs: [version, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+      id-token: write # sign the attestations
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      HAS_GPG: ${{ secrets.RELEASE_GPG_PRIVATE_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # release notes list the commits since the previous tag
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-linux
+          path: build/packages/${{ env.VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-arch
+          path: build/packages/${{ env.VERSION }}/arch
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-flatpak
+          path: build/packages/${{ env.VERSION }}/flatpak
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-windows
+          path: build/packages/${{ env.VERSION }}/windows-installer
+
+      - name: Import the release signing key
+        if: env.HAS_GPG == 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+        run: |
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          fingerprint=$(gpg --batch --with-colons --list-secret-keys | awk -F: '/^fpr:/ { print $10; exit }')
+          echo "LATCH_GPG_KEY_ID=$fingerprint" >> "$GITHUB_ENV"
+
+      - name: Assemble the release
+        env:
+          LATCH_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: pnpm package --release "$VERSION"
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: build/packages/${{ env.VERSION }}/release/*
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$TAG" build/packages/"$VERSION"/release/* \
+            --title "LatchVerify $VERSION" \
+            --notes-file "build/packages/$VERSION/RELEASE_NOTES.md" \
+            --verify-tag $prerelease

@@ -150,7 +150,7 @@ Run `pnpm package <target> --version x.y.z`, or use the Build & Distribution pag
   - `flatpak` needs flatpak-builder plus the freedesktop 24.08 runtime, SDK and node22
     extension. It is a local bundle, not Flathub (see `packaging/flatpak/FLATHUB.md`).
   - `windows-installer` (Inno Setup) builds only on Windows or through
-    `.github/workflows/package.yml`, which is manual-trigger only.
+    `.github/workflows/package.yml` (run by hand, or by release.yml on a `v*` tag).
 - Templates in `packaging/` use `@NAME@` placeholders. `config.ts render()` throws on a
   missing or unused value.
 - Launchers: `packaging/linux/latchverify-review` (POSIX sh) and `LatchVerify Review.cmd`
@@ -168,6 +168,26 @@ Packaging rules:
   INSTALL.md and build.json. Job records are in `build/packages/.jobs/`.
 - "Prepare release" writes RELEASE_NOTES.md and SHA256SUMS after re-hashing every file.
 - Nothing in scripts/package pushes, uploads, tags or publishes; keep it that way.
+  Publishing happens only in `.github/workflows/release.yml`, on a pushed `v*` tag.
+
+Signing and releases (see `packaging/RELEASING.md`):
+- Windows installer (`scripts/package/signing.ts`): Authenticode through signtool. Inno
+  Setup signs the installer and its uninstaller.
+  - Configure with `LATCH_WIN_SIGN_THUMBPRINT`, or `LATCH_WIN_SIGN_DLIB` +
+    `LATCH_WIN_SIGN_METADATA` for Azure Artifact Signing.
+  - Verified with `signtool verify /pa /all`. `LATCH_WIN_SIGN_REQUIRED=1` fails an
+    unsigned build.
+  - Smart App Control needs a CA-issued or Azure-issued certificate. Self-signed never works.
+- `scripts/package/release.ts` assembles `release/`: every package once, SHA256SUMS, and
+  SHA256SUMS.asc when `LATCH_GPG_KEY_ID` is set, plus RELEASE_NOTES.md.
+- CI:
+  - `package.yml` (reusable) builds on Ubuntu, an Arch container, Ubuntu with Flatpak, and
+    Windows.
+  - Arch and Flatpak package the Ubuntu job's archive through `LATCH_PORTABLE_TARBALL`.
+  - `release.yml` attests provenance and runs `gh release create`.
+  - Workflow scripts take values only through `env`; `tests/package/workflows.test.ts`
+    forbids `${{ }}` inside `run:`.
+
 
 ## Build order (as built)
 
@@ -205,10 +225,12 @@ There is no browser test runner. To check the UI visually, serve the built bundl
 
 - CI results are not stored, so the Git & CI page documents `latch verify` rather than
   showing CI runs, and no page shows live proxy connections.
-- Packages are unsigned. There is no AppImage, because it would need a downloaded Node
-  runtime and appimagetool.
-- The `.deb`, Flatpak and Windows installer targets are implemented but have not been
-  built on this machine: the tools are missing, or the target needs Windows.
+- The release pipeline has not run end to end. The Arch container, Flatpak and Windows
+  signing jobs need a pushed tag and configured secrets to be exercised.
+- Windows signing needs a real certificate (Azure Artifact Signing or a CA-issued PFX).
+- The `.deb` and pacman packages are not individually signed; integrity comes from the
+  signed SHA256SUMS and provenance attestations.
+- There is no AppImage, because it would need a downloaded Node runtime and appimagetool.
 - Flathub submission needs a source-built manifest with generated npm sources and an app id
   matching a repository you own (`packaging/flatpak/FLATHUB.md`).
 - On Windows, MCP clients that spawn `latch` without a shell may not resolve `latch.cmd`.

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { BuildCheck, BuildTargetId } from "../../src/schema/index.js";
 import {
   APP_ID,
@@ -17,6 +17,7 @@ import {
   renderTemplate,
 } from "./config.js";
 import { buildEnv, capture, resolvePnpm, run, which } from "./process.js";
+import { findSigntool, innoSignCommand, signingRequired, windowsSigning, type WindowsSigning } from "./signing.js";
 import { metainfoVars, stageLinuxTree, stageWindowsTree, type StageContext } from "./stage.js";
 
 export interface BuildContext extends StageContext {
@@ -162,9 +163,29 @@ async function buildPortableTarball(ctx: BuildContext, app: string, dest: string
   await run(
     which("tar")!,
     ["--sort=name", "--owner=0", "--group=0", "--numeric-owner", `--mtime=@${ctx.sourceDateEpoch}`, "-czf", archive, "-C", base, `latchverify-${ctx.version}`],
-    { cwd: base, env: buildEnv({ GZIP: "-n" }), log: ctx.log },
+    // gzip reading a pipe stores no name and a zero timestamp, so the archive is reproducible.
+    { cwd: base, env: buildEnv(), log: ctx.log },
   );
   return archive;
+}
+
+/**
+ * The portable archive an Arch or Flatpak build packages. CI builds it once (linux-tarball) and
+ * points LATCH_PORTABLE_TARBALL at it, so the PKGBUILD and Flatpak manifest checksums match the
+ * archive that is actually released. Without it, the archive is built here.
+ */
+async function portableSource(ctx: BuildContext, app: string, dir: string): Promise<{ path: string; shared: boolean }> {
+  const given = process.env.LATCH_PORTABLE_TARBALL?.trim();
+  if (!given) return { path: await buildPortableTarball(ctx, app, dir), shared: false };
+  const source = resolve(given);
+  if (basename(source) !== portableName(ctx.version)) {
+    throw new Error(`LATCH_PORTABLE_TARBALL must be ${portableName(ctx.version)}, got ${basename(source)}`);
+  }
+  await mkdir(dir, { recursive: true });
+  const copy = join(dir, basename(source));
+  await copyFile(source, copy);
+  ctx.log(`using the portable archive from LATCH_PORTABLE_TARBALL: ${source} (sha256 ${await sha256(copy)})`);
+  return { path: copy, shared: true };
 }
 
 const LINUX_REQUIRED = (root: string) => [
@@ -190,6 +211,24 @@ function findIscc(): string | null {
     if (base && existsSync(join(base, "Inno Setup 6", "ISCC.exe"))) return join(base, "Inno Setup 6", "ISCC.exe");
   }
   return null;
+}
+
+/** Whether the installer will be signed, and whether that is acceptable. */
+function signingCheck(): BuildCheck {
+  let signing: WindowsSigning;
+  try {
+    signing = windowsSigning();
+  } catch (error) {
+    return fail("Code signing", error instanceof Error ? error.message : String(error));
+  }
+  if (signing.mode === "none") {
+    return signingRequired()
+      ? fail("Code signing", "LATCH_WIN_SIGN_REQUIRED is set but no certificate is configured (LATCH_WIN_SIGN_THUMBPRINT or LATCH_WIN_SIGN_DLIB + LATCH_WIN_SIGN_METADATA)")
+      : skip("Code signing", "not configured: the installer will be unsigned, and Smart App Control and SmartScreen block unsigned installers");
+  }
+  const signtool = findSigntool();
+  if (!signtool) return fail("Code signing", "signtool.exe not found; install the Windows SDK signing tools");
+  return pass("Code signing", `${signing.mode === "thumbprint" ? `certificate ${signing.thumbprint}` : "Azure Artifact Signing"} with ${signtool}`);
 }
 
 /** sha256 placeholder for validating templates before the real archive exists. */
@@ -290,6 +329,9 @@ Requires Node.js 22 or newer on PATH (https://nodejs.org/).
    settings > Environment Variables). MCP client configs written by \`latch init\` start \`latch\`.
 3. Start **LatchVerify Review.cmd** to open the review UI, or run \`latch\` in a terminal.
 
+On Windows 11 with **Smart App Control** turned on, use the installer instead: Windows blocks
+\`.cmd\` files extracted from a downloaded zip, and offers no override.
+
 ## Uninstall
 
 Delete the \`LatchVerify\` folder and remove it from PATH.
@@ -311,6 +353,7 @@ Delete the \`LatchVerify\` folder and remove it from PATH.
         hostCheck(["win32"], "Inno Setup runs on Windows; build there or in the CI workflow (.github/workflows/package.yml)"),
         pnpmCheck(),
         iscc ? pass("Inno Setup 6 (ISCC)", iscc) : fail("Inno Setup 6 (ISCC)", "not found; install Inno Setup 6 from https://jrsoftware.org/isinfo.php"),
+        signingCheck(),
       ];
     },
     async validate(ctx) {
@@ -328,15 +371,27 @@ Delete the \`LatchVerify\` folder and remove it from PATH.
         join(dir, "latchverify.iss"),
         await renderTemplate("windows/latchverify.iss.in", { VERSION: ctx.version, VERSION_NUMERIC: numericVersion(ctx.version), HOMEPAGE }),
       );
-      await run(findIscc()!, ["/Qp", "latchverify.iss"], { cwd: dir, log: ctx.log });
+      // With a certificate, Inno Setup signs both the installer and the uninstaller it embeds.
+      const signing = windowsSigning();
+      const signArgs = signing.mode === "none" ? [] : ["/DSign", `/Slatchsign=${innoSignCommand(findSigntool()!, signing)}`];
+      ctx.log(signing.mode === "none" ? "building an UNSIGNED installer" : `signing with ${signing.mode}`);
+      await run(findIscc()!, ["/Qp", ...signArgs, "latchverify.iss"], { cwd: dir, log: ctx.log });
       const name = `latchverify-${ctx.version}-windows-setup.exe`;
       await rename(join(dir, "out", name), join(ctx.outDir, name));
       return [join(ctx.outDir, name)];
     },
-    async verify(_ctx, [setup]) {
+    async verify(ctx, [setup]) {
       const head = (await readFile(setup!)).subarray(0, 2).toString("latin1");
       const { size } = await stat(setup!);
-      return [head === "MZ" ? pass("Windows executable", `${size} bytes`) : fail("Windows executable", "missing MZ header")];
+      const checks = [head === "MZ" ? pass("Windows executable", `${size} bytes`) : fail("Windows executable", "missing MZ header")];
+      if (windowsSigning().mode === "none") {
+        checks.push(skip("Authenticode signature", "unsigned: Smart App Control and SmartScreen will block this installer"));
+      } else {
+        // /pa: the default Authenticode policy, so the chain must reach a trusted root.
+        const { code, stdout, stderr } = await capture(findSigntool()!, ["verify", "/pa", "/all", setup!], { cwd: ctx.workDir, timeoutMs: 120_000 });
+        checks.push(code === 0 ? pass("Authenticode signature", "valid, timestamped, chains to a trusted root") : fail("Authenticode signature", (stderr || stdout).trim()));
+      }
+      return checks;
     },
     install: (version) => `# LatchVerify ${version}: Windows installer
 
@@ -347,6 +402,10 @@ Requires Node.js 22 or newer on PATH (https://nodejs.org/).
 Run \`latchverify-${version}-windows-setup.exe\`. It installs for the current user (no
 administrator rights), adds a **LatchVerify Review** Start menu shortcut and, unless you
 untick it, adds \`latch\` to your PATH.
+
+Release builds are Authenticode-signed, so Smart App Control and SmartScreen can verify the
+publisher (check with right-click > Properties > Digital Signatures). An unsigned build, such
+as one made without a certificate configured, is blocked by Smart App Control.
 
 ## Uninstall
 
@@ -379,7 +438,7 @@ Settings > Apps > Installed apps > LatchVerify > Uninstall. This also removes th
     },
     async package(ctx, app) {
       const dir = join(ctx.workDir, "arch");
-      const source = await buildPortableTarball(ctx, app, dir);
+      const { path: source, shared } = await portableSource(ctx, app, dir);
       const pkgbuild = await pkgbuildFor(ctx.version, await sha256(source));
       await writeFile(join(dir, "PKGBUILD"), pkgbuild);
       await run(which("makepkg")!, ["--nodeps", "--noconfirm", "--force", "--cleanbuild", "--nosign"], {
@@ -395,8 +454,11 @@ Settings > Apps > Installed apps > LatchVerify > Uninstall. This also removes th
         }),
       });
       await copyFile(join(dir, "PKGBUILD"), join(ctx.outDir, "PKGBUILD"));
+      const artifacts = [join(ctx.outDir, `latchverify-${archPkgver(ctx.version)}-1-any.pkg.tar.zst`), join(ctx.outDir, "PKGBUILD")];
+      // A shared archive ships with the linux-tarball build; otherwise keep the PKGBUILD's source with it.
+      if (shared) return artifacts;
       await copyFile(source, join(ctx.outDir, portableName(ctx.version)));
-      return [join(ctx.outDir, `latchverify-${archPkgver(ctx.version)}-1-any.pkg.tar.zst`), join(ctx.outDir, "PKGBUILD"), join(ctx.outDir, portableName(ctx.version))];
+      return [...artifacts, join(ctx.outDir, portableName(ctx.version))];
     },
     async verify(ctx, [pkg]) {
       const entries = await listArchive(pkg!);
@@ -537,13 +599,13 @@ sudo apt remove latchverify
     },
     async package(ctx, app) {
       const dir = join(ctx.workDir, "flatpak");
-      const source = await buildPortableTarball(ctx, app, dir);
+      const { path: source } = await portableSource(ctx, app, dir);
       const manifest = join(dir, `${APP_ID}.yml`);
       await writeFile(manifest, await flatpakManifestFor(ctx.version, await sha256(source)));
       const env = buildEnv();
-      await run(which("flatpak-builder")!, ["--disable-download", "--force-clean", "--repo=repo", "--state-dir=state", "build-dir", manifest], { cwd: dir, log: ctx.log, env });
+      await run(which("flatpak-builder")!, ["--disable-download", "--disable-rofiles-fuse", "--force-clean", "--repo=repo", "--state-dir=state", "build-dir", manifest], { cwd: dir, log: ctx.log, env });
       const bundle = join(ctx.outDir, `latchverify-${ctx.version}.flatpak`);
-      await run(which("flatpak")!, ["build-bundle", "repo", bundle, APP_ID], { cwd: dir, log: ctx.log, env });
+      await run(which("flatpak")!, ["build-bundle", "--runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo", "repo", bundle, APP_ID], { cwd: dir, log: ctx.log, env });
       await copyFile(manifest, join(ctx.outDir, `${APP_ID}.yml`));
       return [bundle, join(ctx.outDir, `${APP_ID}.yml`)];
     },
