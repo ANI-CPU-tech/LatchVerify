@@ -9,7 +9,7 @@ import { href } from "../lib/router";
 /** One headline number. Shows "—" until its source has loaded, never a made-up value. */
 function Metric({ label, value, link, icon, tone = "neutral" }: { label: string; value: number | null; link: string; icon: ReactNode; tone?: Tone }) {
   return (
-    <a href={link} className="group flex items-center gap-3 rounded-lg border bg-card p-3 shadow-card transition-colors hover:border-primary/50 sm:p-4">
+    <a href={link} className="group flex items-center gap-3 rounded-lg border bg-card-glass backdrop-blur-sm p-3 shadow-card transition-colors hover:border-primary/50 sm:p-4">
       <span className={`hidden text-2xl sm:inline ${tone === "neutral" ? "text-accent" : TONE_TEXT[tone]}`}>{icon}</span>
       <span className="min-w-0 flex-1">
         <span className={`block font-display text-2xl font-bold ${tone === "neutral" ? "" : TONE_TEXT[tone]}`}>{value ?? "—"}</span>

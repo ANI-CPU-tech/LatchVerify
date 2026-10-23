@@ -38,7 +38,7 @@ export function Servers() {
       {servers.length > 0 && (
         <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {servers.map((server) => (
-            <li key={server.id} className="flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-4 shadow-card">
+            <li key={server.id} className="flex min-w-0 flex-col gap-3 rounded-lg border bg-card-glass backdrop-blur-sm p-4 shadow-card">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <h2 className="min-w-0 break-all font-display text-base font-bold">{server.id}</h2>
                 <Badge tone={server.status.tone}>

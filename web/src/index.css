@@ -11,6 +11,8 @@
  * The selectors are attribute selectors, not :root only, so a theme preview in Settings can set
  * data-theme on its own element and render with that theme's real tokens.
  *
+ * surface-alpha: opacity of cards over the landscape backdrop (bg-card-glass); the lowest that
+ *          keeps every text color at AA over any art color, per tests/web/themes.test.ts.
  * primary: buttons, links, the active nav item; dark enough for AA text on background.
  * accent:  brand orange for decoration only (icons, artwork, highlights), never for body text.
  * art-*:   the pixel-art landscape (web/src/art/landscape.ts), recolored per theme; art-sky and
@@ -24,6 +26,7 @@
     --foreground: 28 22% 12%;
     --card: 40 100% 98%;
     --card-foreground: 28 22% 12%;
+    --surface-alpha: 0.92;
     --muted: 38 45% 88%;
     --muted-foreground: 28 16% 34%;
     --border: 35 35% 77%;
@@ -72,6 +75,7 @@
     --foreground: 25 35% 14%;
     --card: 48 80% 98%;
     --card-foreground: 25 35% 14%;
+    --surface-alpha: 0.88;
     --muted: 40 45% 87%;
     --muted-foreground: 26 24% 32%;
     --border: 32 30% 74%;
@@ -120,6 +124,7 @@
     --foreground: 15 35% 13%;
     --card: 30 100% 97%;
     --card-foreground: 15 35% 13%;
+    --surface-alpha: 0.9;
     --muted: 26 70% 86%;
     --muted-foreground: 16 28% 31%;
     --border: 22 50% 77%;
@@ -168,6 +173,7 @@
     --foreground: 38 45% 88%;
     --card: 28 14% 13%;
     --card-foreground: 38 45% 88%;
+    --surface-alpha: 0.95;
     --muted: 28 12% 18%;
     --muted-foreground: 35 15% 66%;
     --border: 28 12% 25%;
@@ -216,6 +222,7 @@
     --foreground: 30 8% 12%;
     --card: 0 0% 100%;
     --card-foreground: 30 8% 12%;
+    --surface-alpha: 0.82;
     --muted: 40 8% 93%;
     --muted-foreground: 30 5% 36%;
     --border: 40 8% 86%;
@@ -264,6 +271,7 @@
     --foreground: 140 25% 12%;
     --card: 48 60% 98%;
     --card-foreground: 140 25% 12%;
+    --surface-alpha: 0.84;
     --muted: 70 22% 87%;
     --muted-foreground: 90 14% 30%;
     --border: 75 18% 75%;

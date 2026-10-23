@@ -15,7 +15,8 @@ export default {
         background: token("background"),
         foreground: token("foreground"),
         muted: pair("muted"),
-        card: pair("card"),
+        // glass: cards over the landscape, see-through by the theme's --surface-alpha.
+        card: { ...pair("card"), glass: "hsl(var(--card) / var(--surface-alpha))" },
         primary: pair("primary"),
         accent: pair("accent"),
         destructive: pair("destructive"),

@@ -83,7 +83,7 @@ export function ChangeDetail({ item, actions }: { item: ReviewItem; actions?: Ch
   };
 
   return (
-    <article aria-busy={busy !== null} className="min-w-0 space-y-5 rounded-lg border bg-card p-4 shadow-card sm:p-6">
+    <article aria-busy={busy !== null} className="min-w-0 space-y-5 rounded-lg border bg-card-glass backdrop-blur-sm p-4 shadow-card sm:p-6">
       <header className="space-y-1">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h2 className="min-w-0 break-all font-display text-lg font-bold">

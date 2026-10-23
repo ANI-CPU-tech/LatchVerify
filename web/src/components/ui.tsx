@@ -85,7 +85,7 @@ export function Panel({
   bodyClassName?: string;
 }) {
   return (
-    <section className={`min-w-0 rounded-lg border bg-card text-card-foreground shadow-card ${className}`}>
+    <section className={`min-w-0 rounded-lg border bg-card-glass backdrop-blur-sm text-card-foreground shadow-card ${className}`}>
       {title && (
         <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <h2 className="flex min-w-0 items-center gap-2 font-display text-sm font-bold">

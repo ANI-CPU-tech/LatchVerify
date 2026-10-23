@@ -106,6 +106,18 @@ describe("theme tokens in index.css", () => {
         expect(contrast(color(status), blend(color(status), color("card"), 0.1))).toBeGreaterThanOrEqual(4.5);
       });
 
+      it("keeps text on glass cards at 4.5:1 over every color of the landscape backdrop", () => {
+        const alpha = Number(blocks.get(id)!.get("surface-alpha"));
+        expect(alpha).toBeGreaterThan(0);
+        expect(alpha).toBeLessThanOrEqual(1);
+        const behind = [...blocks.get(id)!.keys()].filter((name) => name.startsWith("art-")).concat("background");
+        for (const text of ["foreground", "card-foreground", "muted-foreground", "primary", "destructive", "warning", "success", "info"]) {
+          for (const art of behind) {
+            expect(contrast(color(text), blend(color("card"), color(art), alpha)), `${text} over ${art}`).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+      });
+
       it("has a focus ring that stands out from background and card (3:1)", () => {
         expect(contrast(color("ring"), color("background"))).toBeGreaterThanOrEqual(3);
         expect(contrast(color("ring"), color("card"))).toBeGreaterThanOrEqual(3);
