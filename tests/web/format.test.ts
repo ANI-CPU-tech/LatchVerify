@@ -168,6 +168,8 @@ describe("router", () => {
     ["#/tools/my%20server", { page: "tools", server: "my server" }],
     ["#/audit", { page: "audit" }],
     ["#/git-ci", { page: "ci" }],
+    ["#/simulation", { page: "simulation" }],
+    ["#/simulation/x", { page: "not-found", path: "/simulation/x" }],
     ["#/settings", { page: "settings" }],
     ["#/nope", { page: "not-found", path: "/nope" }],
     ["#/settings/extra", { page: "not-found", path: "/settings/extra" }],
@@ -186,6 +188,7 @@ describe("router", () => {
       { page: "tools", server: "weather" },
       { page: "audit" },
       { page: "ci" },
+      { page: "simulation" },
       { page: "settings" },
     ] as const) {
       expect(parseRoute(href(route))).toEqual(route);

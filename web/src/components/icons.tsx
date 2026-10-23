@@ -135,3 +135,10 @@ export const TerminalIcon = (p: P) => (
     <path d="m7 9 3 3-3 3M13 15h4" />
   </Icon>
 );
+
+/** A flask: the Simulation tab. */
+export const FlaskIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M9 3h6M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9" />
+  </Icon>
+);

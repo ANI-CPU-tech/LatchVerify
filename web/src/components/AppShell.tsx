@@ -4,7 +4,7 @@ import { useData } from "../lib/data";
 import { useTheme } from "../lib/theme";
 import { sceneFor } from "../lib/themes";
 import { href, type Page } from "../lib/router";
-import { GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
+import { FlaskIcon, GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
 
 export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon: ReactNode; href: string }> = [
@@ -14,6 +14,7 @@ export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon:
   { page: "tools", label: "Approved Tools", icon: <ToolCheckIcon />, href: href({ page: "tools", server: null }) },
   { page: "audit", label: "Audit Log", icon: <LogIcon />, href: href({ page: "audit" }) },
   { page: "ci", label: "Git & CI", icon: <GitIcon />, href: href({ page: "ci" }) },
+  { page: "simulation", label: "Simulation", icon: <FlaskIcon />, href: href({ page: "simulation" }) },
   { page: "settings", label: "Settings", icon: <SettingsIcon />, href: href({ page: "settings" }) },
 ];
 
