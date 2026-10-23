@@ -60,7 +60,13 @@ export interface ServerReport {
   tools: ToolReport[];
 }
 
+/** Format version of the --json report; bumped on incompatible changes. */
+export const VERIFY_REPORT_VERSION = 1;
+
+/** The --json report. Strings are as the servers sent them; JSON escaping keeps them inert. */
 export interface VerifyReport {
+  version: typeof VERIFY_REPORT_VERSION;
+  /** Absolute path of the lockfile checked. */
   lockfile: string;
   status: VerifyStatus;
   exitCode: number;
@@ -79,17 +85,27 @@ export interface VerifyReport {
  * spoke invalid JSON-RPC (or uses a transport other than stdio), and "ok" otherwise: tier 0/1
  * changes and tools removed from the server pass. The exit code is that of the worst server
  * (VERIFY_EXIT); a missing or invalid lockfile is an error, so CI can never pass vacuously.
+ *
+ * With `json`, the output is exactly one VerifyReport document; the servers' own stderr still
+ * goes to stderr.
  */
 export async function runVerify(options: VerifyOptions): Promise<number> {
   const report = await buildReport(options);
   const output = options.output ?? process.stdout;
-  output.write(renderText(report));
+  output.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : renderText(report));
   return report.exitCode;
 }
 
 async function buildReport(options: VerifyOptions): Promise<VerifyReport> {
   const lockfile = resolve(options.lockfilePath);
-  const failed = (error: string): VerifyReport => ({ lockfile, status: "error", exitCode: VERIFY_EXIT.error, error, servers: [] });
+  const failed = (error: string): VerifyReport => ({
+    version: VERIFY_REPORT_VERSION,
+    lockfile,
+    status: "error",
+    exitCode: VERIFY_EXIT.error,
+    error,
+    servers: [],
+  });
 
   let lock: LockFile;
   try {
@@ -107,7 +123,7 @@ async function buildReport(options: VerifyOptions): Promise<VerifyReport> {
     servers.push(await verifyServer(lock, serverId, lock.servers[serverId]!, options.timeoutMs));
   }
   const status = servers.reduce<VerifyStatus>((worst, server) => (EXIT_FOR[server.status] > EXIT_FOR[worst] ? server.status : worst), "ok");
-  return { lockfile, status, exitCode: EXIT_FOR[status], servers };
+  return { version: VERIFY_REPORT_VERSION, lockfile, status, exitCode: EXIT_FOR[status], servers };
 }
 
 async function verifyServer(lock: LockFile, serverId: string, server: ServerEntry, timeoutMs: number | undefined): Promise<ServerReport> {

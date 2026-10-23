@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { VERIFY_EXIT, printable, runVerify } from "../../src/commands/verify.js";
+import { VERIFY_EXIT, VERIFY_REPORT_VERSION, printable, runVerify, type VerifyReport } from "../../src/commands/verify.js";
 import { LockFileSchema, type LockFile, type ServerEntry } from "../../src/schema/index.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -56,12 +56,18 @@ async function lockfile(weather: Pick<ServerEntry, "command" | "args">, extra: R
 }
 
 /** Run verify and return its exit code and text, without ANSI colours. */
-async function verify(lockfilePath: string) {
+async function verify(lockfilePath: string, json = false) {
   const output = new PassThrough();
   let text = "";
   output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
-  const code = await runVerify({ lockfilePath, json: false, output, timeoutMs: 20_000 });
+  const code = await runVerify({ lockfilePath, json, output, timeoutMs: 20_000 });
   return { code, text: text.replace(/\x1b\[[0-9;]*m/g, "") };
+}
+
+/** Run verify --json and return its exit code and parsed report. */
+async function verifyJson(lockfilePath: string): Promise<{ code: number; report: VerifyReport; text: string }> {
+  const { code, text } = await verify(lockfilePath, true);
+  return { code, report: JSON.parse(text) as VerifyReport, text };
 }
 
 describe("runVerify", () => {
@@ -163,5 +169,77 @@ describe("printable", () => {
   it("escapes control and format characters but keeps other Unicode", () => {
     expect(printable("café 😀 ok")).toBe("café 😀 ok");
     expect(printable("a\u0000b\nc​d e\u{e0068}")).toBe("a[U+0000]b[U+000A]c[U+200B]d[U+2028]e[U+E0068]");
+  });
+});
+
+describe("runVerify --json", () => {
+  it("reports a clean run as one JSON document", async () => {
+    const path = await lockfile(demo("weather-server.ts"));
+    const { code, report, text } = await verifyJson(path);
+    expect(code).toBe(0);
+    expect(text.endsWith("}\n")).toBe(true);
+    expect(report).toEqual({
+      version: VERIFY_REPORT_VERSION,
+      lockfile: path,
+      status: "ok",
+      exitCode: 0,
+      servers: [
+        {
+          serverId: "weather",
+          command: process.execPath,
+          args: demo("weather-server.ts").args,
+          status: "ok",
+          specVersion: "2025-06-18",
+          tools: [
+            { name: "get_alerts", status: "unchanged" },
+            { name: "get_forecast", status: "unchanged" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("carries tiers, reasons, deltas and findings for a hard block", async () => {
+    vi.stubEnv("DEMO_MUTATE", "1");
+    const { code, report } = await verifyJson(await lockfile(demo("evil-server.ts")));
+    expect(code).toBe(2);
+    expect(report.status).toBe("hard_block");
+    expect(report.exitCode).toBe(2);
+    const tools = report.servers[0]!.tools;
+    expect(tools.map((t) => [t.name, t.status, t.tier])).toEqual([
+      ["get_forecast", "changed", 3],
+      ["read_config", "new", 2],
+      ["run_diagnostics", "new", 3],
+      ["sync_alerts", "new", 3],
+      ["get_alerts", "removed", undefined],
+    ]);
+    const forecast = tools[0]!;
+    expect(forecast.reason).toMatch(/^Critical pattern finding/);
+    // latch.lock.example pins a domain the fixture cannot derive (PERSON1_HANDOFF.md, follow-up 4).
+    expect(forecast.capabilityDelta).toEqual({ gained: [], lost: ["network.domains:api.weather.gov"], loosened: [] });
+    expect(forecast.findings!.some((f) => f.severity === "critical" && f.evidence.includes("~/.ssh/id_rsa"))).toBe(true);
+  });
+
+  it("reports a server error and a lockfile error in JSON too", async () => {
+    const broken = await verifyJson(await lockfile({ command: "latch-no-such-binary-for-test", args: [] }));
+    expect(broken.code).toBe(3);
+    expect(broken.report.servers[0]).toMatchObject({ status: "error", error: expect.stringMatching(/^could not start /), tools: [] });
+
+    const missing = join(dir, "missing.lock");
+    expect((await verifyJson(missing)).report).toEqual({
+      version: VERIFY_REPORT_VERSION,
+      lockfile: missing,
+      status: "error",
+      exitCode: 3,
+      error: `no lockfile at ${missing}; run \`latch init\` to create one`,
+      servers: [],
+    });
+  });
+
+  it("keeps a server's strings verbatim, escaped only by JSON", async () => {
+    const hostile = { name: "evil\u001b[2Jtool", description: "x", inputSchema: { type: "object" } };
+    const { report, text } = await verifyJson(await lockfile(listing([...benignTools, hostile])));
+    expect(text).not.toContain("\u001b");
+    expect(report.servers[0]!.tools[0]!.name).toBe("evil\u001b[2Jtool");
   });
 });
