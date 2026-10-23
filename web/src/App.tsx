@@ -6,6 +6,7 @@ import { href, type Route } from "./lib/router";
 import { useRoute } from "./lib/useRoute";
 import { ThemeProvider } from "./lib/theme";
 import { Audit } from "./pages/Audit";
+import { Build } from "./pages/Build";
 import { GitCi } from "./pages/GitCi";
 import { Overview } from "./pages/Overview";
 import { Review } from "./pages/Review";
@@ -29,6 +30,8 @@ function Page({ route }: { route: Route }) {
       return <GitCi />;
     case "settings":
       return <Settings />;
+    case "build":
+      return <Build jobId={route.job} />;
     case "not-found":
       return (
         <Panel>

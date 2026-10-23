@@ -10,6 +10,7 @@ export type Route =
   | { page: "audit" }
   | { page: "ci" }
   | { page: "settings" }
+  | { page: "build"; job: string | null }
   | { page: "not-found"; path: string };
 
 export type Page = Route["page"];
@@ -22,6 +23,7 @@ const SEGMENTS: Record<string, Page> = {
   audit: "audit",
   "git-ci": "ci",
   settings: "settings",
+  build: "build",
 };
 
 const decode = (part: string | undefined): string | null => {
@@ -41,6 +43,7 @@ export function parseRoute(hash: string): Route {
   if (page === undefined || rest.length > 0) return { page: "not-found", path: `/${path}` };
   if (page === "review") return { page, id: decode(param) };
   if (page === "tools") return { page, server: decode(param) };
+  if (page === "build") return { page, job: decode(param) };
   if (param !== undefined && param !== "") return { page: "not-found", path: `/${path}` };
   return { page } as Route;
 }
@@ -48,6 +51,6 @@ export function parseRoute(hash: string): Route {
 /** The href for a route. */
 export function href(route: Exclude<Route, { page: "not-found" }>): string {
   const head = Object.keys(SEGMENTS).find((key) => SEGMENTS[key] === route.page)!;
-  const param = route.page === "review" ? route.id : route.page === "tools" ? route.server : null;
+  const param = route.page === "review" ? route.id : route.page === "tools" ? route.server : route.page === "build" ? route.job : null;
   return `#/${head}${param ? `/${encodeURIComponent(param)}` : ""}`;
 }
