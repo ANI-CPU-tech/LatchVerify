@@ -191,7 +191,8 @@ async function onOwnToolList(ctx: InterceptorContext, response: JsonRpcResponse,
  * Runs analyzeToolList over the result and records the outcome. For a server latch.lock does
  * not have, nothing is queued and a `latch init` hint is logged. Otherwise every new or changed tool is
  * queued (tier 0 and 1 too, so `latch review` can fold them into the lockfile; the blocker lets
- * them through), logged as change_detected, and tier 0/1 also as auto_passed. A definition
+ * them through), logged as change_detected, and tier 0/1 also as auto_passed, except a new tool,
+ * which stays blocked as unpinned until approved. A definition
  * already queued or already seen this session is not queued again, so repeated lists do not
  * churn change ids. A tool back at its pinned definition leaves ctx.observed, but its queued
  * change stays for review: the server did serve that definition.
@@ -244,7 +245,10 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
     ctx.pending = enqueue(ctx.pending, change);
     added.push(detected);
     events.push({ kind: "change_detected", at, serverId, toolName, tier, changeId: change.id });
-    if (isAutoPass(tier)) {
+    if (change.before === null && isAutoPass(tier)) {
+      // The blocker holds every unpinned tool whatever its tier, so this is no auto-pass.
+      ctx.log(`${serverId}/${toolName}: new tool blocked until approved: ${reason}`);
+    } else if (isAutoPass(tier)) {
       events.push({ kind: "auto_passed", at, serverId, toolName, tier });
       ctx.log(`${serverId}/${toolName}: tier ${tier} change auto-passed: ${reason}`);
     } else {

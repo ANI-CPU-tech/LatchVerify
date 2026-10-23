@@ -212,6 +212,17 @@ describe("onToolsList", () => {
     expect(logs).toEqual([expect.stringMatching(/^weather\/get_forecast: tier 0 change auto-passed: Text changed/)]);
   });
 
+  it("does not log a new low-tier tool as auto-passed: it stays blocked until approved", async () => {
+    const { listTools, fromClient, ctx, kinds, logs } = await setup();
+    await listTools([...benign, { name: "ping", description: "Check the server is up.", inputSchema: { type: "object" } }]);
+    const [change] = ctx.pending;
+    expect(change).toMatchObject({ toolName: "ping", before: null });
+    expect(change!.tier).toBeLessThan(2);
+    expect(await kinds()).toEqual(["tools_listed", "change_detected"]);
+    expect(logs).toEqual([expect.stringMatching(/^weather\/ping: new tool blocked until approved: /)]);
+    expect(await fromClient(call(4, "ping"))).toMatchObject({ message: { error: { data: { reason: { kind: "unpinned" } } } } });
+  });
+
   it("re-reads the lockfile and queue before analyzing", async () => {
     const order: string[] = [];
     const { listTools, ctx } = await setup({
