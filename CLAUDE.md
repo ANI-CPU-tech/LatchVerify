@@ -135,6 +135,10 @@ shows the last `tools_listed` event instead.
   is for decoration only.
 - The preference ("system" or a theme id) is stored in `localStorage` under
   `latch.theme`, with every access wrapped in try/catch.
+- Card opacity (Settings > Card transparency) is a second preference, `latch.surface`, from
+  0 to 1 (`lib/surface.ts`). `ThemeProvider` sets it as `--surface-mix` on `<html>`, and
+  `bg-card-glass` raises the theme's `--surface-alpha` floor by that much toward solid, so
+  it can only add opacity. `tests/web/themes.test.ts` checks text contrast at every step.
 
 **Artwork.** `web/src/art/landscape.ts` generates an original pixel-art landscape from
 seeded noise: a setting sun with dithered afterglow, clouds, a hazy distant range, a snowy
@@ -158,7 +162,8 @@ behind content. Cards over it use `bg-card-glass`: see-through by the theme's
 `--surface-alpha`, which `tests/web/themes.test.ts` holds to 4.5:1 for text over any art color.
 Text outside a card is not covered by that test; keep page headings near the top, where the
 sky is plain. The favicon,
-`web/public/favicon.svg`, is a 16x16 pixel-art padlock with a sunset.
+`web/public/favicon.svg`, is a 16x16 pixel-art padlock with a sunset; the page header shows it
+next to the name, with a foreground glow so its dark outline reads on dark themes.
 
 ## Build order (as built)
 
