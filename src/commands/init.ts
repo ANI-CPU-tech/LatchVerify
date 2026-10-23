@@ -1,8 +1,27 @@
-import { unwrapProxy, wrapWithProxy, type ClientConfig, type ClientId, type ClientServerEntry } from "../config/clients.js";
+import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { delimiter, dirname, join, resolve } from "node:path";
+import type { Writable } from "node:stream";
+import { isDeepStrictEqual } from "node:util";
+import pc from "picocolors";
+import {
+  PROXY_COMMAND,
+  SUPPORTED_CLIENTS,
+  clientConfigPath,
+  detectClients,
+  unwrapProxy,
+  wrapWithProxy,
+  writeClientConfig,
+  type ClientConfig,
+  type ClientId,
+  type ClientServerEntry,
+} from "../config/clients.js";
 import { analyzeToolList } from "../proxy/analysis.js";
 import { captureTools } from "../proxy/capture.js";
 import type { LockFile } from "../schema/index.js";
-import { applyApproval } from "../store/lockfile.js";
+import { applyApproval, readLockfile, serializeLockfile, writeLockfile } from "../store/lockfile.js";
+import { defaultReviewer } from "../ui/server.js";
+import { plural, printable } from "./text.js";
 
 export interface InitOptions {
   /** Restrict to one client; default is every detected client. */
@@ -10,6 +29,12 @@ export interface InitOptions {
   /** Print the planned config rewrites without writing anything. */
   dryRun: boolean;
   lockfilePath: string;
+  /** Who the pins are recorded as. Defaults to defaultReviewer(): LATCH_REVIEWER, git user.email, OS user. */
+  reviewer?: string;
+  /** Deadline for capturing each server's tools. Defaults to DEFAULT_CAPTURE_TIMEOUT_MS. */
+  timeoutMs?: number;
+  /** Where progress is written. Defaults to process.stdout. */
+  output?: Writable;
 }
 
 /** One server latch init can wrap, as configured in one or more clients. */
@@ -162,12 +187,163 @@ function stringEnv(env: unknown): Record<string, string> {
 }
 
 /**
- * `latch init`
- * TODO: detectClients(), let the user pick servers with @clack/prompts multiselect, rewrite each
- * chosen entry with wrapWithProxy() (backing up the original config), capture each server's
- * tools/list once, and write an initial latch.lock with every tool pinned under the current git
- * user. Resolves with the process exit code.
+ * `latch init`: put the MCP servers in this machine's client configs behind latch.
+ *
+ * 1. Reads latch.lock (a malformed one stops init before anything changes) and detects client
+ *    configs, or only `client`'s.
+ * 2. Collects their stdio servers (collectServers) and pins each server latch.lock does not have
+ *    yet (pinServer), under the reviewer. A server already in latch.lock is left as pinned:
+ *    changes to it go through `latch review`, never through a re-run of init.
+ * 3. Writes latch.lock, then rewrites each client entry to run `latch proxy`, with
+ *    LATCH_LOCKFILE_PATH and LATCH_STATE_DIR in its env so the proxy finds this lockfile and
+ *    <lockfile dir>/.latch whatever directory the client starts it in. Each rewritten config
+ *    keeps a timestamped .bak copy. The lockfile goes first: a config is only ever wrapped
+ *    around pins that exist.
+ *
+ * A server whose tools cannot be captured is reported and neither pinned nor wrapped. Running
+ * init again changes nothing. With `dryRun`, servers are still queried to show what would be
+ * pinned, but nothing is written.
+ *
+ * Resolves with 0 when every server was handled, 1 when no client config was found or any
+ * server was skipped or failed.
+ *
+ * @throws LockfileError when latch.lock exists but is malformed.
  */
 export async function runInit(options: InitOptions): Promise<number> {
-  throw new Error("not implemented");
+  const out = options.output ?? process.stdout;
+  const say = (line = "") => void out.write(`${line}\n`);
+  const lockfilePath = resolve(options.lockfilePath);
+  const stateDir = join(dirname(lockfilePath), ".latch");
+  const verb = (done: string, planned: string) => (options.dryRun ? planned : done);
+
+  const lock = await readLockfile(lockfilePath);
+  const configs = (await detectClients()).filter((config) => options.client === undefined || config.client === options.client);
+  if (configs.length === 0) {
+    say(pc.red(`✖ no MCP client config found${options.client === undefined ? "" : ` for ${options.client}`}. Looked in:`));
+    for (const client of options.client === undefined ? SUPPORTED_CLIENTS : [options.client]) {
+      say(`  ${client}: ${printable(clientConfigPath(client))}`);
+    }
+    return 1;
+  }
+
+  say(pc.bold(`latch init: ${printable(lockfilePath)}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
+  for (const config of configs) {
+    say(`  found ${config.client}: ${printable(config.path)} (${plural(Object.keys(config.servers).length, "stdio server")})`);
+  }
+  const { servers, skipped } = collectServers(configs);
+  let failed = skipped.length > 0;
+  for (const skip of skipped) say(pc.yellow(`! skipping ${printable(skip.serverId)} (${skip.clients.join(", ")}): ${printable(skip.reason)}`));
+  if (servers.length === 0) {
+    say(failed ? pc.red("✖ no server can be wrapped") : "nothing to wrap: the configs have no stdio servers");
+    return failed ? 1 : 0;
+  }
+
+  const reviewer = options.reviewer ?? defaultReviewer();
+  const now = new Date();
+  let next = lock;
+  const ready: InitServer[] = [];
+  say();
+  for (const server of servers) {
+    const id = printable(server.serverId);
+    const existing = Object.hasOwn(next.servers, server.serverId) ? next.servers[server.serverId]! : undefined;
+    if (existing !== undefined) {
+      if (existing.transport === "stdio" && existing.command === server.command && isDeepStrictEqual(existing.args, server.args)) {
+        say(`${pc.green("✔")} ${id}: already in latch.lock (${plural(existing.tools.length, "tool")}); changes go through \`latch review\``);
+        ready.push(server);
+      } else {
+        say(pc.red(`✖ ${id}: latch.lock launches it as ${commandLine(existing.command, existing.args)}, but the client runs ${commandLine(server.command, server.args)}; left unchanged`));
+        failed = true;
+      }
+      continue;
+    }
+    try {
+      const outcome = await pinServer(server, next, reviewer, now, options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs });
+      next = outcome.lock;
+      ready.push(server);
+      const names = outcome.pinned.length > 0 ? `: ${printable(outcome.pinned.join(", "))}` : "";
+      say(`${pc.green("✔")} ${id}: ${verb("pinned", "would pin")} ${plural(outcome.pinned.length, "tool")}${names}`);
+      for (const held of outcome.held) {
+        say(pc.yellow(`  ! ${printable(held.name)} ${verb("held back", "would be held back")} for \`latch review\`: ${printable(held.reason)}`));
+      }
+    } catch (error) {
+      say(pc.red(`✖ ${id}: ${printable(error instanceof Error ? error.message : String(error))}; not pinned or wrapped`));
+      failed = true;
+    }
+  }
+
+  const rewrites = planRewrites(configs, ready, lockfilePath, stateDir);
+  const lockChanged = serializeLockfile(next) !== serializeLockfile(lock);
+  say();
+  if (options.dryRun) {
+    if (lockChanged) say(`would write ${printable(lockfilePath)} with ${plural(Object.keys(next.servers).length, "server")}`);
+    for (const { config, servers: entries } of rewrites) {
+      say(`would rewrite ${printable(config.path)}, keeping a .bak copy:`);
+      for (const [serverId, entry] of Object.entries(entries)) {
+        say(`  ${printable(serverId)}: ${commandLine(entry.command, entry.args ?? [])}`);
+      }
+    }
+    if (!lockChanged && rewrites.length === 0) say("nothing to change");
+    return failed ? 1 : 0;
+  }
+
+  if (lockChanged) {
+    await mkdir(dirname(lockfilePath), { recursive: true });
+    await writeLockfile(lockfilePath, next);
+    say(`${pc.green("✔")} wrote ${printable(lockfilePath)}`);
+  }
+  for (const { config, servers: entries } of rewrites) {
+    try {
+      await writeClientConfig({ ...config, servers: entries });
+      say(`${pc.green("✔")} wrapped ${plural(Object.keys(entries).length, "server")} in ${printable(config.path)} (the original is kept as a .bak copy)`);
+    } catch (error) {
+      say(pc.red(`✖ could not rewrite ${printable(config.path)}: ${printable(error instanceof Error ? error.message : String(error))}`));
+      failed = true;
+    }
+  }
+  if (!lockChanged && rewrites.length === 0) say("nothing to change");
+
+  if (rewrites.length > 0 && !onPath(PROXY_COMMAND)) {
+    say(pc.yellow(`! \`${PROXY_COMMAND}\` is not on PATH, so clients cannot start the wrapped servers; run \`pnpm link --global\` in the latchverify checkout`));
+  }
+  if (lockChanged) say(`next: commit ${printable(lockfilePath)} so the pins are reviewed like code`);
+  if (rewrites.length > 0) say(`next: restart ${[...new Set(rewrites.map((r) => r.config.client))].join(", ")} to start the wrapped servers`);
+  return failed ? 1 : 0;
+}
+
+/**
+ * Per client config, the entries to write: each ready server it configures, wrapped with
+ * `latch proxy` and given LATCH_LOCKFILE_PATH and LATCH_STATE_DIR. Entries already in that state
+ * are left out, and configs with nothing left are dropped, which makes a second init a no-op.
+ */
+function planRewrites(
+  configs: readonly ClientConfig[],
+  ready: readonly InitServer[],
+  lockfilePath: string,
+  stateDir: string,
+): Array<{ config: ClientConfig; servers: Record<string, ClientServerEntry> }> {
+  return configs.flatMap((config) => {
+    const entries: Array<[string, ClientServerEntry]> = [];
+    for (const server of ready) {
+      if (!server.clients.includes(config.client)) continue;
+      const current = config.servers[server.serverId]!;
+      const wrapped = wrapWithProxy(server.serverId, current);
+      const env = typeof wrapped.env === "object" && wrapped.env !== null ? wrapped.env : {};
+      const target: ClientServerEntry = { ...wrapped, env: { ...env, LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: stateDir } };
+      if (!isDeepStrictEqual(target, current)) entries.push([server.serverId, target]);
+    }
+    return entries.length > 0 ? [{ config, servers: Object.fromEntries(entries) }] : [];
+  });
+}
+
+function commandLine(command: string, args: readonly string[]): string {
+  return printable([command, ...args].join(" "));
+}
+
+/** True when an executable named `command` is in a PATH directory. */
+function onPath(command: string): boolean {
+  const names = process.platform === "win32" ? [`${command}.cmd`, `${command}.exe`, command] : [command];
+  return (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter((dir) => dir !== "")
+    .some((dir) => names.some((name) => existsSync(join(dir, name))));
 }

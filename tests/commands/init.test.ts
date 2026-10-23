@@ -1,14 +1,17 @@
 import { readFileSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { PassThrough } from "node:stream";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashTool } from "../../src/analyze/hash.js";
-import { collectServers, pinServer, type InitServer } from "../../src/commands/init.js";
+import { collectServers, pinServer, runInit, type InitOptions, type InitServer } from "../../src/commands/init.js";
 import { CaptureError } from "../../src/proxy/capture.js";
 import { LockFileSchema, type LockFile, type McpTool } from "../../src/schema/index.js";
-import { emptyLockfile } from "../../src/store/lockfile.js";
-import { wrapWithProxy, type ClientConfig, type ClientId, type ClientServerEntry } from "../../src/config/clients.js";
+import { LockfileError, emptyLockfile } from "../../src/store/lockfile.js";
+import { clientConfigPath, wrapWithProxy, type ClientConfig, type ClientId, type ClientServerEntry } from "../../src/config/clients.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 // Absolute, so children started outside the repo still find tsx.
@@ -205,5 +208,209 @@ describe("pinServer", () => {
   it("passes capture failures through", async () => {
     const server = { ...listing("broken", []), command: "latch-no-such-binary-for-test", args: [] };
     await expect(pinServer(server, emptyLockfile(), "dev@example.com", now)).rejects.toBeInstanceOf(CaptureError);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("runInit", () => {
+  let home: string;
+  let lockfilePath: string;
+  const weatherEntry = { command: process.execPath, args: ["--import", tsx, join(root, "demo/weather-server.ts")] };
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), "latch-init-"));
+    lockfilePath = join(home, "repo", "latch.lock");
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("XDG_CONFIG_HOME", undefined);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await rm(home, { recursive: true, force: true });
+  });
+
+  async function writeConfig(client: ClientId, contents: unknown): Promise<string> {
+    const path = clientConfigPath(client);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(contents, null, 2));
+    return path;
+  }
+
+  /** Run init and return its exit code and output, without ANSI colours. */
+  async function init(options: Partial<InitOptions> = {}) {
+    const output = new PassThrough();
+    let text = "";
+    output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+    const code = await runInit({ dryRun: false, lockfilePath, reviewer: "dev@example.com", timeoutMs: 20_000, output, ...options });
+    return { code, text: text.replace(/\x1b\[[0-9;]*m/g, "") };
+  }
+
+  const files = async (path: string) => (await readdir(dirname(path))).sort();
+  const lockOnDisk = async () => LockFileSchema.parse(JSON.parse(await readFile(lockfilePath, "utf8")));
+  const expectedEntry = (entry: ClientServerEntry, serverId = "weather") => ({
+    ...wrapWithProxy(serverId, entry),
+    env: { ...entry.env, LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: join(home, "repo", ".latch") },
+  });
+
+  it("dry run plans everything and writes nothing (task Verify)", async () => {
+    const config = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry }, other: 1 });
+    const before = await readFile(config, "utf8");
+    const { code, text } = await init({ client: "claude-desktop", dryRun: true });
+    expect(code).toBe(0);
+    expect(text).toContain("(dry run: nothing is written)");
+    expect(text).toContain("✔ weather: would pin 2 tools: get_forecast, get_alerts");
+    expect(text).toContain(`would write ${lockfilePath} with 1 server`);
+    expect(text).toContain(`would rewrite ${config}, keeping a .bak copy:`);
+    expect(text).toContain("  weather: latch proxy --server weather -- ");
+    expect(await readFile(config, "utf8")).toBe(before);
+    expect(await files(config)).toEqual(["claude_desktop_config.json"]);
+    await expect(readdir(join(home, "repo"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("wraps the server, keeps other keys and a .bak, and pins every tool (task Verify)", async () => {
+    const config = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry }, other: 1 });
+    const before = await readFile(config, "utf8");
+    const { code, text } = await init({ client: "claude-desktop" });
+    expect(code).toBe(0);
+    expect(text).toContain("✔ weather: pinned 2 tools: get_forecast, get_alerts");
+    expect(text).toContain(`✔ wrote ${lockfilePath}`);
+    expect(text).toContain(`next: commit ${lockfilePath}`);
+    expect(text).toContain("next: restart claude-desktop");
+
+    expect(JSON.parse(await readFile(config, "utf8"))).toEqual({ mcpServers: { weather: expectedEntry(weatherEntry) }, other: 1 });
+    const [, backup] = await files(config);
+    expect(backup).toMatch(/^claude_desktop_config\.json\..+\.bak$/);
+    expect(await readFile(join(dirname(config), backup!), "utf8")).toBe(before);
+
+    const lock = await lockOnDisk();
+    expect(lock.servers.weather!).toMatchObject({ transport: "stdio", command: weatherEntry.command, args: weatherEntry.args });
+    expect(lock.servers.weather!.tools.map((t) => [t.name, t.approvedBy])).toEqual([
+      ["get_alerts", "dev@example.com"],
+      ["get_forecast", "dev@example.com"],
+    ]);
+  });
+
+  it("changes nothing when run a second time (task Verify)", async () => {
+    const config = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry }, other: 1 });
+    await init();
+    const [configAfter, lockAfter, filesAfter] = [await readFile(config, "utf8"), await readFile(lockfilePath, "utf8"), await files(config)];
+    const { code, text } = await init();
+    expect(code).toBe(0);
+    expect(text).toContain("✔ weather: already in latch.lock (2 tools); changes go through `latch review`");
+    expect(text).toContain("nothing to change");
+    expect(await readFile(config, "utf8")).toBe(configAfter);
+    expect(await readFile(lockfilePath, "utf8")).toBe(lockAfter);
+    expect(await files(config)).toEqual(filesAfter);
+  });
+
+  it("wraps a server configured in several clients and pins it once", async () => {
+    const desktop = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry } });
+    const vscodeEntry = { type: "stdio", ...weatherEntry };
+    const vscode = await writeConfig("vscode", { servers: { weather: vscodeEntry }, inputs: [] });
+    const { code } = await init();
+    expect(code).toBe(0);
+    expect(Object.keys((await lockOnDisk()).servers)).toEqual(["weather"]);
+    expect(JSON.parse(await readFile(desktop, "utf8")).mcpServers.weather).toEqual(expectedEntry(weatherEntry));
+    expect(JSON.parse(await readFile(vscode, "utf8"))).toEqual({ servers: { weather: expectedEntry(vscodeEntry) }, inputs: [] });
+  });
+
+  it("only touches the client named with --client", async () => {
+    const desktop = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry } });
+    const cursor = await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
+    const cursorBefore = await readFile(cursor, "utf8");
+    await init({ client: "claude-desktop" });
+    expect(JSON.parse(await readFile(desktop, "utf8")).mcpServers.weather.command).toBe("latch");
+    expect(await readFile(cursor, "utf8")).toBe(cursorBefore);
+  });
+
+  it("wraps a new client's entry for a server latch.lock already pins, without re-pinning it", async () => {
+    await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry } });
+    await init();
+    const lockBefore = await readFile(lockfilePath, "utf8");
+    const cursor = await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
+    const { code } = await init();
+    expect(code).toBe(0);
+    expect(await readFile(lockfilePath, "utf8")).toBe(lockBefore);
+    expect(JSON.parse(await readFile(cursor, "utf8")).mcpServers.weather).toEqual(expectedEntry(weatherEntry));
+  });
+
+  it("holds back poisoned tools but still wraps their server", async () => {
+    const evil = { command: process.execPath, args: ["--import", tsx, join(root, "demo/evil-server.ts")], env: { DEMO_MUTATE: "1" } };
+    const config = await writeConfig("cursor", { mcpServers: { weather: evil } });
+    const { code, text } = await init();
+    expect(code).toBe(0);
+    expect(text).toContain("✔ weather: pinned 1 tool: read_config");
+    expect(text).toMatch(/! get_forecast held back for `latch review`: Critical pattern finding/);
+    expect((await lockOnDisk()).servers.weather!.tools.map((t) => t.name)).toEqual(["read_config"]);
+    expect(JSON.parse(await readFile(config, "utf8")).mcpServers.weather).toEqual(expectedEntry(evil));
+  });
+
+  it("neither pins nor wraps a server whose tools cannot be captured, and exits 1", async () => {
+    const broken = { command: "latch-no-such-binary-for-test", args: [] };
+    const config = await writeConfig("cursor", { mcpServers: { broken, weather: weatherEntry } });
+    const { code, text } = await init();
+    expect(code).toBe(1);
+    expect(text).toContain("✖ broken: could not start latch-no-such-binary-for-test");
+    expect(text).toContain("not pinned or wrapped");
+    const written = JSON.parse(await readFile(config, "utf8")).mcpServers;
+    expect(written.broken).toEqual(broken);
+    expect(written.weather.command).toBe("latch");
+    expect(Object.keys((await lockOnDisk()).servers)).toEqual(["weather"]);
+  });
+
+  it("leaves a server alone when latch.lock launches it differently", async () => {
+    const lock = example();
+    lock.servers.weather!.command = "something-else";
+    await mkdir(dirname(lockfilePath), { recursive: true });
+    await writeFile(lockfilePath, JSON.stringify(lock));
+    const config = await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
+    const before = await readFile(config, "utf8");
+    const { code, text } = await init();
+    expect(code).toBe(1);
+    expect(text).toMatch(/✖ weather: latch\.lock launches it as something-else tsx demo\/weather-server\.ts, but the client runs .*; left unchanged/);
+    expect(await readFile(config, "utf8")).toBe(before);
+  });
+
+  it("stops before changing anything when latch.lock is malformed", async () => {
+    await mkdir(dirname(lockfilePath), { recursive: true });
+    await writeFile(lockfilePath, "{ nope");
+    const config = await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
+    const before = await readFile(config, "utf8");
+    await expect(init()).rejects.toBeInstanceOf(LockfileError);
+    expect(await readFile(config, "utf8")).toBe(before);
+    expect(await files(config)).toEqual(["mcp.json"]);
+  });
+
+  it("exits 1 and lists where it looked when no client config exists", async () => {
+    const { code, text } = await init();
+    expect(code).toBe(1);
+    expect(text).toContain("✖ no MCP client config found. Looked in:");
+    expect(text).toContain(`  cursor: ${clientConfigPath("cursor")}`);
+    const one = await init({ client: "vscode" });
+    expect(one.text).toContain("✖ no MCP client config found for vscode. Looked in:");
+    expect(one.text).not.toContain("cursor:");
+  });
+
+  it("reports configs without stdio servers and conflicting ids", async () => {
+    await writeConfig("claude-desktop", { mcpServers: { remote: { type: "http", url: "https://mcp.example" } } });
+    expect((await init({ client: "claude-desktop" })).text).toContain("nothing to wrap: the configs have no stdio servers");
+    await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
+    await writeConfig("vscode", { servers: { weather: { command: "other" } } });
+    const conflict = await init();
+    expect(conflict.code).toBe(1);
+    expect(conflict.text).toContain("! skipping weather (cursor, vscode): cursor and vscode launch it with different commands");
+  });
+
+  it("warns when latch is not on PATH, and not when it is", async () => {
+    const bin = join(home, "bin");
+    await mkdir(bin);
+    vi.stubEnv("PATH", bin);
+    await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
+    expect((await init()).text).toContain("! `latch` is not on PATH");
+    await writeFile(join(bin, "latch"), "#!/bin/sh\n");
+    await chmod(join(bin, "latch"), 0o755);
+    await writeConfig("vscode", { servers: { weather: weatherEntry } });
+    expect((await init()).text).not.toContain("is not on PATH");
   });
 });
