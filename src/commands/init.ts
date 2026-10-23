@@ -1,4 +1,8 @@
 import { unwrapProxy, wrapWithProxy, type ClientConfig, type ClientId, type ClientServerEntry } from "../config/clients.js";
+import { analyzeToolList } from "../proxy/analysis.js";
+import { captureTools } from "../proxy/capture.js";
+import type { LockFile } from "../schema/index.js";
+import { applyApproval } from "../store/lockfile.js";
 
 export interface InitOptions {
   /** Restrict to one client; default is every detected client. */
@@ -84,6 +88,61 @@ export function collectServers(configs: readonly ClientConfig[]): { servers: Ini
   }
   servers.sort((a, b) => (a.serverId < b.serverId ? -1 : a.serverId > b.serverId ? 1 : 0));
   return { servers, skipped };
+}
+
+/** A server's tools pinned in latch init. */
+export interface PinOutcome {
+  /** A new lockfile with the server added and its tools pinned. */
+  lock: LockFile;
+  /** Tools pinned, in list order. */
+  pinned: string[];
+  /** Tools left unpinned because of critical findings, with the reason. */
+  held: Array<{ name: string; reason: string }>;
+  /** Protocol version the server answered with. */
+  specVersion: string | null;
+}
+
+/**
+ * Capture `server`'s tools and pin them, under `reviewer` at `now`, in a copy of `lock` that
+ * also gains the server's launch command. `lock` is not modified.
+ *
+ * Trust on first use stops at hidden intent: a tool with a critical finding (hidden
+ * instructions, invisible or bidi characters, a reference to another server's tool, a
+ * definition that cannot be analyzed) is held back. The proxy then queues it as a tier-3 change
+ * for `latch review` instead of trusting it silently. Capabilities alone never hold a tool back:
+ * a server installed to run commands may run commands.
+ *
+ * @throws Error when the server is already in `lock`, or CaptureError when its tools cannot be
+ * captured.
+ */
+export async function pinServer(
+  server: InitServer,
+  lock: LockFile,
+  reviewer: string,
+  now: Date,
+  options: { timeoutMs?: number } = {},
+): Promise<PinOutcome> {
+  const { serverId } = server;
+  if (Object.hasOwn(lock.servers, serverId)) throw new Error(`server "${serverId}" is already in latch.lock`);
+  const captured = await captureTools(server.command, server.args, { env: server.env, ...options });
+
+  let next: LockFile = {
+    ...lock,
+    generatedAt: now.toISOString(),
+    servers: { ...lock.servers, [serverId]: { transport: "stdio", command: server.command, args: server.args, tools: [] } },
+  };
+  const analysis = analyzeToolList(serverId, { tools: captured.tools }, next, captured.specVersion, now)!;
+  const pinned: string[] = [];
+  const held: PinOutcome["held"] = [];
+  for (const { change, reason } of analysis.changes) {
+    if (change.findings.some((finding) => finding.severity === "critical")) {
+      held.push({ name: change.toolName, reason });
+      continue;
+    }
+    next = applyApproval(next, change, reviewer, now);
+    pinned.push(change.toolName);
+  }
+  return { lock: next, pinned, held, specVersion: captured.specVersion };
 }
 
 /** "a", "a and b", "a, b and c". */
