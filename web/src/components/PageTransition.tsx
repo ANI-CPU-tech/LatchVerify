@@ -7,7 +7,8 @@ export const PAGE_FADE_MS = 160;
 const prefersReducedMotion = (): boolean => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 /**
- * Fades the old page out and the new one in when `pageKey` changes. Changes within a page (another
+ * Fades the old page out and the new one in when `pageKey` changes; the new page's sections rise in
+ * one after another (.page-stagger in index.css). Changes within a page (another
  * change selected, fresh data) show at once. Opacity only: a transform would make this wrapper
  * the containing block of anything fixed inside a page. Without motion the swap is instant.
  */
@@ -38,7 +39,7 @@ export function PageTransition({ pageKey, children }: { pageKey: string; childre
 
   return (
     <div
-      className={`space-y-6 transition-opacity ease-out motion-reduce:transition-none ${leaving ? "opacity-0" : "opacity-100"}`}
+      className={`page-stagger space-y-6 transition-opacity ease-out motion-reduce:transition-none ${leaving ? "opacity-0" : "opacity-100"}`}
       style={{ transitionDuration: `${PAGE_FADE_MS}ms` }}
     >
       {shown.content}

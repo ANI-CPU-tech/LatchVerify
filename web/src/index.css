@@ -677,3 +677,33 @@
     opacity: 0;
   }
 }
+
+/*
+ * UI motion, only for viewers who have not asked for less. Fill mode is backwards so nothing keeps
+ * a transform once it has arrived (a transform would make it a containing block).
+ */
+@media (prefers-reduced-motion: no-preference) {
+  /* A page's sections rise in one after another when it opens; later inserts rise on their own. */
+  .page-stagger > * {
+    animation: ui-rise 0.4s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  }
+  .page-stagger > :nth-child(2) {
+    animation-delay: 50ms;
+  }
+  .page-stagger > :nth-child(3) {
+    animation-delay: 100ms;
+  }
+  .page-stagger > :nth-child(4) {
+    animation-delay: 150ms;
+  }
+  .page-stagger > :nth-child(n + 5) {
+    animation-delay: 200ms;
+  }
+}
+
+@keyframes ui-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
