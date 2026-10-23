@@ -109,7 +109,7 @@ export function anchoredPrefix(pattern: string): AnchoredPrefix | null {
     let width: number;
     if (ch === "\\") {
       const next = pattern[i + 1];
-      // Escaped punctuation is literal; \d, \w, A and friends are classes or encodings.
+      // Escaped punctuation is literal; \d, \w, \u0041 and friends are classes or encodings.
       if (next === undefined || /[\p{L}\p{N}]/u.test(next)) break;
       literal = next;
       width = 2;
