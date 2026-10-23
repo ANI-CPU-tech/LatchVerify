@@ -14,6 +14,39 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+const SEGMENTS = [
+  ["name", "Name"],
+  ["description", "Description"],
+  ["inputSchema", "Input schema"],
+] as const;
+
+/**
+ * Which parts of the definition changed, from the segment hashes. Live pending changes carry
+ * hashes, not text, so this is what the reviewer gets in place of a text diff.
+ */
+function SegmentChanges({ change }: { change: ReviewItem["change"] }) {
+  if (!change.before) {
+    return <p className="text-sm text-muted-foreground">New tool: there is no approved definition to compare with.</p>;
+  }
+  const before = change.before.hashes;
+  const after = change.after.hashes;
+  return (
+    <ul className="space-y-1 text-sm">
+      {SEGMENTS.map(([key, label]) => {
+        const changed = before[key] !== after[key];
+        return (
+          <li key={key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-1.5">
+            <span>{label}</span>
+            <span className={`font-mono text-xs ${changed ? "font-semibold text-warning" : "text-muted-foreground"}`}>
+              {changed ? "changed" : "unchanged"}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /** What the reviewer can do with a change. Absent when the screen shows sample data. */
 export interface ChangeActions {
   onApprove: (id: string) => Promise<void>;
@@ -74,9 +107,13 @@ export function ChangeDetail({ item, actions }: { item: ReviewItem; actions?: Ch
         <FindingList findings={change.findings} />
       </Section>
 
-      {item.descriptionDiff && (
+      {item.descriptionDiff ? (
         <Section title="Description diff">
           <TextDiff parts={item.descriptionDiff} />
+        </Section>
+      ) : (
+        <Section title="What changed">
+          <SegmentChanges change={change} />
         </Section>
       )}
 
