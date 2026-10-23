@@ -116,6 +116,10 @@ describe("art tokens and styles", () => {
     }
   });
 
+  it("gives every theme its own extra, and every extra to a theme", () => {
+    expect(THEMES.map((theme) => theme.art).sort()).toEqual([...ART_EXTRAS].sort());
+  });
+
   it("styles only layers that exist", () => {
     const styled = new Set([...css.matchAll(/\.art-([a-z-]+)/g)].map((match) => match[1]!));
     for (const name of styled) expect(ART_LAYERS, `.art-${name}`).toContain(name);

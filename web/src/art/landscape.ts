@@ -31,7 +31,7 @@ export type ArtColor = (typeof ART_COLORS)[number];
 export type ArtTime = "day" | "night";
 
 /** Each theme's special touch, drawn on top of the shared scene. */
-export const ART_EXTRAS = ["balloon", "sailboat", "geese", "fireflies", "snowfall"] as const;
+export const ART_EXTRAS = ["balloon", "sailboat", "geese", "fireflies", "snowfall", "deer"] as const;
 export type ArtExtra = (typeof ART_EXTRAS)[number];
 
 /** Layers in paint order. A layer that is empty in a scene is left out of it. */
@@ -49,8 +49,11 @@ export const ART_LAYERS = [
   "land",
   "glint-a",
   "glint-b",
+  "mist",
   "sailboat",
   "canoe",
+  "deer-a",
+  "deer-b",
   "front",
   "window",
   "smoke-a",
@@ -547,7 +550,40 @@ function snowfall(on: Painter) {
   }
 }
 
-const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon, sailboat, geese, fireflies, snowfall };
+/** Mist lying on the lake, and a stag in the shallows that looks up, then drinks. */
+function deer(on: Painter) {
+  const mist = on("mist");
+  for (let y = LAKE - 4; y <= LAKE + 6; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      const density = (1 - Math.abs(y - (LAKE + 1)) / 6) * Math.max(0, fbm(x / 24, 500) - 0.35) * 0.9;
+      if (dither(x, y, density)) mist(x, y, "cloud");
+    }
+  }
+  // Facing left toward the canoe, hooves in the water at row y.
+  const [x, y] = [346, 93];
+  const body: Array<[number, number]> = [];
+  for (let dx = -3; dx <= 3; dx++) body.push([dx, -5]);
+  for (let dy = -7; dy <= -6; dy++) for (let dx = -4; dx <= 4; dx++) body.push([dx, dy]);
+  for (const dx of [-3, 3]) for (let dy = -4; dy <= -1; dy++) body.push([dx, dy]);
+  for (const dx of [-2, 2]) for (let dy = -4; dy <= -2; dy++) body.push([dx, dy]);
+  body.push([5, -8], [5, -7]);
+  const headUp: Array<[number, number]> = [
+    [-4, -8], [-5, -8], [-5, -9], [-6, -9], [-6, -10], [-7, -10], [-8, -10], [-9, -10], [-6, -11], [-7, -11], [-8, -11],
+    [-5, -12], [-6, -12], [-5, -13], [-4, -14], [-6, -14], [-7, -13], [-8, -14],
+  ];
+  const headDown: Array<[number, number]> = [
+    [-4, -7], [-5, -7], [-5, -6], [-6, -6], [-6, -5], [-7, -4], [-7, -3], [-8, -3], [-8, -2], [-9, -2], [-9, -1],
+    [-6, -7], [-7, -8], [-8, -8], [-6, -9], [-8, -6], [-9, -7],
+  ];
+  for (const [layer, head] of [["deer-a", headUp], ["deer-b", headDown]] as const) {
+    const set = on(layer);
+    for (const [dx, dy] of [...body, ...head]) set(x + dx, y + dy, "tree");
+    // A broken reflection under the body.
+    for (let dx = -4; dx <= 4; dx++) for (let dy = 1; dy <= 3; dy++) if ((dx + dy) % 2 === 0) set(x + dx, y + dy, "mid-shade");
+  }
+}
+
+const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon, sailboat, geese, fireflies, snowfall, deer };
 
 /** A grid of pixels as horizontal runs of one color. */
 function toLayer(name: ArtLayer, grid: Grid, width: number, height: number): PixelLayer {

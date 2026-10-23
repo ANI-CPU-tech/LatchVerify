@@ -10,8 +10,8 @@ export const THEMES = [
   { id: "sunset", label: "Sunset", description: "Apricot, burnt orange", dark: false, art: "geese" },
   { id: "terminal", label: "Terminal Dark", description: "Charcoal, cream text, orange", dark: true, art: "fireflies" },
   { id: "minimal", label: "Minimal", description: "Neutral, muted artwork", dark: false, art: "snowfall" },
-  { id: "forest", label: "Forest Green", description: "Ivory, forest green, olive", dark: false, art: null },
-] as const satisfies ReadonlyArray<{ id: string; label: string; description: string; dark: boolean; art: ArtExtra | null }>;
+  { id: "forest", label: "Forest Green", description: "Ivory, forest green, olive", dark: false, art: "deer" },
+] as const satisfies ReadonlyArray<{ id: string; label: string; description: string; dark: boolean; art: ArtExtra }>;
 
 export type ThemeId = (typeof THEMES)[number]["id"];
 
@@ -30,7 +30,7 @@ const THEME_IDS: ReadonlySet<string> = new Set(THEMES.map((theme) => theme.id));
 export const isDarkTheme = (id: ThemeId): boolean => THEMES.some((theme) => theme.id === id && theme.dark);
 
 /** The landscape a theme shows: night for dark themes, plus the theme's own extra. */
-export function sceneFor(id: ThemeId): { time: ArtTime; extra: ArtExtra | null } {
+export function sceneFor(id: ThemeId): { time: ArtTime; extra: ArtExtra } {
   const theme = THEMES.find((entry) => entry.id === id)!;
   return { time: theme.dark ? "night" : "day", extra: theme.art };
 }

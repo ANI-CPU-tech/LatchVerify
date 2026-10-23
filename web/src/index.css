@@ -353,7 +353,8 @@
 .art-birds-b,
 .art-geese-b,
 .art-fireflies-b,
-.art-shooting-star {
+.art-shooting-star,
+.art-deer-b {
   opacity: 0;
 }
 
@@ -428,6 +429,16 @@
   }
   .art-snow-c {
     animation-delay: -4s;
+  }
+  .art-mist {
+    animation: art-drift 40s ease-in-out infinite alternate-reverse;
+  }
+  /* The stag holds its head up for a while, then lowers it to drink. */
+  .art-deer-a {
+    animation: art-graze 9s steps(1) infinite;
+  }
+  .art-deer-b {
+    animation: art-graze 9s steps(1) -4.5s infinite;
   }
   .art-rays {
     animation: art-pulse 9s ease-in-out infinite alternate;
@@ -547,6 +558,14 @@
     100% {
       opacity: 0;
       transform: translate(-3px, 8px);
+    }
+  }
+  @keyframes art-graze {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
     }
   }
   @keyframes art-bob {
