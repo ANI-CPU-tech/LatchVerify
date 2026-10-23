@@ -63,8 +63,9 @@ program
   .command("inspect")
   .description("show derived capabilities and findings for a server's tools without pinning")
   .option("--file <path>", "read a tools/list result from a JSON file")
-  .argument("[server...]", "server command to spawn and query")
+  .argument("[server...]", "server command to spawn and query, with its own flags")
   .option("--json", "machine-readable output", false)
+  .passThroughOptions()
   .action((server: string[], opts: { file?: string; json: boolean }) =>
     run(() => runInspect({ ...opts, server: server.length > 0 ? server : undefined })),
   );
