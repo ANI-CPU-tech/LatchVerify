@@ -4,6 +4,7 @@ import {
   DEFAULT_PREFERENCE,
   THEMES,
   THEME_STORAGE_KEY,
+  isDarkTheme,
   parsePreference,
   readPreference,
   resolveTheme,
@@ -52,6 +53,14 @@ describe("theme tokens in index.css", () => {
     expect([...blocks.keys()].sort()).toEqual(THEMES.map((theme) => theme.id).sort());
   });
 
+  it("marks a theme dark exactly when its block sets color-scheme: dark", () => {
+    for (const { id } of THEMES) {
+      const body = new RegExp(`\\[data-theme="${id}"\\]\\s*\\{([^}]*)\\}`).exec(css)![1]!;
+      expect(isDarkTheme(id), id).toBe(/color-scheme:\s*dark/.test(body));
+    }
+    expect(isDarkTheme("terminal")).toBe(true);
+  });
+
   it("defines the same tokens in every theme", () => {
     const reference = [...blocks.get("light")!.keys()].sort();
     expect(reference.length).toBeGreaterThan(25);
@@ -95,6 +104,18 @@ describe("theme tokens in index.css", () => {
 
       it.each(["destructive", "warning", "success", "info", "primary"])("%s text on its own light tint meets 4.5:1", (status) => {
         expect(contrast(color(status), blend(color(status), color("card"), 0.1))).toBeGreaterThanOrEqual(4.5);
+      });
+
+      it("keeps text on glass cards at 4.5:1 over every color of the landscape backdrop", () => {
+        const alpha = Number(blocks.get(id)!.get("surface-alpha"));
+        expect(alpha).toBeGreaterThan(0);
+        expect(alpha).toBeLessThanOrEqual(1);
+        const behind = [...blocks.get(id)!.keys()].filter((name) => name.startsWith("art-")).concat("background");
+        for (const text of ["foreground", "card-foreground", "muted-foreground", "primary", "destructive", "warning", "success", "info"]) {
+          for (const art of behind) {
+            expect(contrast(color(text), blend(color("card"), color(art), alpha)), `${text} over ${art}`).toBeGreaterThanOrEqual(4.5);
+          }
+        }
       });
 
       it("has a focus ring that stands out from background and card (3:1)", () => {

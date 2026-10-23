@@ -11,9 +11,12 @@
  * The selectors are attribute selectors, not :root only, so a theme preview in Settings can set
  * data-theme on its own element and render with that theme's real tokens.
  *
+ * surface-alpha: opacity of cards over the landscape backdrop (bg-card-glass); the lowest that
+ *          keeps every text color at AA over any art color, per tests/web/themes.test.ts.
  * primary: buttons, links, the active nav item; dark enough for AA text on background.
  * accent:  brand orange for decoration only (icons, artwork, highlights), never for body text.
- * art-*:   the pixel-art landscape (web/src/art/landscape.ts), recolored per theme.
+ * art-*:   the pixel-art landscape (web/src/art/landscape.ts), recolored per theme; art-sky and
+ *          art-horizon are the gradient its sky stretches into, up to the top of the page.
  */
 @layer base {
   :root,
@@ -23,6 +26,7 @@
     --foreground: 28 22% 12%;
     --card: 40 100% 98%;
     --card-foreground: 28 22% 12%;
+    --surface-alpha: 0.92;
     --muted: 38 45% 88%;
     --muted-foreground: 28 16% 34%;
     --border: 35 35% 77%;
@@ -47,10 +51,19 @@
     --terminal-muted: 30 14% 62%;
     --terminal-accent: 22 90% 62%;
     --shadow: 0 1px 2px hsl(28 30% 20% / 0.06), 0 2px 8px hsl(28 30% 20% / 0.05);
+    --art-sky: 38 55% 94%;
+    --art-horizon: 28 85% 85%;
     --art-glow: 30 95% 70%;
     --art-sun: 19 87% 54%;
+    --art-cloud: 28 85% 80%;
+    --art-haze: 25 55% 77%;
     --art-far: 20 42% 62%;
+    --art-far-shade: 18 32% 51%;
     --art-snow: 40 100% 97%;
+    --art-snow-shade: 22 45% 85%;
+    --art-mid: 22 32% 43%;
+    --art-mid-shade: 22 32% 35%;
+    --art-water: 24 40% 60%;
     --art-near: 24 32% 27%;
     --art-tree: 25 35% 15%;
     --art-bird: 28 25% 25%;
@@ -62,6 +75,7 @@
     --foreground: 25 35% 14%;
     --card: 48 80% 98%;
     --card-foreground: 25 35% 14%;
+    --surface-alpha: 0.88;
     --muted: 40 45% 87%;
     --muted-foreground: 26 24% 32%;
     --border: 32 30% 74%;
@@ -86,10 +100,19 @@
     --terminal-muted: 30 16% 60%;
     --terminal-accent: 28 75% 60%;
     --shadow: 0 1px 2px hsl(25 35% 20% / 0.07), 0 2px 6px hsl(25 35% 20% / 0.05);
+    --art-sky: 44 60% 94%;
+    --art-horizon: 32 75% 85%;
     --art-glow: 35 80% 72%;
     --art-sun: 24 70% 54%;
+    --art-cloud: 38 70% 84%;
+    --art-haze: 32 40% 77%;
     --art-far: 28 30% 60%;
+    --art-far-shade: 26 24% 49%;
     --art-snow: 45 70% 95%;
+    --art-snow-shade: 30 35% 84%;
+    --art-mid: 26 28% 44%;
+    --art-mid-shade: 26 28% 36%;
+    --art-water: 30 34% 60%;
     --art-near: 25 30% 30%;
     --art-tree: 25 35% 18%;
     --art-bird: 25 30% 28%;
@@ -101,6 +124,7 @@
     --foreground: 15 35% 13%;
     --card: 30 100% 97%;
     --card-foreground: 15 35% 13%;
+    --surface-alpha: 0.9;
     --muted: 26 70% 86%;
     --muted-foreground: 16 28% 31%;
     --border: 22 50% 77%;
@@ -125,10 +149,19 @@
     --terminal-muted: 20 18% 62%;
     --terminal-accent: 18 90% 64%;
     --shadow: 0 1px 2px hsl(15 40% 25% / 0.07), 0 2px 8px hsl(15 40% 25% / 0.06);
+    --art-sky: 30 85% 93%;
+    --art-horizon: 20 90% 84%;
     --art-glow: 32 95% 70%;
     --art-sun: 14 88% 55%;
+    --art-cloud: 24 95% 81%;
+    --art-haze: 15 65% 78%;
     --art-far: 10 48% 60%;
+    --art-far-shade: 8 38% 49%;
     --art-snow: 30 100% 95%;
+    --art-snow-shade: 15 60% 86%;
+    --art-mid: 10 36% 42%;
+    --art-mid-shade: 10 36% 34%;
+    --art-water: 18 55% 62%;
     --art-near: 12 35% 28%;
     --art-tree: 15 40% 16%;
     --art-bird: 15 30% 22%;
@@ -140,6 +173,7 @@
     --foreground: 38 45% 88%;
     --card: 28 14% 13%;
     --card-foreground: 38 45% 88%;
+    --surface-alpha: 0.95;
     --muted: 28 12% 18%;
     --muted-foreground: 35 15% 66%;
     --border: 28 12% 25%;
@@ -164,10 +198,19 @@
     --terminal-muted: 30 12% 58%;
     --terminal-accent: 22 90% 62%;
     --shadow: 0 1px 2px hsl(0 0% 0% / 0.4), 0 2px 8px hsl(0 0% 0% / 0.25);
+    --art-sky: 28 14% 8%;
+    --art-horizon: 26 28% 15%;
     --art-glow: 28 70% 32%;
     --art-sun: 22 90% 58%;
+    --art-cloud: 26 50% 38%;
+    --art-haze: 26 32% 21%;
     --art-far: 24 26% 30%;
+    --art-far-shade: 24 22% 23%;
     --art-snow: 38 45% 72%;
+    --art-snow-shade: 30 25% 55%;
+    --art-mid: 25 18% 24%;
+    --art-mid-shade: 25 18% 20%;
+    --art-water: 28 34% 28%;
     --art-near: 25 18% 19%;
     --art-tree: 22 22% 13%;
     --art-bird: 38 30% 62%;
@@ -179,6 +222,7 @@
     --foreground: 30 8% 12%;
     --card: 0 0% 100%;
     --card-foreground: 30 8% 12%;
+    --surface-alpha: 0.82;
     --muted: 40 8% 93%;
     --muted-foreground: 30 5% 36%;
     --border: 40 8% 86%;
@@ -203,10 +247,19 @@
     --terminal-muted: 0 0% 62%;
     --terminal-accent: 19 70% 64%;
     --shadow: none;
+    --art-sky: 40 10% 97%;
+    --art-horizon: 30 12% 91%;
     --art-glow: 30 15% 88%;
     --art-sun: 19 45% 72%;
+    --art-cloud: 30 10% 91%;
+    --art-haze: 30 6% 87%;
     --art-far: 30 6% 78%;
+    --art-far-shade: 30 6% 71%;
     --art-snow: 0 0% 100%;
+    --art-snow-shade: 30 6% 90%;
+    --art-mid: 30 5% 67%;
+    --art-mid-shade: 30 5% 62%;
+    --art-water: 30 8% 82%;
     --art-near: 30 5% 58%;
     --art-tree: 30 6% 40%;
     --art-bird: 30 5% 45%;
@@ -218,6 +271,7 @@
     --foreground: 140 25% 12%;
     --card: 48 60% 98%;
     --card-foreground: 140 25% 12%;
+    --surface-alpha: 0.84;
     --muted: 70 22% 87%;
     --muted-foreground: 90 14% 30%;
     --border: 75 18% 75%;
@@ -242,10 +296,19 @@
     --terminal-muted: 90 12% 60%;
     --terminal-accent: 80 45% 62%;
     --shadow: 0 1px 2px hsl(140 25% 15% / 0.07), 0 2px 8px hsl(140 25% 15% / 0.05);
+    --art-sky: 50 40% 94%;
+    --art-horizon: 35 70% 86%;
     --art-glow: 35 85% 75%;
     --art-sun: 24 80% 52%;
+    --art-cloud: 38 75% 85%;
+    --art-haze: 70 22% 73%;
     --art-far: 85 18% 56%;
+    --art-far-shade: 95 18% 46%;
     --art-snow: 48 60% 96%;
+    --art-snow-shade: 70 20% 84%;
+    --art-mid: 120 22% 38%;
+    --art-mid-shade: 125 24% 31%;
+    --art-water: 170 20% 55%;
     --art-near: 150 30% 24%;
     --art-tree: 150 40% 15%;
     --art-bird: 140 20% 25%;

@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { PixelLandscape } from "../art/PixelLandscape";
 import { AlertIcon, ArrowRightIcon, LogIcon, QueueIcon, ServerIcon, ToolCheckIcon } from "../components/icons";
 import { TierBadge } from "../components/TierBadge";
 import { Badge, EmptyState, ErrorState, LoadingState, Panel, PanelLink, StatusDot, TONE_TEXT, buttonClass } from "../components/ui";
@@ -10,7 +9,7 @@ import { href } from "../lib/router";
 /** One headline number. Shows "—" until its source has loaded, never a made-up value. */
 function Metric({ label, value, link, icon, tone = "neutral" }: { label: string; value: number | null; link: string; icon: ReactNode; tone?: Tone }) {
   return (
-    <a href={link} className="group flex items-center gap-3 rounded-lg border bg-card p-3 shadow-card transition-colors hover:border-primary/50 sm:p-4">
+    <a href={link} className="group flex items-center gap-3 rounded-lg border bg-card-glass backdrop-blur-sm p-3 shadow-card transition-colors hover:border-primary/50 sm:p-4">
       <span className={`hidden text-2xl sm:inline ${tone === "neutral" ? "text-accent" : TONE_TEXT[tone]}`}>{icon}</span>
       <span className="min-w-0 flex-1">
         <span className={`block font-display text-2xl font-bold ${tone === "neutral" ? "" : TONE_TEXT[tone]}`}>{value ?? "—"}</span>
@@ -37,12 +36,9 @@ export function Overview() {
 
   return (
     <>
-      <header className="flex items-end justify-between gap-6">
-        <div className="min-w-0">
-          <h1 className="font-display text-3xl font-bold tracking-tight">Overview</h1>
-          <p className="mt-1 text-sm text-muted-foreground">MCP tool definitions checked against latch.lock, from this machine's proxy state.</p>
-        </div>
-        <PixelLandscape variant="wide" className="hidden h-24 w-auto shrink-0 sm:block" />
+      <header>
+        <h1 className="font-display text-3xl font-bold tracking-tight">Overview</h1>
+        <p className="mt-1 text-sm text-muted-foreground">MCP tool definitions checked against latch.lock, from this machine's proxy state.</p>
       </header>
 
       {highRisk.length > 0 && (

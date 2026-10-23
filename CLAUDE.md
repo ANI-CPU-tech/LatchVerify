@@ -123,12 +123,21 @@ shows the last `tools_listed` event instead.
 - The preference ("system" or a theme id) is stored in `localStorage` under
   `latch.theme`, with every access wrapped in try/catch.
 
-**Artwork.** `web/src/art/landscape.ts` generates an original pixel-art landscape: sun,
-two mountain ranges with snow, pines and birds. It comes in two scenes, `wide` for the
-Overview header and `tall` for the bottom of the sidebar, which hides on short windows.
-`PixelLandscape.tsx` draws it as inline SVG with `crispEdges`, colored by the `--art-*` tokens
-of each theme; Minimal uses muted greys. The art is decorative only: `aria-hidden`,
-`pointer-events-none`, and never placed over content. The favicon,
+**Artwork.** `web/src/art/landscape.ts` generates an original pixel-art landscape from
+seeded noise: a setting sun with dithered afterglow, clouds, a hazy distant range, a snowy
+far range and forested mid range (each with sunlit and shadowed faces), a lake that mirrors
+them with the sun's glitter path, a canoe, pine shores with a cabin, jetty, rocks and reeds,
+and birds. Dark themes (`dark: true` in `themes.ts`, matching `color-scheme: dark`) get the
+night scene: a cratered moon, stars and a moonlit path instead of the sun, no birds.
+`AppShell` shows it as a fixed backdrop behind the content column on every page (the sidebar
+stays plain): the art whole at the bottom, its sky stretched to the top as a gradient
+(`--art-sky` to `--art-horizon`), with `starrySky()` stars at night. `PixelLandscape.tsx` draws
+both as inline SVG with `crispEdges`, colored by the `--art-*` tokens of each theme; Minimal
+uses muted greys. The art is decorative only: `aria-hidden`, `pointer-events-none`, and always
+behind content. Cards over it use `bg-card-glass`: see-through by the theme's
+`--surface-alpha`, which `tests/web/themes.test.ts` holds to 4.5:1 for text over any art color.
+Text outside a card is not covered by that test; keep page headings near the top, where the
+sky is plain. The favicon,
 `web/public/favicon.svg`, is a 16x16 pixel-art padlock with a sunset.
 
 ## Build order (as built)

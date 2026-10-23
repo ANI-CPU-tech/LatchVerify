@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
-import { PixelLandscape } from "../art/PixelLandscape";
+import { PixelLandscape, StarrySky } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
+import { useTheme } from "../lib/theme";
+import { isDarkTheme } from "../lib/themes";
 import { href, type Page } from "../lib/router";
 import { GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
@@ -63,6 +65,8 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
 
 export function AppShell({ current, children }: { current: Page; children: ReactNode }) {
   const { api, busy, reload } = useData();
+  const { theme } = useTheme();
+  const night = isDarkTheme(theme);
   const status = API_STATUS[api];
   return (
     <div className="flex min-h-screen flex-col">
@@ -104,19 +108,23 @@ export function AppShell({ current, children }: { current: Page; children: React
 
       <div className="flex flex-1">
         <aside className="hidden w-56 shrink-0 border-r bg-sidebar md:block">
-          <div className="sticky top-14 flex h-[calc(100vh-3.5rem)] flex-col">
-            <nav aria-label="Sections" className="p-3">
-              <NavLinks current={current} layout="sidebar" />
-            </nav>
-            {/* Below the nav, never over it; dropped on short windows. */}
-            <div className="mt-auto px-3 pb-3 [@media(max-height:620px)]:hidden">
-              <PixelLandscape variant="tall" className="w-full" />
-            </div>
-          </div>
+          <nav aria-label="Sections" className="sticky top-14 p-3">
+            <NavLinks current={current} layout="sidebar" />
+          </nav>
         </aside>
         <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-6xl space-y-6">{children}</div>
         </main>
+      </div>
+      {/*
+        Backdrop behind the content column (the sidebar stays plain): the landscape at full width,
+        its sky stretched up to the top as a gradient, starry at night. Fixed, so content scrolls
+        over it.
+      */}
+      <div className="pointer-events-none fixed inset-0 top-14 -z-10 flex flex-col justify-end bg-gradient-to-b from-art-sky to-art-horizon md:left-56">
+        {/* Stars thin out toward the top, where page headings sit on the sky without a card. */}
+        {night && <StarrySky className="block min-h-0 w-full flex-1 [mask-image:linear-gradient(to_bottom,transparent,black_75%)]" />}
+        <PixelLandscape time={night ? "night" : "day"} className="block h-auto min-h-40 w-full shrink-0" />
       </div>
     </div>
   );
