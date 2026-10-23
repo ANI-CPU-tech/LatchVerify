@@ -1,5 +1,6 @@
-import type { LlmAdvisory, McpTool, Sha256Hex } from "../schema/index.js";
+import { FindingSchema, FindingTypeSchema, type Finding, type LlmAdvisory, type McpTool, type Sha256Hex } from "../schema/index.js";
 import { canonicalJson, sha256Hex } from "./hash.js";
+import { escapeForEvidence } from "./unicode.js";
 
 /**
  * Pass 3 (optional, off by default): an LLM reviews a tool definition and reports findings the
@@ -40,6 +41,83 @@ export function advisoryCacheKey(tool: McpTool, model: string): Sha256Hex {
       prompt: ADVISORY_PROMPT_VERSION,
     }),
   );
+}
+
+/** The advisory pass failed: unreachable API, an error status, or output that is not JSON. */
+export class LlmError extends Error {
+  override readonly name = "LlmError";
+
+  constructor(
+    message: string,
+    readonly status?: number,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+  }
+}
+
+/** Most findings kept from one review, and the longest message or evidence kept from each. */
+export const MAX_ADVISORY_FINDINGS = 10;
+export const MAX_ADVISORY_TEXT = 300;
+
+/** Model output as printable ASCII, truncated: it is untrusted text shown to reviewers. */
+function clean(value: string): string {
+  const chars = [...value.trim()];
+  const text = chars.length > MAX_ADVISORY_TEXT ? `${chars.slice(0, MAX_ADVISORY_TEXT).join("")}...` : chars.join("");
+  return escapeForEvidence(text).slice(1, -1);
+}
+
+/** The JSON value in a model reply, tolerating code fences and prose around it. */
+function extractJson(text: string): unknown {
+  const unfenced = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  try {
+    return JSON.parse(unfenced);
+  } catch {
+    const start = unfenced.search(/[[{]/);
+    const end = Math.max(unfenced.lastIndexOf("}"), unfenced.lastIndexOf("]"));
+    if (start === -1 || end <= start) throw new LlmError("the model did not answer with JSON");
+    try {
+      return JSON.parse(unfenced.slice(start, end + 1));
+    } catch (error) {
+      throw new LlmError("the model did not answer with valid JSON", undefined, { cause: error });
+    }
+  }
+}
+
+/**
+ * Findings from a model reply of the form `{"findings": [...]}` (a bare array is accepted too).
+ * The reply is untrusted, so each item is checked: entries without a known type, a message and
+ * evidence are dropped, text is truncated and rendered as printable ASCII, and at most
+ * MAX_ADVISORY_FINDINGS are kept. Severity is capped at "warn": the advisory informs reviewers
+ * but never blocks a tool on its own, since a model can be wrong or be manipulated by the very
+ * text it reviews. Throws LlmError when the reply holds no JSON findings list.
+ */
+export function parseAdvisoryFindings(reply: string): Finding[] {
+  const data = extractJson(reply);
+  const items = Array.isArray(data)
+    ? data
+    : typeof data === "object" && data !== null && "findings" in data && Array.isArray(data.findings)
+      ? data.findings
+      : undefined;
+  if (!items) throw new LlmError('the model reply has no "findings" list');
+
+  const findings: Finding[] = [];
+  for (const item of items as unknown[]) {
+    if (findings.length === MAX_ADVISORY_FINDINGS) break;
+    if (typeof item !== "object" || item === null) continue;
+    const { type, severity, message, evidence } = item as Record<string, unknown>;
+    const knownType = FindingTypeSchema.safeParse(type);
+    if (!knownType.success || typeof message !== "string" || typeof evidence !== "string" || message.trim() === "") continue;
+    findings.push(
+      FindingSchema.parse({
+        type: knownType.data,
+        severity: severity === "info" ? "info" : "warn",
+        message: `LLM advisory: ${clean(message)}`,
+        evidence: clean(evidence),
+      }),
+    );
+  }
+  return findings;
 }
 
 /**
