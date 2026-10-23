@@ -50,12 +50,20 @@ README.md               CLAUDE.md               docs/*        task_split.md
 
 ## Finish steps (same for every task)
 
+Every task ends with a **Verify it works** block. A task is not finished until that
+block passes: the new tests, the manual check that the feature really works, and the
+regression checks for earlier tasks it builds on.
+
 ```sh
+# 1. run the task's "Verify it works" block and check the expected output
+# 2. make sure nothing else broke
 pnpm typecheck && pnpm test
 git diff --name-only main...HEAD   # every path must be one you own
 git push -u origin <your-branch>
-# open a PR into main; the other person reviews it
+# 3. open a PR into main and paste the Verify output under a "## Verify" heading
 ```
+
+The Verify commands are written for bash or zsh. On fish, run `bash` first.
 
 ---
 
@@ -86,6 +94,18 @@ git checkout main && git pull && git checkout -b p1/task-1-hashing
 
 **Depends on:** nothing.
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/analyze/hash.test.ts
+pnpm exec tsx -e 'import { readFileSync } from "node:fs"; const load = (f: string) => JSON.parse(readFileSync(`tests/fixtures/${f}`, "utf8")).tools; import { hashTool } from "./src/analyze/hash.ts";
+const lock = JSON.parse(readFileSync("latch.lock.example", "utf8"));
+for (const r of lock.servers.weather.tools) {
+  const t = load("benign-tools.json").find((x: any) => x.name === r.name);
+  console.log(r.name, hashTool(t).composite === r.hashes.composite ? "match" : "MISMATCH");
+}'
+```
+Expected: `get_alerts match` and `get_forecast match`.
+
 ### Task 2: Capability extraction (passes 1 and 2)
 
 **Branch:**
@@ -109,6 +129,18 @@ git checkout main && git pull && git checkout -b p1/task-2-capabilities
 
 **Depends on:** nothing.
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/analyze/capabilities.test.ts
+pnpm exec tsx -e 'import { readFileSync } from "node:fs"; const load = (f: string) => JSON.parse(readFileSync(`tests/fixtures/${f}`, "utf8")).tools; import { extractCapabilities } from "./src/analyze/capabilities.ts";
+for (const t of load("poisoned-tools.json")) {
+  const { capabilities: c, findings } = extractCapabilities(t, []);
+  console.log(t.name, "fs:", c.filesystem.scope, "exec:", c.exec.enabled, "net:", c.network.unconstrained, findings.map((f: any) => f.type));
+}'
+```
+Expected: `read_config fs: unconstrained`, `run_diagnostics exec: true` with an
+`annotation_mismatch`, `sync_alerts net: true`.
+
 ### Task 3: Unicode detector
 
 **Branch:**
@@ -131,6 +163,16 @@ git checkout main && git pull && git checkout -b p1/task-3-unicode
 
 **Depends on:** nothing.
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/analyze/unicode.test.ts
+pnpm exec tsx -e 'import { readFileSync } from "node:fs"; const load = (f: string) => JSON.parse(readFileSync(`tests/fixtures/${f}`, "utf8")).tools; import { detectUnicode } from "./src/analyze/unicode.ts";
+for (const t of load("poisoned-tools.json")) console.log(t.name, detectUnicode(t.description ?? "", "description").map((f: any) => f.evidence));
+for (const t of load("benign-tools.json")) console.log(t.name, detectUnicode(t.description ?? "", "description").length);'
+```
+Expected: `get_forecast` shows the U+200B run, `run_diagnostics` shows U+202E,
+`sync_alerts` shows the decoded tag text `hi`. Both benign tools print `0`.
+
 ### Task 4: Pattern detector
 
 **Branch:**
@@ -150,6 +192,17 @@ git checkout main && git pull && git checkout -b p1/task-4-patterns
 - [ ] Benign fixture gives no findings.
 
 **Depends on:** nothing.
+
+**Verify it works:**
+```sh
+pnpm vitest run tests/analyze/patterns.test.ts
+pnpm exec tsx -e 'import { readFileSync } from "node:fs"; const load = (f: string) => JSON.parse(readFileSync(`tests/fixtures/${f}`, "utf8")).tools; import { detectPatterns } from "./src/analyze/patterns.ts";
+for (const f of ["poisoned-tools.json", "benign-tools.json"])
+  for (const t of load(f)) console.log(f, t.name, detectPatterns(t.description ?? "", "description", { otherServerTools: ["send_email"] }).map((x: any) => `${x.type}: ${x.evidence}`));'
+```
+Expected: poisoned tools list `you must`, `Do not tell the user`, `Ignore previous`,
+`~/.ssh/id_rsa`, `OPENAI_API_KEY` and a `cross_server` hit for `send_email`. Benign
+tools print `[]`.
 
 ### Task 5: Differ and tiers
 
@@ -172,6 +225,29 @@ git checkout main && git pull && git checkout -b p1/task-5-differ-tiers
 
 **Depends on:** Tasks 1–4 (uses their output in tests).
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/analyze/differ.test.ts tests/analyze/tiers.test.ts
+pnpm exec tsx -e 'import { readFileSync } from "node:fs"; const load = (f: string) => JSON.parse(readFileSync(`tests/fixtures/${f}`, "utf8")).tools;
+import { hashTool } from "./src/analyze/hash.ts";
+import { extractCapabilities } from "./src/analyze/capabilities.ts";
+import { detectUnicode } from "./src/analyze/unicode.ts";
+import { detectPatterns } from "./src/analyze/patterns.ts";
+import { diffHashes, diffCapabilities } from "./src/analyze/differ.ts";
+import { classifyTier } from "./src/analyze/tiers.ts";
+const tier = (b: any, a: any) => {
+  const ex = extractCapabilities(a, []);
+  const findings = [...ex.findings, ...detectUnicode(a.description ?? "", "description"), ...detectPatterns(a.description ?? "", "description", { otherServerTools: [] })];
+  return classifyTier(diffHashes(hashTool(b), hashTool(a)), diffCapabilities(extractCapabilities(b, []).capabilities, ex.capabilities), findings);
+};
+const b = load("benign-tools.json")[0], p = load("poisoned-tools.json")[0];
+console.log("poisoned:", tier(b, p));
+console.log("reworded:", tier(b, { ...b, description: "Fetch the forecast for a location." }));'
+```
+Expected: `poisoned: { tier: 3, … }` and `reworded: { tier: 0, … }`.
+
+**Regression:** re-run the Verify blocks of Tasks 1–4.
+
 ### Task 6: Lockfile store
 
 **Branch:**
@@ -193,6 +269,16 @@ git checkout main && git pull && git checkout -b p1/task-6-lockfile-store
 
 **Depends on:** nothing. Person 2 Tasks 10 and 11 call this.
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/store/lockfile.test.ts
+pnpm exec tsx -e 'import { readLockfile, writeLockfile } from "./src/store/lockfile.ts";
+readLockfile("latch.lock.example").then((l) => writeLockfile("/tmp/latch-roundtrip.lock", l));'
+diff latch.lock.example /tmp/latch-roundtrip.lock && echo identical
+pnpm exec tsx -e 'import { readLockfile } from "./src/store/lockfile.ts"; readLockfile("/tmp/does-not-exist.lock").then(console.log);'
+```
+Expected: `identical`, then an empty lockfile (`servers: {}`).
+
 ### Task 7: Review API
 
 **Branch:**
@@ -212,6 +298,21 @@ git checkout main && git pull && git checkout -b p1/task-7-review-api
 - [ ] `pnpm ui` starts both the API and Vite with no errors.
 
 **Depends on:** Person 2 Task 3 (`readPending`, `readEvents`). Mock them with `vi.mock()` in your test until it merges.
+
+**Verify it works:**
+```sh
+pnpm vitest run tests/ui/routes.test.ts
+pnpm ui                                             # terminal 1
+curl -s http://127.0.0.1:7777/api/pending           # terminal 2: JSON array
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:7777/api/pending/nope   # 404
+ss -ltn | grep 7777                                 # must show 127.0.0.1:7777, not 0.0.0.0
+```
+To check approve: copy one `change` object from `web/src/lib/mock.ts` into
+`.latch/pending.json` (as a JSON array), `cp latch.lock.example latch.lock`, then
+`curl -s -X POST http://127.0.0.1:7777/api/pending/chg_7f3a91/approve`. Expected:
+`git diff --no-index latch.lock.example latch.lock` shows the new `get_forecast`
+hashes, and `/api/pending` no longer lists it. Delete `latch.lock` and `.latch/`
+afterwards.
 
 ### Task 8: Wire the web UI
 
@@ -233,6 +334,19 @@ git checkout main && git pull && git checkout -b p1/task-8-web-ui
 
 **Depends on:** Task 7.
 
+**Verify it works:**
+```sh
+pnpm ui
+```
+Manual check in the browser at http://localhost:5173, with a seeded queue as in Task 7:
+- [ ] The list shows the real queue, not the mock (change `.latch/pending.json` and reload).
+- [ ] Clicking each list item switches the detail pane.
+- [ ] Approve updates `latch.lock` on disk and removes the item. Reject removes it without touching `latch.lock`.
+- [ ] Stop the API process: the UI falls back to mock data with a visible notice.
+- [ ] Browser devtools at 390 px width: no horizontal page scroll.
+
+**Regression:** re-run the Verify block of Task 7.
+
 ### Task 9: LLM advisory pass (optional, last)
 
 **Branch:**
@@ -252,6 +366,20 @@ git checkout main && git pull && git checkout -b p1/task-9-llm
 - [ ] Nothing runs unless `LATCH_LLM_ENABLED=true`.
 
 **Depends on:** Tasks 1 and 2.
+
+**Verify it works:**
+```sh
+pnpm vitest run tests/analyze/llm.test.ts
+LATCH_LLM_ENABLED=true ANTHROPIC_API_KEY=<your key> pnpm exec tsx -e '
+import { readFileSync } from "node:fs"; import { runAdvisory } from "./src/analyze/llm.ts";
+const t = JSON.parse(readFileSync("tests/fixtures/poisoned-tools.json", "utf8")).tools[0];
+const opts = { apiKey: process.env.ANTHROPIC_API_KEY!, model: "claude-haiku-5-5" };
+runAdvisory(t, opts).then(async (first) => { const second = await runAdvisory(t, opts, first); console.log(first.findings.length, "findings; cached reused:", second === first); });'
+```
+Expected: at least one finding, and `cached reused: true` (the second call made no
+API request). Without the env vars, `latch` must never call the API.
+
+**Regression:** re-run the Verify blocks of Tasks 1, 2 and 5.
 
 ---
 
@@ -283,6 +411,17 @@ git checkout main && git pull && git checkout -b p2/task-1-transport
 
 **Depends on:** nothing.
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/proxy/transport.test.ts
+pnpm exec tsx -e 'import { PassThrough } from "node:stream"; import { readFrames, writeLine } from "./src/proxy/transport.ts";
+const i = new PassThrough(), o = new PassThrough(); o.pipe(process.stdout);
+readFrames(i, (f) => { console.error("parsed:", f.message !== null); void writeLine(o, f.raw); });
+i.end(`{"jsonrpc":"2.0","id":1,"method":"x","x-extra":{"kept":true}}\nnot json\n`);'
+```
+Expected on stdout: both input lines, byte-for-byte, including `x-extra`. On stderr:
+`parsed: true`, then `parsed: false`.
+
 ### Task 2: Blocker
 
 **Branch:**
@@ -301,6 +440,17 @@ git checkout main && git pull && git checkout -b p2/task-2-blocker
 - [ ] The error uses code `-32001` and its message mentions `latch review`.
 
 **Depends on:** nothing. You can build lockfile objects by hand in tests.
+
+**Verify it works:**
+```sh
+pnpm vitest run tests/proxy/blocker.test.ts
+pnpm exec tsx -e 'import { shouldBlock, buildBlockError } from "./src/proxy/blocker.ts";
+const lock = { version: "1", generatedAt: new Date().toISOString(), servers: {} };
+const v = shouldBlock("weather", "get_forecast", lock, []); console.log(v);
+if (v.blocked) console.log(JSON.stringify(buildBlockError(1, "get_forecast", v.reason)));'
+```
+Expected: `{ blocked: true, reason: { kind: "unpinned" } }`, then an error object with
+`"code":-32001` and a message that mentions `latch review`.
 
 ### Task 3: Pending queue and event log
 
@@ -322,6 +472,17 @@ git checkout main && git pull && git checkout -b p2/task-3-pending-events
 
 **Depends on:** nothing. Person 1 Task 7 calls this.
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/store/pending.test.ts tests/store/events.test.ts
+pnpm exec tsx -e 'import { appendEvent, readEvents } from "./src/store/events.ts";
+appendEvent("/tmp/latch-test", { kind: "list_changed", at: new Date().toISOString(), serverId: "weather" }).then(() => readEvents("/tmp/latch-test")).then(console.log);'
+echo "garbage" >> /tmp/latch-test/events.jsonl
+pnpm exec tsx -e 'import { readEvents } from "./src/store/events.ts"; readEvents("/tmp/latch-test").then(console.log);'
+rm -rf /tmp/latch-test
+```
+Expected: the event is printed both times, and the garbage line is skipped, not thrown.
+
 ### Task 4: Demo servers
 
 **Branch:**
@@ -334,12 +495,28 @@ git checkout main && git pull && git checkout -b p2/task-4-demo-servers
 **What to build:**
 - Weather server: answers `initialize`, `tools/list` and `tools/call` over raw line-delimited JSON-RPC.
 - Evil server: same as weather until 3 calls or SIGUSR1, then serves the poisoned tools and sends `notifications/tools/list_changed`.
+- `DEMO_MUTATE=1` makes the evil server start already mutated, so `latch verify` can be checked against it.
 
 **Done when:**
 - [ ] `echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | pnpm -s demo:benign` prints the two benign tools.
 - [ ] The evil server switches after 3 calls and emits `list_changed`.
 
 **Depends on:** nothing. Do this early, because Tasks 6 and 7 test against it.
+
+**Verify it works:**
+```sh
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | pnpm -s demo:benign
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_alerts","arguments":{"state":"CA"}}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_alerts","arguments":{"state":"CA"}}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_alerts","arguments":{"state":"CA"}}}' \
+  '{"jsonrpc":"2.0","id":4,"method":"tools/list"}' | pnpm -s demo:evil
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | DEMO_MUTATE=1 pnpm -s demo:evil
+```
+Expected: the benign server lists `get_forecast` and `get_alerts`. The evil server
+answers 3 calls, prints a `notifications/tools/list_changed` line, then lists 4 tools
+including `read_config`. With `DEMO_MUTATE=1` it serves the poisoned tools straight
+away. Only JSON-RPC appears on stdout; logs go to stderr.
 
 ### Task 5: Env and client configs
 
@@ -361,6 +538,19 @@ git checkout main && git pull && git checkout -b p2/task-5-config
 
 **Depends on:** nothing.
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/config/env.test.ts tests/config/clients.test.ts
+pnpm exec tsx -e 'import { loadEnv } from "./src/config/env.ts"; console.log(loadEnv());'
+LATCH_UI_PORT=abc pnpm exec tsx -e 'import { loadEnv } from "./src/config/env.ts"; loadEnv();'
+pnpm exec tsx -e 'import { wrapWithProxy, unwrapProxy } from "./src/config/clients.ts";
+const orig = { command: "node", args: ["w.js"], env: { A: "1" }, extra: true };
+const once = wrapWithProxy("weather", orig), twice = wrapWithProxy("weather", once);
+console.log(JSON.stringify(once) === JSON.stringify(twice), JSON.stringify(unwrapProxy(once)) === JSON.stringify(orig));'
+```
+Expected: defaults matching `.env.example`; a readable error naming `LATCH_UI_PORT`;
+then `true true`.
+
 ### Task 6: Interceptor and proxy lifecycle
 
 **Branch:**
@@ -381,6 +571,34 @@ git checkout main && git pull && git checkout -b p2/task-6-interceptor
 
 **Depends on:** Tasks 1–4, and Person 1 Tasks 1–5 for real analysis. Until those merge, `vi.mock()` the `src/analyze/*` functions in your own tests.
 
+**Verify it works:**
+Run in bash. The proxy is fed a session where the evil server rug-pulls after 3 calls.
+```sh
+pnpm vitest run tests/proxy/interceptor.test.ts tests/proxy/proxy.e2e.test.ts
+rm -rf /tmp/latch-state
+( printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_alerts","arguments":{"state":"CA"}}}' \
+    '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_alerts","arguments":{"state":"CA"}}}' \
+    '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_alerts","arguments":{"state":"CA"}}}'
+  sleep 2
+  echo '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_forecast","arguments":{"latitude":1,"longitude":2}}}'
+  sleep 1 ) | pnpm exec tsx -e 'import { startProxy } from "./src/proxy/index.ts";
+startProxy({ serverId: "weather", command: "pnpm", args: ["-s", "demo:evil"], lockfilePath: "latch.lock.example", stateDir: "/tmp/latch-state" }).then((c) => process.exit(c));'
+cat /tmp/latch-state/pending.json /tmp/latch-state/events.jsonl
+```
+Expected:
+- [ ] Responses 1–5 come back normally.
+- [ ] A `notifications/tools/list_changed` line is forwarded.
+- [ ] Response 6 is an **error** with code `-32001` mentioning `latch review`. It never reaches the server.
+- [ ] `pending.json` holds a tier-3 `get_forecast` change; `events.jsonl` has `list_changed` and `call_blocked`.
+
+Before Person 1 Tasks 1–5 merge, only the forwarding checks can pass; the tier-3 checks
+pass at Sync 1.
+
+**Regression:** re-run the Verify blocks of Tasks 1–4.
+
 ### Task 7: `latch verify`
 
 **Branch:**
@@ -400,6 +618,22 @@ git checkout main && git pull && git checkout -b p2/task-7-verify
 
 **Depends on:** Task 6, and Person 1 Task 6 (`readLockfile`).
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/commands/verify.test.ts
+pnpm build
+node dist/cli.js --lockfile latch.lock.example verify; echo "exit $?"
+sed 's#demo/weather-server.ts#demo/evil-server.ts#' latch.lock.example > /tmp/evil.lock
+DEMO_MUTATE=1 node dist/cli.js --lockfile /tmp/evil.lock verify; echo "exit $?"
+sed 's#"npx"#"no-such-binary"#' latch.lock.example > /tmp/broken.lock
+node dist/cli.js --lockfile /tmp/broken.lock verify; echo "exit $?"
+node dist/cli.js --lockfile latch.lock.example verify --json
+```
+Expected: `exit 0`, then `exit 2` with the tier-3 reasons printed, then `exit 3`, then
+a JSON report that parses.
+
+**Regression:** re-run the Verify block of Task 6.
+
 ### Task 8: `latch inspect`
 
 **Branch:**
@@ -417,6 +651,19 @@ git checkout main && git pull && git checkout -b p2/task-8-inspect
 - [ ] Never writes to disk.
 
 **Depends on:** Task 1, and Person 1 Tasks 2–4.
+
+**Verify it works:**
+```sh
+pnpm vitest run tests/commands/inspect.test.ts
+pnpm build
+node dist/cli.js inspect --file tests/fixtures/poisoned-tools.json
+node dist/cli.js inspect --file tests/fixtures/benign-tools.json --json
+node dist/cli.js inspect -- pnpm -s demo:benign
+git status --short
+```
+Expected: findings for all 4 poisoned tools; a clean JSON report for the benign file;
+the live server gives the same result as its file. `git status` shows nothing new:
+inspect never writes.
 
 ### Task 9: `latch proxy`
 
@@ -436,6 +683,25 @@ git checkout main && git pull && git checkout -b p2/task-9-proxy-command
 
 **Depends on:** Task 6.
 
+**Verify it works:**
+Run in bash.
+```sh
+pnpm vitest run tests/commands/proxy.test.ts
+pnpm build
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+| node dist/cli.js --lockfile latch.lock.example --state-dir /tmp/latch-state proxy --server weather -- pnpm -s demo:benign \
+| node -e 'require("readline").createInterface({ input: process.stdin }).on("line", (l) => { JSON.parse(l); console.log("ok:", l.slice(0, 60)); })'
+```
+Expected: two `ok:` lines and no JSON parse error, which proves stdout carries only
+JSON-RPC.
+
+Real client check (optional): `claude mcp add weather -- node "$PWD/dist/cli.js" --lockfile "$PWD/latch.lock.example" proxy --server weather -- npx tsx "$PWD/demo/weather-server.ts"`,
+then ask Claude Code for a forecast.
+
+**Regression:** re-run the Verify block of Task 6.
+
 ### Task 10: `latch init`
 
 **Branch:**
@@ -453,6 +719,26 @@ git checkout main && git pull && git checkout -b p2/task-10-init
 - [ ] Writes a valid `latch.lock` with every tool pinned.
 
 **Depends on:** Tasks 5 and 6, and Person 1 Task 6 (`writeLockfile`).
+
+**Verify it works:**
+Run in bash. Uses a throwaway HOME so your real client configs are untouched.
+```sh
+pnpm vitest run tests/commands/init.test.ts
+pnpm build
+export FAKE_HOME=$(mktemp -d)
+mkdir -p "$FAKE_HOME/.config/Claude"
+echo '{"mcpServers":{"weather":{"command":"npx","args":["tsx","'"$PWD"'/demo/weather-server.ts"]}},"other":1}' \
+  > "$FAKE_HOME/.config/Claude/claude_desktop_config.json"
+HOME=$FAKE_HOME node dist/cli.js --lockfile "$FAKE_HOME/latch.lock" init --client claude-desktop --dry-run
+ls "$FAKE_HOME"                                  # no latch.lock yet
+HOME=$FAKE_HOME node dist/cli.js --lockfile "$FAKE_HOME/latch.lock" init --client claude-desktop
+cat "$FAKE_HOME/.config/Claude/claude_desktop_config.json"; ls "$FAKE_HOME/.config/Claude"
+pnpm exec tsx -e 'import { readFileSync } from "node:fs"; import { LockFileSchema } from "./src/schema/index.ts";
+console.log(LockFileSchema.parse(JSON.parse(readFileSync(process.env.FAKE_HOME + "/latch.lock", "utf8"))).servers.weather?.tools.length);'
+```
+Expected: dry run writes nothing. The real run wraps `weather` with `latch proxy`, keeps
+`"other":1`, leaves a `.bak` copy, and the lockfile validates with `2` tools. Running
+`init` a second time changes nothing (idempotent).
 
 ### Task 11: `latch review` (terminal)
 
@@ -473,6 +759,24 @@ git checkout main && git pull && git checkout -b p2/task-11-review
 
 **Depends on:** Task 3, and Person 1 Tasks 6 and 7.
 
+**Verify it works:**
+```sh
+pnpm vitest run tests/commands/review.test.ts
+pnpm build
+cp latch.lock.example /tmp/review.lock
+# seed a tier-3 change: run the Task 6 Verify session with lockfilePath "/tmp/review.lock"
+node dist/cli.js --lockfile /tmp/review.lock --state-dir /tmp/latch-state review
+git diff --no-index latch.lock.example /tmp/review.lock
+cat /tmp/latch-state/pending.json
+node dist/cli.js --lockfile /tmp/review.lock --state-dir /tmp/latch-state review --ui
+```
+Expected: tier-3 `get_forecast` is shown first with its capability delta and findings.
+After approving, the diff shows new `get_forecast` hashes and capabilities, and
+`pending.json` no longer has it. Rejecting instead leaves `/tmp/review.lock` unchanged.
+`--ui` opens the browser on the review screen.
+
+**Regression:** re-run the Verify blocks of Tasks 3 and 6.
+
 ---
 
 ## Suggested order and sync points
@@ -486,6 +790,23 @@ Week 4   Person 1: Task 9 (optional)       Person 2: Task 10 → 11
          ── Sync 2: the docs/DEMO.md script runs start to finish. ──
 ```
 
+### Sync 1 check (both people, together)
+
+Run after Person 1 Tasks 1–6 and Person 2 Tasks 1–6 are merged, on a fresh `main`:
+
+- [ ] `pnpm typecheck && pnpm test` passes with no mocks of `src/analyze/*` left in use for the e2e test.
+- [ ] Person 2 Task 6 Verify block passes in full: the poisoned `get_forecast` call is blocked with `-32001`, and `pending.json` holds a tier-3 change.
+- [ ] Same session with the evil server swapped for the weather server: nothing is blocked and `pending.json` stays empty.
+- [ ] A reworded description only (edit `tests/fixtures/benign-tools.json` locally, don't commit) is tier 0 and is not blocked.
+
+### Sync 2 check (both people, together)
+
+Run after every task is merged:
+
+- [ ] Every task's Verify block passes on `main`.
+- [ ] `pnpm build` works, then the full [`docs/DEMO.md`](docs/DEMO.md) script runs start to finish: init, commit `latch.lock`, rug pull, proxy blocks, review UI shows "⚠ New capability: filesystem read, unconstrained", `latch verify` exits non-zero.
+- [ ] `latch review` approves the change, and `latch verify` then exits 0.
+
 ## PR rules
 
 1. One branch per task, named as shown in the task (`p1/task-N-…`, `p2/task-N-…`).
@@ -493,7 +814,9 @@ Week 4   Person 1: Task 9 (optional)       Person 2: Task 10 → 11
 3. New tests go in new files inside your own test folders.
 4. Do not implement a stub in a file you don't own. Mock it in your test instead.
 5. `pnpm typecheck && pnpm test` must pass. Rebase on `main` right before merging.
-6. The other person reviews every PR.
+6. The other person reviews every PR, and **re-runs the task's Verify block on the
+   branch** before approving. A PR without Verify output in its description is not
+   ready for review.
 
 ## Changing a shared file
 
