@@ -4,15 +4,15 @@ One story, told in six beats. A harmless weather server is approved, then rug-pu
 with an invisible instruction to steal an SSH key. LatchVerify catches it at three
 layers: the proxy, the review UI and CI.
 
-> Status: scaffold. The review UI already renders this exact scenario from
-> `web/src/lib/mock.ts` (`pnpm ui`). The other beats need the proxy and commands
-> implemented. See `CLAUDE.md` for the build order.
+> Every beat runs for real: `pnpm build && pnpm link --global` puts `latch` on the
+> PATH and builds the review UI that `latch review --ui` serves.
 
 ## Setup (before the clock starts)
 
 - Terminal A: a repo with LatchVerify installed, no `latch.lock` yet.
 - An MCP client (Claude Desktop or Claude Code) configured with the demo server.
-- Browser tab ready for `http://localhost:5173`.
+- Browser ready for `http://127.0.0.1:7777`, where `latch review --ui` serves the
+  built UI (`--port` or `LATCH_UI_PORT` to change it).
 - The repo pushed to GitHub with a workflow that runs `latch verify`.
 
 ## Script
@@ -100,10 +100,23 @@ Show the GitHub Actions run from the nightly schedule:
 
 ```
 $ latch verify
-✖ weather/get_forecast   tier 3  filesystem.read gained (unconstrained)
-                                 2 critical findings
-Error: hard block (exit 2)
+latch verify: 1 server in /repo/latch.lock
+
+weather  npx tsx demo/evil-server.ts
+  ✖ get_forecast     tier 3  Critical pattern finding: Text instructs the model and points it at a sensitive file (description) (and 4 more critical findings)
+                     5 critical findings, 1 other
+                     · Text points the model at a sensitive file (description): "~/.ssh/id_rsa"
+                     ...
+  ✖ read_config      new, tier 2  Gained filesystem.read; loosened filesystem.scope
+  ✖ run_diagnostics  new, tier 3  Critical unicode finding: Bidirectional override in description ...
+  ✖ sync_alerts      new, tier 3  Critical unicode finding: 2 invisible tag characters in description ...
+  - get_alerts       removed from the server
+
+✖ hard block (exit 2): tier-3 changes (hidden instructions, obfuscation, exec or credential access); do not approve without a close look
 ```
+
+(Abbreviated. The demo server mutates on its own after three calls; set
+`DEMO_MUTATE=1` to make `latch verify` see the poisoned tools straight away.)
 
 > **Say:** "Even with no proxy running, the nightly CI check catches drift on a
 > server nobody committed to. Reject the change, or open a PR that approves it."
@@ -115,4 +128,6 @@ Error: hard block (exit 2)
 - Proxy not responding: run `latch inspect --file tests/fixtures/poisoned-tools.json`
   to show the findings directly.
 - No network for CI: run `latch verify; echo $?` locally and show the exit code.
-- The review UI always works, because it renders from mock data.
+- The review UI always works: when its API is unreachable it renders this scenario
+  from mock data (`pnpm ui` also serves it with hot reload on
+  `http://localhost:5173`).

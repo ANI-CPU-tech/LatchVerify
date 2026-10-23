@@ -162,7 +162,7 @@ async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: s
   const staticDir = options.staticDir ?? BUILT_UI_DIRS.map((url) => fileURLToPath(url)).find((dir) => existsSync(join(dir, "index.html")));
   if (staticDir === undefined || !existsSync(join(staticDir, "index.html"))) {
     throw new Error(
-      "latch review --ui: the review UI is not built; run `pnpm exec vite build --config web/vite.config.ts` in the latchverify checkout, or `pnpm ui` to work on it",
+      "latch review --ui: the review UI is not built; run `pnpm build` in the latchverify checkout, or `pnpm ui` to work on it",
     );
   }
   // Read both files first: a malformed one is reported here rather than on the first page load.

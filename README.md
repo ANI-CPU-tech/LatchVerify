@@ -9,9 +9,9 @@ calls to any tool whose capabilities changed without review.
 
 npm package: `latchverify` · CLI: `latch`
 
-> **Status: scaffold, not yet functional.** The project structure, types, schemas,
-> docs and review UI mockup are in place. Every command prints `not implemented`.
-> See [What to build first](#what-to-build-first).
+> **Status: working prototype.** The proxy, the analysis pipeline, `init`, `review`
+> (terminal and web UI), `verify` and `inspect` are implemented and tested. See
+> [docs/DEMO.md](docs/DEMO.md) for the end-to-end rug-pull demo.
 
 ---
 
@@ -96,38 +96,30 @@ written by `latch init` invoke it.
 ```sh
 pnpm dev          # watch-run the CLI with tsx
 pnpm typecheck    # tsc over src/, tests/, demo/ and web/
-pnpm test         # vitest (the schema tests are real)
-pnpm build        # emit dist/
-pnpm ui           # hono API + Vite review UI on http://localhost:5173
+pnpm test         # vitest
+pnpm build        # emit dist/ (CLI) and dist/web/ (review UI served by `latch review --ui`)
+pnpm ui           # dev: hono API + Vite review UI with hot reload on http://localhost:5173
 pnpm demo:benign  # benign weather MCP server
 pnpm demo:evil    # rug-pull MCP server
 ```
 
-Copy `.env.example` to `.env` to change ports, paths or enable the optional LLM pass.
+Copy `.env.example` to `.env` to change ports, paths or the reviewer name, or to
+enable the optional LLM advisory pass (any OpenAI-compatible API, such as Groq or
+OpenRouter). `latch` reads `./.env`; variables already set win.
 
 ## Project layout
 
 ```
-src/schema/    zod schemas: the shared contract (fully implemented)
+src/schema/    zod schemas: the shared contract
 src/proxy/     stdio JSON-RPC proxy and the three interception points
 src/analyze/   capability extraction, Unicode/pattern detectors, differ, tiers, LLM pass
 src/store/     latch.lock, the .latch/ pending queue and event log
 src/commands/  init, review, verify, inspect, proxy
 src/ui/        hono review API
-web/           Vite + React review UI (renders mock data for now)
+web/           Vite + React review UI (falls back to mock data when the API is down)
 demo/          benign and evil demo servers
 docs/          design docs
 ```
-
-## What to build first
-
-1. `src/analyze/hash.ts` and `src/store/lockfile.ts`: the lockfile round-trip.
-2. `src/analyze/capabilities.ts` pass 1 and `src/analyze/differ.ts`: the differentiator.
-3. `src/analyze/unicode.ts`, `patterns.ts`, `tiers.ts`.
-4. `src/proxy/`: transport, interceptor, blocker.
-5. `latch verify`, then `latch init`, then `latch review`.
-
-[CLAUDE.md](CLAUDE.md) has the full build order.
 
 ## License
 

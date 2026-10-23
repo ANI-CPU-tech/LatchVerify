@@ -365,7 +365,7 @@ describe("runReview --ui", () => {
     const empty = join(dir, "empty");
     await mkdir(empty);
     await expect(review({ ui: true, port: 0, staticDir: empty, until: Promise.resolve() })).rejects.toThrow(
-      "latch review --ui: the review UI is not built; run `pnpm exec vite build --config web/vite.config.ts`",
+      "latch review --ui: the review UI is not built; run `pnpm build` in the latchverify checkout",
     );
   });
 

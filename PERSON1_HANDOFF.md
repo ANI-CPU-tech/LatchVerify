@@ -184,20 +184,18 @@ passed, the rug pull is classified tier 0.
 
 ## Open follow-ups (shared files: do them together)
 
-1. **LLM env vars:** `.env.example` and the docs still mention `ANTHROPIC_API_KEY`.
-   Proposed replacements: `LATCH_LLM_API_KEY`, `LATCH_LLM_BASE_URL`, `LATCH_LLM_MODEL`.
-2. **Unused dependency:** `@anthropic-ai/sdk` in `package.json` is no longer used.
-3. **Outdated Verify blocks in `task_split.md`:**
-   - Task 7's approve `curl` needs `-H "X-Latch-Client: review-ui"`;
-   - Task 9 still names Anthropic.
-4. **`latch.lock.example`** pins `domains: ["api.weather.gov"]`, which can't be derived
-   from the weather tools' schema (the code derives `[]`). `latch verify` sees that as a
-   harmless tier-1 change; regenerate the example to remove it.
+1. ~~**LLM env vars**~~ done (branch `fix/integration-audit`): `LATCH_LLM_API_KEY`,
+   `LATCH_LLM_BASE_URL`, `LATCH_LLM_MODEL`, loaded from `.env` by the CLI.
+2. ~~**Unused dependency**~~ done: `@anthropic-ai/sdk` removed.
+3. ~~**Outdated Verify blocks in `task_split.md`**~~ done: Task 7's `curl` sends
+   `X-Latch-Client`, Task 9 uses the OpenAI-compatible API.
+4. ~~**`latch.lock.example` domains**~~ done: capabilities regenerated with
+   `extractCapabilities` (`domains: []`); a test keeps them in sync.
 5. **Description text isn't in the pending queue.** `PendingChange` stores hashes only,
    so the UI can't show a text diff for live changes. Adding the text is a shared
    schema change.
-6. **`title` and `outputSchema` aren't hashed or checked.** A server could change them
-   unnoticed. That's also a shared schema change.
+6. **`outputSchema` isn't hashed or checked.** A server could change it unnoticed.
+   (`title` and `annotations` are now pinned in the `metadata` hash segment.)
 
 ---
 
@@ -209,6 +207,5 @@ pnpm typecheck && pnpm test && pnpm build
 pnpm ui        # API on 127.0.0.1:7777, UI on http://localhost:5173
 ```
 
-Each task's "Verify it works" block in `task_split.md` still applies; adjust the two
-from follow-up 3. Run the Sync 1 and Sync 2 checklists together once the proxy and
+Each task's "Verify it works" block in `task_split.md` still applies. Run the Sync 1 and Sync 2 checklists together once the proxy and
 commands are in.

@@ -309,7 +309,7 @@ ss -ltn | grep 7777                                 # must show 127.0.0.1:7777, 
 ```
 To check approve: copy one `change` object from `web/src/lib/mock.ts` into
 `.latch/pending.json` (as a JSON array), `cp latch.lock.example latch.lock`, then
-`curl -s -X POST http://127.0.0.1:7777/api/pending/chg_7f3a91/approve`. Expected:
+`curl -s -X POST -H "X-Latch-Client: review-ui" http://127.0.0.1:7777/api/pending/chg_7f3a91/approve`. Expected:
 `git diff --no-index latch.lock.example latch.lock` shows the new `get_forecast`
 hashes, and `/api/pending` no longer lists it. Delete `latch.lock` and `.latch/`
 afterwards.
@@ -354,7 +354,7 @@ Manual check in the browser at http://localhost:5173, with a seeded queue as in 
 git checkout main && git pull && git checkout -b p1/task-9-llm
 ```
 **Files you edit:** `src/analyze/llm.ts`, and the `advisory` merge in `src/analyze/capabilities.ts`
-**Tests:** `tests/analyze/llm.test.ts` (new, mock `@anthropic-ai/sdk`)
+**Tests:** `tests/analyze/llm.test.ts` (new, inject a fake `fetch`)
 
 **What to build:**
 - `advisoryCacheKey()`.
@@ -370,10 +370,10 @@ git checkout main && git pull && git checkout -b p1/task-9-llm
 **Verify it works:**
 ```sh
 pnpm vitest run tests/analyze/llm.test.ts
-LATCH_LLM_ENABLED=true ANTHROPIC_API_KEY=<your key> pnpm exec tsx -e '
-import { readFileSync } from "node:fs"; import { runAdvisory } from "./src/analyze/llm.ts";
+LATCH_LLM_ENABLED=true LATCH_LLM_API_KEY=<your Groq key> pnpm exec tsx -e '
+import { readFileSync } from "node:fs"; import { DEFAULT_LLM_MODEL, runAdvisory } from "./src/analyze/llm.ts";
 const t = JSON.parse(readFileSync("tests/fixtures/poisoned-tools.json", "utf8")).tools[0];
-const opts = { apiKey: process.env.ANTHROPIC_API_KEY!, model: "claude-haiku-5-5" };
+const opts = { apiKey: process.env.LATCH_LLM_API_KEY!, model: DEFAULT_LLM_MODEL };
 runAdvisory(t, opts).then(async (first) => { const second = await runAdvisory(t, opts, first); console.log(first.findings.length, "findings; cached reused:", second === first); });'
 ```
 Expected: at least one finding, and `cached reused: true` (the second call made no
