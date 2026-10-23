@@ -1,6 +1,6 @@
 /**
  * Original pixel-art landscape: a sun setting behind snowy peaks, forested hills, a lake that
- * mirrors them and pine shores in front. Built from a few shapes and seeded noise, so it is
+ * mirrors them and pine shores in front. At night (dark themes) a moon and stars replace the sun. Built from a few shapes and seeded noise, so it is
  * deterministic and stays crisp at any size. Pure data: the React component (PixelLandscape.tsx)
  * paints each color with a theme token (--art-*), so every theme recolors it without new assets.
  */
@@ -23,6 +23,9 @@ export const ART_COLORS = [
 ] as const;
 export type ArtColor = (typeof ART_COLORS)[number];
 
+/** Day shows the setting sun; night, for dark themes, a moon and stars. */
+export type ArtTime = "day" | "night";
+
 export interface PixelArt {
   width: number;
   height: number;
@@ -34,6 +37,10 @@ const WIDTH = 512;
 const HEIGHT = 96;
 /** Near the middle, so narrow screens (which crop the sides) still show it. */
 const SUN = { x: 300, y: 50, r: 15 };
+/** Above the sun's place, so the peaks keep the same lit and shaded faces at night. */
+const MOON = { x: SUN.x, y: 26, r: 9 };
+/** Moon craters as [dx, dy, radius] from its center. */
+const CRATERS: Array<[number, number, number]> = [[-3, -2, 2.5], [3, 2, 1.8], [-1, 5, 1.5], [4, -4, 1.5]];
 /** Water line of the lake: below it is water unless the shore covers it. */
 const LAKE = 74;
 /** Snow covers the peaks above this row, give or take the noise of the gullies. */
@@ -140,7 +147,8 @@ function shoreAt(x: number): number {
   return SHORE[SHORE.length - 1]![1];
 }
 
-export function landscape(): PixelArt {
+export function landscape(time: ArtTime = "day"): PixelArt {
+  const night = time === "night";
   const grid: Array<ArtColor | null> = new Array(WIDTH * HEIGHT).fill(null);
   const get = (x: number, y: number) => (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT ? grid[y * WIDTH + x]! : null);
   const set = (x: number, y: number, color: ArtColor) => {
@@ -148,19 +156,34 @@ export function landscape(): PixelArt {
   };
 
   // Afterglow low on the horizon, fading with height and distance from the sun.
-  for (let y = 36; y < LAKE; y++) {
+  for (let y = 36; y < (night ? 0 : LAKE); y++) {
     for (let x = 0; x < WIDTH; x++) {
       const density = Math.max(0, 1 - Math.abs(x - SUN.x) / 190) * Math.min(1, (y - 36) / 34) * 0.55;
       if (dither(x, y, density)) set(x, y, "glow");
     }
   }
 
-  // Sun with a dithered halo. Distances are squared until the halo needs the real one.
-  for (let y = SUN.y - SUN.r - 7; y <= SUN.y + SUN.r + 7; y++) {
-    for (let x = SUN.x - SUN.r - 7; x <= SUN.x + SUN.r + 7; x++) {
-      const d = (x - SUN.x) ** 2 + (y - SUN.y) ** 2;
-      if (d <= SUN.r ** 2) set(x, y, "sun");
-      else if (d <= (SUN.r + 1) ** 2 || dither(x, y, 1 - (Math.sqrt(d) - SUN.r) / 7)) set(x, y, "glow");
+  if (night) {
+    // Moon: cratered, a little shaded toward its lower right, with a faint dithered halo.
+    for (let y = MOON.y - MOON.r - 6; y <= MOON.y + MOON.r + 6; y++) {
+      for (let x = MOON.x - MOON.r - 6; x <= MOON.x + MOON.r + 6; x++) {
+        const [dx, dy] = [x - MOON.x, y - MOON.y];
+        const d = dx * dx + dy * dy;
+        if (d <= MOON.r ** 2) {
+          const crater = CRATERS.some(([cx, cy, r]) => (dx - cx) ** 2 + (dy - cy) ** 2 <= r * r);
+          const limb = dx + dy > MOON.r && (x + y) % 2 === 0;
+          set(x, y, crater || limb ? "snow-shade" : "snow");
+        } else if (dither(x, y, (1 - (Math.sqrt(d) - MOON.r) / 6) * 0.5)) set(x, y, "snow-shade");
+      }
+    }
+  } else {
+    // Sun with a dithered halo. Distances are squared until the halo needs the real one.
+    for (let y = SUN.y - SUN.r - 7; y <= SUN.y + SUN.r + 7; y++) {
+      for (let x = SUN.x - SUN.r - 7; x <= SUN.x + SUN.r + 7; x++) {
+        const d = (x - SUN.x) ** 2 + (y - SUN.y) ** 2;
+        if (d <= SUN.r ** 2) set(x, y, "sun");
+        else if (d <= (SUN.r + 1) ** 2 || dither(x, y, 1 - (Math.sqrt(d) - SUN.r) / 7)) set(x, y, "glow");
+      }
     }
   }
 
@@ -201,7 +224,7 @@ export function landscape(): PixelArt {
   }
 
   // Lake: a mirror of the ranges broken by ripples that thicken toward the viewer, and the
-  // sun's glitter path.
+  // glitter path of the sun (or the narrower, paler one of the moon).
   for (let y = LAKE; y < HEIGHT; y++) {
     const depth = y - LAKE;
     const shift = Math.round((fbm(y * 0.7, 21) - 0.5) * 6);
@@ -212,16 +235,18 @@ export function landscape(): PixelArt {
       if (above === "far" || above === "far-shade") color = "far-shade";
       else if (above === "snow" || above === "snow-shade") color = "snow-shade";
       else if (above === "mid" || above === "mid-shade") color = "mid-shade";
-      const half = 3 + depth * 1.2;
+      const half = night ? 2 + depth * 0.6 : 3 + depth * 1.2;
       const dx = Math.abs(x - SUN.x);
-      if (depth % 2 === 0 && dx <= half && fbm(x / 3, 30 + y) > 0.45) color = dx < half * 0.4 ? "glow" : "sun";
+      if (depth % 2 === 0 && dx <= half && fbm(x / 3, 30 + y) > 0.45) {
+        color = dx < half * 0.4 ? (night ? "snow" : "glow") : night ? "snow-shade" : "sun";
+      }
       set(x, y, color);
     }
   }
 
-  // A bright line where the lake meets the far bank, broken by noise and warmer near the sun.
+  // A bright line where the lake meets the far bank, broken by noise and brighter under the light.
   for (let x = 0; x < WIDTH; x++) {
-    if (fbm(x / 4, 80) > 0.42) set(x, LAKE, Math.abs(x - SUN.x) < 60 ? "glow" : "cloud");
+    if (fbm(x / 4, 80) > 0.42) set(x, LAKE, Math.abs(x - SUN.x) >= 60 ? "cloud" : night ? "snow-shade" : "glow");
   }
 
   // Canoe and paddler in silhouette, a broken reflection under them and a wake behind.
@@ -333,12 +358,26 @@ export function landscape(): PixelArt {
     for (let r = 0; r < h; r++) set(x + (r > h / 2 ? lean : 0), HEIGHT - 1 - r, r === h - 1 ? "near" : "tree");
   }
 
-  // Birds: a flock caught mid-flap, and a far one as single "v"s.
-  BIRDS.forEach(([bx, by], i) => {
-    for (const [dx, dy] of WINGS[i % WINGS.length]!) set(bx + dx, by + dy, "bird");
-  });
-  for (const [bx, by] of FAR_BIRDS) {
-    for (const [dx, dy] of [[-1, 0], [1, 0], [0, 1]] as const) set(bx + dx, by + dy, "bird");
+  // Birds by day: a flock caught mid-flap, and a far one as single "v"s.
+  if (!night) {
+    BIRDS.forEach(([bx, by], i) => {
+      for (const [dx, dy] of WINGS[i % WINGS.length]!) set(bx + dx, by + dy, "bird");
+    });
+    for (const [bx, by] of FAR_BIRDS) {
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, 1]] as const) set(bx + dx, by + dy, "bird");
+    }
+  }
+
+  // Stars by night, only in open sky, thicker toward the top; the brightest get a twinkle.
+  for (let i = 0; night && i < 160; i++) {
+    const x = Math.floor(hash(i, 100) * WIDTH);
+    const y = 2 + Math.floor(hash(i, 101) ** 1.6 * 44);
+    if (get(x, y) !== null) continue;
+    const bright = hash(i, 102) > 0.85;
+    set(x, y, bright || hash(i, 103) > 0.5 ? "snow" : "snow-shade");
+    if (bright && y > 2) {
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) if (get(x + dx, y + dy) === null) set(x + dx, y + dy, "snow-shade");
+    }
   }
 
   const runs: PixelArt["runs"] = [];
