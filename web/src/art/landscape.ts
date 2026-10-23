@@ -53,6 +53,8 @@ const CLOUDS: Array<[number, number, number]> = [[262, 42, 70], [318, 54, 50], [
 const CABIN = { x: 144, w: 17 };
 /** Jetty from the cabin into the lake: planks from x to x + w on row y. */
 const JETTY = { x: 166, w: 46, y: 90 };
+/** Rocks in the shallows as [x, width, height], resting on the bottom row. */
+const ROCKS: Array<[number, number, number]> = [[222, 7, 3], [231, 4, 2], [362, 6, 3]];
 /** Waterline of the canoe's hull, on the edge of the sun's glitter path. */
 const CANOE = { x: 284, y: 86 };
 const BIRDS: Array<[number, number]> = [[176, 30], [186, 26], [195, 31], [168, 34], [206, 24]];
@@ -305,6 +307,22 @@ export function landscape(): PixelArt {
       for (let dy = 2; dy <= 3; dy++) set(x + dx, y + dy, "tree");
       if (shoreAt(x + dx) > y + 3) for (let dy = 4; dy <= 6; dy += 2) set(x + dx, y + dy, "mid-shade");
     }
+  }
+
+  // Rocks: rounded, lit on top, dark below.
+  for (const [rx, w, h] of ROCKS) {
+    for (let r = 0; r < h; r++) {
+      const inset = r === 0 ? 1 : 0;
+      for (let dx = inset; dx < w - inset; dx++) set(rx + dx, HEIGHT - h + r, r === 0 ? "far-shade" : "near");
+    }
+  }
+
+  // Reeds in the shallows off the right shore, some leaning, with seed heads.
+  for (let x = 366; x < 400; x += 1 + Math.floor(hash(x, 95) * 3)) {
+    if (shoreAt(x) < HEIGHT - 2) continue;
+    const h = 3 + Math.floor(hash(x, 96) * 5);
+    const lean = hash(x, 97) > 0.6 ? 1 : 0;
+    for (let r = 0; r < h; r++) set(x + (r > h / 2 ? lean : 0), HEIGHT - 1 - r, r === h - 1 ? "near" : "tree");
   }
 
   // Birds: a small flock gliding with raised wings.
