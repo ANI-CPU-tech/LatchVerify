@@ -343,3 +343,299 @@
   }
 }
 
+
+/*
+ * Landscape layers (web/src/art/landscape.ts): each is a <g class="art-<layer>">. Second copies
+ * and alternate poses are hidden here, so the scene is complete and still without animation.
+ */
+.art-glint-b,
+.art-smoke-b,
+.art-birds-b,
+.art-geese-b,
+.art-fireflies-b,
+.art-shooting-star,
+.art-deer-b {
+  opacity: 0;
+}
+
+/* Motion, only for viewers who have not asked for less. Lengths are art pixels. */
+@media (prefers-reduced-motion: no-preference) {
+  .art-clouds {
+    animation: art-drift 90s ease-in-out infinite alternate;
+  }
+  .art-birds-far {
+    animation: art-drift 70s linear infinite alternate;
+  }
+  /* The flock crosses the sky, flapping by showing its two poses in turn. It starts mid-flight. */
+  .art-birds-a,
+  .art-birds-b {
+    animation:
+      art-fly 48s linear -18s infinite,
+      art-swap 0.7s steps(1) infinite;
+  }
+  .art-birds-b {
+    animation-delay: -18s, -0.35s;
+  }
+  .art-glint-a,
+  .art-glint-b {
+    animation: art-swap 1.6s steps(1) infinite;
+  }
+  .art-glint-b {
+    animation-delay: -0.8s;
+  }
+  /* Two copies of the smoke, half a cycle apart, so one takes over as the other fades. */
+  .art-smoke-a,
+  .art-smoke-b {
+    animation: art-rise 7s linear infinite;
+  }
+  .art-smoke-b {
+    animation-delay: -3.5s;
+  }
+  .art-stars-a {
+    animation: art-twinkle 3s ease-in-out infinite;
+  }
+  .art-stars-b {
+    animation: art-twinkle 4.6s ease-in-out -1.2s infinite;
+  }
+  .art-stars-c {
+    animation: art-twinkle 6.2s ease-in-out -2.9s infinite;
+  }
+  .art-canoe {
+    animation: art-bob 3.2s steps(1) infinite;
+  }
+  .art-balloon {
+    animation: art-float 40s ease-in-out infinite alternate;
+  }
+  .art-sailboat {
+    animation: art-sail 50s ease-in-out infinite alternate;
+  }
+  .art-fireflies-a {
+    animation: art-blink 3.4s ease-in-out infinite;
+  }
+  .art-fireflies-b {
+    animation: art-blink 4.8s ease-in-out -2s infinite;
+  }
+  /* A shooting star now and then: hidden most of the cycle, then a quick streak down-left. */
+  .art-shooting-star {
+    animation: art-shoot 11s linear -6s infinite;
+  }
+  .art-snow-a,
+  .art-snow-b,
+  .art-snow-c {
+    animation: art-fall 6s linear infinite;
+  }
+  .art-snow-b {
+    animation-delay: -2s;
+  }
+  .art-snow-c {
+    animation-delay: -4s;
+  }
+  .art-mist {
+    animation: art-drift 40s ease-in-out infinite alternate-reverse;
+  }
+  /* The stag holds its head up for a while, then lowers it to drink. */
+  .art-deer-a {
+    animation: art-graze 9s steps(1) infinite;
+  }
+  .art-deer-b {
+    animation: art-graze 9s steps(1) -4.5s infinite;
+  }
+  .art-rays {
+    animation: art-pulse 9s ease-in-out infinite alternate;
+  }
+  /* The V of geese heads left across the sky, flapping slower than the small birds. */
+  .art-geese-a,
+  .art-geese-b {
+    animation:
+      art-migrate 64s linear -26s infinite,
+      art-swap 1s steps(1) infinite;
+  }
+  .art-geese-b {
+    animation-delay: -26s, -0.5s;
+  }
+  .art-window {
+    animation: art-flicker 5s linear infinite;
+  }
+
+  @keyframes art-drift {
+    to {
+      transform: translateX(28px);
+    }
+  }
+  @keyframes art-fly {
+    from {
+      transform: translateX(-240px);
+    }
+    to {
+      transform: translateX(360px);
+    }
+  }
+  @keyframes art-swap {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
+    }
+  }
+  @keyframes art-rise {
+    0% {
+      opacity: 0;
+      transform: translate(0, 0);
+    }
+    15% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-5px, -8px);
+    }
+  }
+  @keyframes art-twinkle {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @keyframes art-float {
+    to {
+      transform: translate(36px, -5px);
+    }
+  }
+  @keyframes art-sail {
+    to {
+      transform: translateX(34px);
+    }
+  }
+  @keyframes art-pulse {
+    from {
+      opacity: 0.5;
+    }
+  }
+  @keyframes art-migrate {
+    from {
+      transform: translateX(300px);
+    }
+    to {
+      transform: translateX(-340px);
+    }
+  }
+  @keyframes art-blink {
+    0%,
+    100% {
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @keyframes art-shoot {
+    0%,
+    86% {
+      opacity: 0;
+      transform: translate(0, 0);
+    }
+    88% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-70px, 35px);
+    }
+  }
+  @keyframes art-fall {
+    0% {
+      opacity: 0;
+      transform: translate(0, -8px);
+    }
+    15%,
+    85% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-3px, 8px);
+    }
+  }
+  @keyframes art-graze {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
+    }
+  }
+  @keyframes art-bob {
+    50% {
+      transform: translateY(1px);
+    }
+  }
+  @keyframes art-flicker {
+    0%,
+    38%,
+    42%,
+    68%,
+    72%,
+    100% {
+      opacity: 1;
+    }
+    40% {
+      opacity: 0.8;
+    }
+    70% {
+      opacity: 0.88;
+    }
+  }
+}
+
+/* Simulation page: each step's detail slides in (used through motion-safe: only). */
+@keyframes sim-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Simulation flow: a message crosses from its sender (--from) to its receiver (--to). */
+@keyframes sim-travel {
+  from {
+    left: var(--from);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  to {
+    left: var(--to);
+    opacity: 1;
+  }
+}
+
+/* Nav: the active section's icon pops in (used through motion-safe: only). */
+@keyframes nav-pop {
+  0% {
+    transform: scale(0.6) rotate(-12deg);
+  }
+  60% {
+    transform: scale(1.15) rotate(4deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+
+/* Nav: links slide in one after another on first load; the highlight fades in with them. */
+@keyframes nav-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+@keyframes nav-fade {
+  from {
+    opacity: 0;
+  }
+}

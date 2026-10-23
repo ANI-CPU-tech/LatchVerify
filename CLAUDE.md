@@ -86,8 +86,11 @@ that blocks on every reword gets disabled by its users.
 **API** (`src/ui/routes.ts`): `GET /api/pending`, `GET /api/pending/:id`,
 `POST /api/pending/:id/approve|reject`, `GET /api/events?limit=`, `GET /api/lockfile`,
 `GET /api/lockfile/git` (read-only `git status`/`git log` of `latch.lock`, in
-`src/ui/git.ts`). It answers only on loopback hosts; writes need the
-`X-Latch-Client` header and a loopback `Origin`. Do not loosen these guards.
+`src/ui/git.ts`), `POST /api/simulate` (a rug pull rehearsed in memory by
+`src/ui/simulation.ts` with the proxy's own analyzeToolList, applyApproval, shouldBlock and
+buildBlockError; it reads and writes no file, body capped at 1 MiB). It answers only on
+loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a loopback
+`Origin`. Do not loosen these guards.
 
 **Web** (`web/src`):
 - `App.tsx` routes by hash (`lib/router.ts` parses, `lib/useRoute.ts` follows `hashchange`: `#/review/<id>`, `#/tools/<server>`, ...)
@@ -99,6 +102,16 @@ that blocks on every reword gets disabled by its users.
   (`src/schema/event.ts` holds the event log schema for this reason).
 - `lib/format.ts` holds the pure view logic (plain-language explanations, server
   summaries). Keep logic there, not in components, so `tests/web/` can test it in node.
+- `lib/simulation.ts` holds the Simulation page's scenario (`RUG_PULL`, built from
+  `tests/fixtures`) and turns the API's result into steps; `components/SimFlow.tsx` animates
+  each step's messages between agent, proxy and server. Every verdict, tier, finding and error
+  on that page comes from `POST /api/simulate`; without the API the page shows an error, never
+  sample data.
+- The nav (`components/AppShell.tsx`) is animated, all `motion-safe`: one highlight slides to
+  the active link, links enter staggered, icons pop and nudge, the phone strip scrolls to the
+  active link, and the Review Queue count pings while a tier-3 change waits. The highlight is
+  placed from the `<li>` offsets, not the link's: a transformed `<li>` becomes the link's
+  offset parent.
 - `pages/` holds one file per sidebar entry. `components/ui.tsx` holds the shared pieces
   (Panel, Badge, Tabs, Terminal, buttonClass), and `components/icons.tsx` holds inline SVG
   icons (no icon dependency).
@@ -129,6 +142,13 @@ far range and forested mid range (each with sunlit and shadowed faces), a lake t
 them with the sun's glitter path, a canoe, pine shores with a cabin, jetty, rocks and reeds,
 and birds. Dark themes (`dark: true` in `themes.ts`, matching `color-scheme: dark`) get the
 night scene: a cratered moon, stars and a moonlit path instead of the sun, no birds.
+The art is drawn in named layers (`ART_LAYERS`), each a `<g class="art-<layer>">`. Moving parts
+(clouds, birds, glints, smoke, stars, canoe, window) have their own layers, animated in
+`index.css` only under `prefers-reduced-motion: no-preference`; second copies and alternate
+poses are hidden by default, so the still scene is complete. Each theme names its own extra
+in `themes.ts` (`art`): Default Light a balloon, Warm Retro a sailboat, Sunset sun rays and
+geese, Terminal Dark fireflies and a shooting star, Minimal snowfall, Forest Green a stag and
+lake mist. `sceneFor(theme)` gives the time and extra; a test keeps the mapping one to one.
 `AppShell` shows it as a fixed backdrop behind the content column on every page (the sidebar
 stays plain): the art whole at the bottom, its sky stretched to the top as a gradient
 (`--art-sky` to `--art-horizon`), with `starrySky()` stars at night. `PixelLandscape.tsx` draws

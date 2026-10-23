@@ -1,15 +1,17 @@
+import type { ArtExtra, ArtTime } from "../art/landscape.js";
+
 /**
  * Theme registry. Each id has a token block in src/index.css; this file only names them.
  * A theme changes colors, never behaviour: nothing here is read by review or approval code.
  */
 export const THEMES = [
-  { id: "light", label: "Default Light", description: "Cream, off-white, orange", dark: false },
-  { id: "warm", label: "Warm Retro", description: "Ivory, muted orange, brown", dark: false },
-  { id: "sunset", label: "Sunset", description: "Apricot, burnt orange", dark: false },
-  { id: "terminal", label: "Terminal Dark", description: "Charcoal, cream text, orange", dark: true },
-  { id: "minimal", label: "Minimal", description: "Neutral, muted artwork", dark: false },
-  { id: "forest", label: "Forest Green", description: "Ivory, forest green, olive", dark: false },
-] as const;
+  { id: "light", label: "Default Light", description: "Cream, off-white, orange", dark: false, art: "balloon" },
+  { id: "warm", label: "Warm Retro", description: "Ivory, muted orange, brown", dark: false, art: "sailboat" },
+  { id: "sunset", label: "Sunset", description: "Apricot, burnt orange", dark: false, art: "geese" },
+  { id: "terminal", label: "Terminal Dark", description: "Charcoal, cream text, orange", dark: true, art: "fireflies" },
+  { id: "minimal", label: "Minimal", description: "Neutral, muted artwork", dark: false, art: "snowfall" },
+  { id: "forest", label: "Forest Green", description: "Ivory, forest green, olive", dark: false, art: "deer" },
+] as const satisfies ReadonlyArray<{ id: string; label: string; description: string; dark: boolean; art: ArtExtra }>;
 
 export type ThemeId = (typeof THEMES)[number]["id"];
 
@@ -26,6 +28,12 @@ const THEME_IDS: ReadonlySet<string> = new Set(THEMES.map((theme) => theme.id));
 
 /** Dark themes (color-scheme: dark in index.css) show the landscape at night. */
 export const isDarkTheme = (id: ThemeId): boolean => THEMES.some((theme) => theme.id === id && theme.dark);
+
+/** The landscape a theme shows: night for dark themes, plus the theme's own extra. */
+export function sceneFor(id: ThemeId): { time: ArtTime; extra: ArtExtra } {
+  const theme = THEMES.find((entry) => entry.id === id)!;
+  return { time: theme.dark ? "night" : "day", extra: theme.art };
+}
 
 export const isThemeId = (value: unknown): value is ThemeId => typeof value === "string" && THEME_IDS.has(value);
 

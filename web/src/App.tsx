@@ -11,6 +11,7 @@ import { Overview } from "./pages/Overview";
 import { Review } from "./pages/Review";
 import { Servers } from "./pages/Servers";
 import { Settings } from "./pages/Settings";
+import { Simulation } from "./pages/Simulation";
 import { Tools } from "./pages/Tools";
 
 function Page({ route }: { route: Route }) {
@@ -27,6 +28,8 @@ function Page({ route }: { route: Route }) {
       return <Audit />;
     case "ci":
       return <GitCi />;
+    case "simulation":
+      return <Simulation />;
     case "settings":
       return <Settings />;
     case "not-found":

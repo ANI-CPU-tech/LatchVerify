@@ -1,10 +1,10 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { PixelLandscape, StarrySky } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
 import { useTheme } from "../lib/theme";
-import { isDarkTheme } from "../lib/themes";
+import { sceneFor } from "../lib/themes";
 import { href, type Page } from "../lib/router";
-import { GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
+import { FlaskIcon, GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
 
 export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon: ReactNode; href: string }> = [
@@ -14,6 +14,7 @@ export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon:
   { page: "tools", label: "Approved Tools", icon: <ToolCheckIcon />, href: href({ page: "tools", server: null }) },
   { page: "audit", label: "Audit Log", icon: <LogIcon />, href: href({ page: "audit" }) },
   { page: "ci", label: "Git & CI", icon: <GitIcon />, href: href({ page: "ci" }) },
+  { page: "simulation", label: "Simulation", icon: <FlaskIcon />, href: href({ page: "simulation" }) },
   { page: "settings", label: "Settings", icon: <SettingsIcon />, href: href({ page: "settings" }) },
 ];
 
@@ -23,50 +24,108 @@ const API_STATUS = {
   unreachable: { tone: "destructive", label: "API unreachable", detail: "Start it with pnpm ui or latch review --ui" },
 } as const;
 
-/** Count for the Review Queue nav item; destructive when a tier-3 change is waiting. */
+/**
+ * Count for the Review Queue nav item; destructive when a tier-3 change is waiting, with a ping
+ * around it to draw the eye. It bumps when the count changes.
+ */
 function QueueCount() {
   const { pending } = useData();
   if (pending.status !== "ready" || pending.data.length === 0) return null;
+  const count = pending.data.length;
   const highRisk = pending.data.some((item) => item.change.tier === 3);
   return (
-    <span
-      className={`ml-auto rounded-sm px-1.5 font-mono text-xs ${highRisk ? "bg-destructive text-destructive-foreground" : "bg-muted text-foreground"}`}
-      aria-label={`${pending.data.length} pending`}
-    >
-      {pending.data.length}
+    <span className="relative ml-auto flex">
+      {highRisk && <span aria-hidden="true" className="absolute inset-0 rounded-sm bg-destructive opacity-60 motion-safe:animate-ping" />}
+      <span
+        key={count}
+        className={`relative rounded-sm px-1.5 font-mono text-xs motion-safe:animate-[nav-pop_0.4s_ease-out] ${highRisk ? "bg-destructive text-destructive-foreground" : "bg-muted text-foreground"}`}
+        aria-label={`${count} pending`}
+      >
+        {count}
+      </span>
     </span>
   );
 }
 
+/** Where the active link sits inside the nav, for the sliding highlight. */
+type Box = { x: number; y: number; width: number; height: number };
+
+/**
+ * The section links. One highlight sits behind the active link and slides to the next one on
+ * navigation; it is measured from the DOM, so it follows wrapping, zoom and font changes.
+ */
 function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "strip" }) {
+  const wrapper = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<Box | null>(null);
+
+  useLayoutEffect(() => {
+    const root = wrapper.current;
+    if (!root) return;
+    const measure = () => {
+      const link = root.querySelector<HTMLElement>('[aria-current="page"]');
+      // Offsets of the <li>, not the link: while the entrance animation transforms an <li>, it
+      // becomes the link's offset parent and the link's own offsets read as zero.
+      const item = link?.parentElement;
+      setBox(link && item ? { x: item.offsetLeft, y: item.offsetTop, width: link.offsetWidth, height: link.offsetHeight } : null);
+    };
+    measure();
+    // The phone strip scrolls sideways: bring the active link into view.
+    const link = root.querySelector<HTMLElement>('[aria-current="page"]');
+    if (layout === "strip" && link) {
+      const smooth = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      link.scrollIntoView({ block: "nearest", inline: "center", behavior: smooth ? "smooth" : "auto" });
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [current, layout]);
+
   return (
-    <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"}>
-      {NAV.map((item) => {
-        const active = item.page === current;
-        return (
-          <li key={item.page}>
-            <a
-              href={item.href}
-              aria-current={active ? "page" : undefined}
-              className={`flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                active ? "bg-primary text-primary-foreground" : "text-sidebar-foreground hover:bg-muted"
-              }`}
-            >
-              <span className={`text-base ${active ? "" : "text-muted-foreground"}`}>{item.icon}</span>
-              {item.label}
-              {item.page === "review" && <QueueCount />}
-            </a>
-          </li>
-        );
-      })}
-    </ul>
+    <div ref={wrapper} className="relative">
+      {box && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute left-0 top-0 rounded-md bg-primary shadow-card transition-[transform,width,height] duration-300 ease-out motion-reduce:transition-none motion-safe:animate-[nav-fade_0.5s_ease-out_both]"
+          style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.width, height: box.height }}
+        />
+      )}
+      <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"}>
+        {NAV.map((item, i) => {
+          const active = item.page === current;
+          return (
+            // Links arrive one after another on first load; keys are stable, so navigation does not replay it.
+            <li key={item.page} className="motion-safe:animate-[nav-enter_0.45s_ease-out_both]" style={{ animationDelay: `${i * 45}ms` }}>
+              <a
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={`group relative flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-[color,background-color,transform] duration-300 motion-safe:active:scale-[0.97] ${
+                  active ? `text-primary-foreground ${box ? "" : "bg-primary"}` : "text-sidebar-foreground hover:bg-muted"
+                }`}
+              >
+                {/* Keyed on active, so the icon pops when its section opens; it nudges on hover. */}
+                <span
+                  key={active ? "active" : "idle"}
+                  className={`text-base transition-[color,transform] duration-200 ${
+                    active ? "motion-safe:animate-[nav-pop_0.4s_ease-out]" : "text-muted-foreground motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:scale-110 group-hover:text-foreground"
+                  }`}
+                >
+                  {item.icon}
+                </span>
+                {item.label}
+                {item.page === "review" && <QueueCount />}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
 export function AppShell({ current, children }: { current: Page; children: ReactNode }) {
   const { api, busy, reload } = useData();
   const { theme } = useTheme();
-  const night = isDarkTheme(theme);
+  const scene = sceneFor(theme);
   const status = API_STATUS[api];
   return (
     <div className="flex min-h-screen flex-col">
@@ -123,8 +182,8 @@ export function AppShell({ current, children }: { current: Page; children: React
       */}
       <div className="pointer-events-none fixed inset-0 top-14 -z-10 flex flex-col justify-end bg-gradient-to-b from-art-sky to-art-horizon md:left-56">
         {/* Stars thin out toward the top, where page headings sit on the sky without a card. */}
-        {night && <StarrySky className="block min-h-0 w-full flex-1 [mask-image:linear-gradient(to_bottom,transparent,black_75%)]" />}
-        <PixelLandscape time={night ? "night" : "day"} className="block h-auto min-h-40 w-full shrink-0" />
+        {scene.time === "night" && <StarrySky className="block min-h-0 w-full flex-1 [mask-image:linear-gradient(to_bottom,transparent,black_75%)]" />}
+        <PixelLandscape time={scene.time} extra={scene.extra} className="block h-auto min-h-40 w-full shrink-0" />
       </div>
     </div>
   );

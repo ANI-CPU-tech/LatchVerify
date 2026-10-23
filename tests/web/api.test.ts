@@ -22,6 +22,7 @@ const {
   fetchLockfileGit,
   fetchPending,
   rejectChange,
+  simulateRugPull,
   toReviewItem,
 } = await import(
   "../../web/src/lib/api.js"
@@ -191,5 +192,29 @@ describe("fetchEvents, fetchLockfile, fetchLockfileGit", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("simulateRugPull", () => {
+  const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"));
+  const request = { serverId: "weather", pinned: fixture("benign-tools.json"), served: fixture("poisoned-tools.json"), callsBefore: ["get_alerts"], callsAfter: ["get_forecast"] };
+
+  it("posts with the client header and returns the validated result from the real API", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "latch-api-sim-"));
+    try {
+      const app = createRoutes({ lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), reviewer: "alice@example.com" });
+      const mock = stubFetch(async (input, init) => app.request(`http://127.0.0.1${String(input)}`, init));
+      const result = await simulateRugPull(request);
+      expect(mock.mock.calls[0]![1]).toMatchObject({ method: "POST", headers: { [CLIENT_HEADER]: "review-ui" } });
+      expect(result.callsBefore).toEqual([{ toolName: "get_alerts", blocked: null }]);
+      expect(result.callsAfter[0]!.blocked?.error.code).toBe(-32001);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a reply that is not a simulation result", async () => {
+    stubFetch(async () => jsonResponse({ serverId: "weather" }));
+    expect(await failure(simulateRugPull(request))).toMatchObject({ name: "ApiError" });
   });
 });

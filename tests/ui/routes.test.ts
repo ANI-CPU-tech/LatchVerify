@@ -1,12 +1,13 @@
+import { readFileSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLIENT_HEADER, DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, createRoutes, type RouteDeps } from "../../src/ui/routes.js";
+import { CLIENT_HEADER, DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, MAX_SIMULATION_BYTES, createRoutes, type RouteDeps } from "../../src/ui/routes.js";
 import { EVENTS_FILE, appendEvent, readEvents, type LatchEvent } from "../../src/store/events.js";
 import { findRecord, readLockfile } from "../../src/store/lockfile.js";
 import { readPending, writePending } from "../../src/store/pending.js";
-import type { PendingChange, ToolRecord } from "../../src/schema/index.js";
+import { SimulationResultSchema, type PendingChange, type ToolRecord } from "../../src/schema/index.js";
 
 const EXAMPLE_LOCK = new URL("../../latch.lock.example", import.meta.url);
 const HASH = "d".repeat(64);
@@ -326,5 +327,39 @@ describe("request guard", () => {
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     }
+  });
+});
+
+describe("POST /api/simulate", () => {
+  const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"));
+  const body = () => ({ serverId: "weather", pinned: fixture("benign-tools.json"), served: fixture("poisoned-tools.json"), callsBefore: ["get_alerts"], callsAfter: ["get_forecast"] });
+  const post = (payload: unknown, headers: Record<string, string> = { [CLIENT_HEADER]: "test" }) =>
+    request("http://127.0.0.1/api/simulate", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(payload) });
+
+  it("runs the rug pull and writes nothing", async () => {
+    const lockBefore = await readFile(deps.lockfilePath, "utf8");
+    const response = await post(body());
+    expect(response.status).toBe(200);
+    const result = SimulationResultSchema.parse(await json(response));
+    expect(result.callsAfter[0]!.blocked?.error.code).toBe(-32001);
+    expect(await readFile(deps.lockfilePath, "utf8")).toBe(lockBefore);
+    expect(await readPending(deps.stateDir)).toEqual([]);
+    expect(await readEvents(deps.stateDir, MAX_EVENT_LIMIT)).toEqual([]);
+  });
+
+  it("needs the client header, like every write", async () => {
+    expect((await post(body(), {})).status).toBe(403);
+  });
+
+  it("answers 400 for a body that is not a simulation", async () => {
+    expect((await post({ serverId: "weather" })).status).toBe(400);
+    expect((await post({ ...body(), pinned: 42 })).status).toBe(400);
+    const notJson = await request("http://127.0.0.1/api/simulate", { method: "POST", headers: { [CLIENT_HEADER]: "test" }, body: "{" });
+    expect(notJson.status).toBe(400);
+  });
+
+  it("answers 413 for a body over the limit", async () => {
+    const response = await post({ ...body(), served: { tools: [], padding: "x".repeat(MAX_SIMULATION_BYTES) } });
+    expect(response.status).toBe(413);
   });
 });
