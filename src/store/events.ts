@@ -1,4 +1,4 @@
-import { appendFile, mkdir, open, type FileHandle } from "node:fs/promises";
+import { mkdir, open, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { z } from "zod";
@@ -54,6 +54,11 @@ void schemaMatchesType;
  * needed. Each event is one append-mode write, so concurrent writers (proxy, review UI) never
  * interleave inside a line.
  *
+ * When the log does not end in a newline (a write torn by a crash or a full disk, or a hand
+ * edit), the event starts on a fresh line, so it is not glued to the torn line and lost with it
+ * when readEvents skips that line. Two writers repairing at once leave a blank line, which
+ * readEvents skips.
+ *
  * @throws TypeError before writing when the event does not match LatchEvent at runtime (for
  * example a malformed `at`), so every line written can be read back.
  */
@@ -63,7 +68,14 @@ export async function appendEvent(stateDir: string, event: LatchEvent): Promise<
     throw new TypeError(`appendEvent: invalid event\n${z.prettifyError(result.error)}`, { cause: result.error });
   }
   await mkdir(stateDir, { recursive: true });
-  await appendFile(join(stateDir, EVENTS_FILE), `${JSON.stringify(result.data)}\n`, "utf8");
+  const handle = await open(join(stateDir, EVENTS_FILE), "a+");
+  try {
+    const { size } = await handle.stat();
+    const torn = size > 0 && (await handle.read(Buffer.alloc(1), 0, 1, size - 1)).buffer[0] !== 0x0a;
+    await handle.appendFile(`${torn ? "\n" : ""}${JSON.stringify(result.data)}\n`, "utf8");
+  } finally {
+    await handle.close();
+  }
 }
 
 /**

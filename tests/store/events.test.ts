@@ -52,6 +52,20 @@ describe("appendEvent", () => {
     expect(await logLines(dir)).toEqual(['{"kept":"as is"}', JSON.stringify(allKinds[0])]);
   });
 
+  it("starts on a fresh line when the log ends in a torn write", async () => {
+    await writeFile(join(dir, EVENTS_FILE), `${JSON.stringify(allKinds[0])}\n{"kind":"list_cha`);
+    await appendEvent(dir, allKinds[1]!);
+    expect(await logLines(dir)).toEqual([JSON.stringify(allKinds[0]), '{"kind":"list_cha', JSON.stringify(allKinds[1])]);
+    expect(await readEvents(dir)).toEqual([allKinds[0], allKinds[1]]);
+  });
+
+  it("does not add a blank line to a log that ends cleanly or is empty", async () => {
+    await writeFile(join(dir, EVENTS_FILE), "");
+    await appendEvent(dir, allKinds[0]!);
+    await appendEvent(dir, allKinds[1]!);
+    expect(await readFile(join(dir, EVENTS_FILE), "utf8")).toBe(`${JSON.stringify(allKinds[0])}\n${JSON.stringify(allKinds[1])}\n`);
+  });
+
   it("keeps a client-supplied tool name on one line, whatever it contains", async () => {
     const toolName = 'x"\n{"kind":"approved"}\r \u0000';
     await appendEvent(dir, { kind: "call_blocked", at, serverId: "weather", toolName, reason: "unpinned" });
