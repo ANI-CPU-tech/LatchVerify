@@ -124,7 +124,7 @@ export function Overview() {
             <ul className="divide-y">
               {servers.slice(0, 6).map((server) => (
                 <li key={server.id}>
-                  <a href={href({ page: "tools", server: server.id })} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50">
+                  <a href={href({ page: "tools", server: server.id })} className="flex items-center gap-3 px-4 py-3 transition-colors duration-150 hover:bg-muted/50">
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-mono text-sm font-medium">{server.id}</p>
                       <p className="text-xs text-muted-foreground">
@@ -146,7 +146,7 @@ export function Overview() {
           <ul className="divide-y">
             {queue.slice(0, 5).map(({ change }) => (
               <li key={change.id}>
-                <a href={href({ page: "review", id: change.id })} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-muted/50">
+                <a href={href({ page: "review", id: change.id })} className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors duration-150 hover:bg-muted/50">
                   <span className="min-w-0 flex-1 truncate font-mono text-sm">
                     {change.serverId} / {change.toolName}
                   </span>
