@@ -1,10 +1,13 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PROXY_COMMAND,
   SUPPORTED_CLIENTS,
   clientConfigPath,
+  detectClients,
+  serversKey,
   unwrapProxy,
   wrapWithProxy,
   type ClientId,
@@ -207,5 +210,119 @@ describe("unwrapProxy", () => {
     const before = structuredClone(wrapped);
     unwrapProxy(wrapped);
     expect(wrapped).toEqual(before);
+  });
+});
+
+/** A throwaway HOME with no XDG override, so every client path lands inside it. */
+async function fakeHome(): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), "latch-home-"));
+  vi.stubEnv("HOME", home);
+  vi.stubEnv("XDG_CONFIG_HOME", undefined);
+  return home;
+}
+
+async function writeConfig(client: ClientId, contents: unknown): Promise<string> {
+  const path = clientConfigPath(client);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, typeof contents === "string" ? contents : JSON.stringify(contents, null, 2));
+  return path;
+}
+
+describe.skipIf(onWindows)("detectClients", () => {
+  let home: string | undefined;
+
+  afterEach(async () => {
+    if (home !== undefined) await rm(home, { recursive: true, force: true });
+    home = undefined;
+  });
+
+  it("finds nothing in an empty home", async () => {
+    home = await fakeHome();
+    expect(await detectClients()).toEqual([]);
+  });
+
+  it("returns every client whose config exists, in SUPPORTED_CLIENTS order", async () => {
+    home = await fakeHome();
+    const weather = { command: "npx", args: ["tsx", "demo/weather-server.ts"] };
+    for (const client of [...SUPPORTED_CLIENTS].reverse()) {
+      await writeConfig(client, { [serversKey(client)]: { weather }, other: 1 });
+    }
+    const found = await detectClients();
+    expect(found.map((config) => config.client)).toEqual([...SUPPORTED_CLIENTS]);
+    for (const config of found) {
+      expect(config.path).toBe(clientConfigPath(config.client));
+      expect(config.servers).toEqual({ weather });
+      expect(config.raw).toEqual({ [serversKey(config.client)]: { weather }, other: 1 });
+    }
+  });
+
+  it("reads VS Code servers from servers and the others from mcpServers", async () => {
+    home = await fakeHome();
+    expect(SUPPORTED_CLIENTS.map(serversKey)).toEqual(["mcpServers", "mcpServers", "mcpServers", "servers"]);
+    await writeConfig("vscode", { mcpServers: { a: { command: "a" } }, servers: { b: { type: "stdio", command: "b" } } });
+    await writeConfig("cursor", { servers: { a: { command: "a" } }, mcpServers: { b: { command: "b" } } });
+    const found = await detectClients();
+    expect(found.find((c) => c.client === "vscode")?.servers).toEqual({ b: { type: "stdio", command: "b" } });
+    expect(found.find((c) => c.client === "cursor")?.servers).toEqual({ b: { command: "b" } });
+  });
+
+  it("keeps only wrappable stdio servers, leaving the rest in raw", async () => {
+    home = await fakeHome();
+    const mcpServers = {
+      ok: { command: "node", args: ["x.js"], env: { A: "1" }, extra: true },
+      typed: { type: "stdio", command: "uvx" },
+      http: { type: "http", url: "https://mcp.example" },
+      sse: { type: "sse", command: "x", url: "https://mcp.example/sse" },
+      urlOnly: { url: "https://mcp.example" },
+      emptyCommand: { command: "" },
+      numericArgs: { command: "node", args: [1] },
+      stringArgs: { command: "node", args: "x.js" },
+      badEnv: { command: "node", env: ["A=1"] },
+      notObject: "node x.js",
+      nothing: null,
+    };
+    await writeConfig("claude-desktop", { mcpServers });
+    const [config] = await detectClients();
+    expect(config!.servers).toEqual({ ok: mcpServers.ok, typed: mcpServers.typed });
+    expect(config!.raw).toEqual({ mcpServers });
+  });
+
+  it("detects a config without servers, with an empty server map", async () => {
+    home = await fakeHome();
+    await writeConfig("cursor", { theme: "dark" });
+    await writeConfig("claude-code", { mcpServers: [] });
+    expect((await detectClients()).map((c) => [c.client, c.servers])).toEqual([
+      ["claude-code", {}],
+      ["cursor", {}],
+    ]);
+  });
+
+  it("skips files that are not one JSON object, including JSONC", async () => {
+    home = await fakeHome();
+    await writeConfig("claude-desktop", "{ not json");
+    await writeConfig("claude-code", "[1, 2]");
+    await writeConfig("cursor", '{\n  // comment\n  "mcpServers": {}\n}');
+    await writeConfig("vscode", "");
+    expect(await detectClients()).toEqual([]);
+  });
+
+  it("skips a config path that is a directory", async () => {
+    home = await fakeHome();
+    await mkdir(clientConfigPath("cursor"), { recursive: true });
+    expect(await detectClients()).toEqual([]);
+  });
+
+  it("accepts a leading byte-order mark", async () => {
+    home = await fakeHome();
+    await writeConfig("cursor", `\uFEFF${JSON.stringify({ mcpServers: { a: { command: "a" } } })}`);
+    expect((await detectClients())[0]?.servers).toEqual({ a: { command: "a" } });
+  });
+
+  it("keeps a server named __proto__ as a plain key", async () => {
+    home = await fakeHome();
+    await writeConfig("cursor", '{"mcpServers":{"__proto__":{"command":"node"}}}');
+    const [config] = await detectClients();
+    expect(Object.hasOwn(config!.servers, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(config!.servers)).toBe(Object.prototype);
   });
 });

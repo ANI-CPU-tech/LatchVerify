@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { posix, win32, type PlatformPath } from "node:path";
 
@@ -63,12 +64,69 @@ function absoluteOrUndefined(value: string | undefined, path: PlatformPath): str
   return value !== undefined && path.isAbsolute(value) ? value : undefined;
 }
 
+/** Top-level key holding the server map: VS Code's mcp.json uses "servers", the others "mcpServers". */
+export function serversKey(client: ClientId): "servers" | "mcpServers" {
+  return client === "vscode" ? "servers" : "mcpServers";
+}
+
 /**
- * TODO: probe clientConfigPath() for every supported client and return the ones whose
- * config file exists and parses.
+ * Probe clientConfigPath() for every supported client and return, in SUPPORTED_CLIENTS order,
+ * the ones whose config file exists and parses as a JSON object. A file that is missing,
+ * unreadable or not a JSON object (JSONC with comments included) is skipped: init must never
+ * rewrite a file it could not fully read.
+ *
+ * `servers` holds only the stdio entries latch can wrap: a non-empty string `command`, `type`
+ * absent or "stdio", `args` absent or all strings, `env` absent or an object. HTTP/SSE servers
+ * and malformed entries stay in `raw` untouched. Only user-level servers are read; Claude Code's
+ * per-project servers in ~/.claude.json are not.
  */
 export async function detectClients(): Promise<ClientConfig[]> {
-  throw new Error("not implemented");
+  const configs = await Promise.all(SUPPORTED_CLIENTS.map((client) => readClientConfig(client, clientConfigPath(client))));
+  return configs.filter((config): config is ClientConfig => config !== undefined);
+}
+
+async function readClientConfig(client: ClientId, path: string): Promise<ClientConfig | undefined> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  const raw = parseJsonObject(text);
+  if (raw === undefined) return undefined;
+  return { client, path, servers: stdioServers(raw[serversKey(client)]), raw };
+}
+
+/** The parsed object, or undefined when `text` is not one JSON object. A leading BOM is allowed. */
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(text.replace(/^\uFEFF/, ""));
+    return isPlainObject(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function stdioServers(value: unknown): Record<string, ClientServerEntry> {
+  if (!isPlainObject(value)) return {};
+  // fromEntries: a server named "__proto__" stays a plain key.
+  return Object.fromEntries(Object.entries(value).filter((pair): pair is [string, ClientServerEntry] => isStdioEntry(pair[1])));
+}
+
+function isStdioEntry(value: unknown): value is ClientServerEntry {
+  if (!isPlainObject(value)) return false;
+  const { command, type, args, env } = value;
+  return (
+    typeof command === "string" &&
+    command !== "" &&
+    (type === undefined || type === "stdio") &&
+    (args === undefined || (Array.isArray(args) && args.every((arg) => typeof arg === "string"))) &&
+    (env === undefined || isPlainObject(env))
+  );
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Command a wrapped entry runs. `latch init` relies on `latch` being on the client's PATH. */
