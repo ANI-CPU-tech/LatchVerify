@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,6 +6,7 @@ import { join, resolve } from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { REPO_ROOT } from "../../scripts/package/config.js";
+import { which } from "../../scripts/package/process.js";
 import { mountBuildRoutes } from "../../scripts/package/routes.js";
 import { BuildRequestError, BuildService } from "../../scripts/package/runner.js";
 import { TARGETS, type Target } from "../../scripts/package/targets.js";
@@ -153,18 +155,80 @@ describe("BuildService", () => {
     expect(await service().job(record.id)).toMatchObject({ status: "failed", error: expect.stringContaining("interrupted") });
   });
 
-  it("prepares release notes and checksums from successful builds only, re-hashing each file", async () => {
+  it("assembles a flat release folder with checksums and notes, re-hashing each file", async () => {
     const svc = service();
     await expect(svc.prepareRelease("1.0.0")).rejects.toMatchObject({ status: 409 });
     const job = await finished(svc);
     const report = await svc.prepareRelease("1.0.0");
+    const release = join(dir, "packages", "1.0.0", "release");
     expect(report.targets).toEqual(["linux-tarball"]);
-    expect(report.notes).toContain(job.artifacts[0]!.sha256);
-    expect(report.notes).toContain("Nothing has been uploaded or published");
-    expect(await readFile(join(dir, "packages", "1.0.0", "SHA256SUMS"), "utf8")).toBe(`${job.artifacts[0]!.sha256}  linux-tarball/fake-1.0.0.tar.gz\n`);
+    expect(report.files.map((f) => f.split("/").pop())).toEqual(["fake-1.0.0.tar.gz", "SHA256SUMS", "RELEASE_NOTES.md"]);
+    expect(await readFile(join(release, "SHA256SUMS"), "utf8")).toBe(`${job.artifacts[0]!.sha256}  fake-1.0.0.tar.gz\n`);
+    expect(await readFile(join(release, "fake-1.0.0.tar.gz"), "utf8")).toBe("package bytes");
+    expect(report.notes).toContain("`fake-1.0.0.tar.gz`");
+    expect(report.notes).toContain("sha256sum --ignore-missing -c SHA256SUMS");
+    expect(report.notes).not.toContain("SHA256SUMS.asc");
 
     await writeFile(resolve(REPO_ROOT, job.artifacts[0]!.path), "tampered");
     await expect(svc.prepareRelease("1.0.0")).rejects.toThrow("changed or disappeared");
+  });
+
+  it("ships a file two builds share once, and refuses two different files with one name", async () => {
+    const shared = (bytes: string): Target =>
+      fakeTarget({
+        async package(ctx) {
+          const file = join(ctx.outDir, "shared.tar.gz");
+          await writeFile(file, bytes);
+          return [file];
+        },
+      });
+    const build = async (bytes: Record<"linux-tarball" | "arch", string>) => {
+      const svc = new BuildService({
+        outputRoot: join(dir, "packages"),
+        targets: { ...TARGETS, "linux-tarball": shared(bytes["linux-tarball"]), arch: { ...shared(bytes.arch), id: "arch" } },
+        stage: async (ctx) => ctx.workDir,
+      });
+      for (const target of ["linux-tarball", "arch"]) svc.start({ target, version: "2.0.0", arch: "noarch" });
+      await svc.idle();
+      return svc;
+    };
+    const same = await build({ "linux-tarball": "same", arch: "same" });
+    expect((await same.prepareRelease("2.0.0")).files.filter((f) => f.endsWith("shared.tar.gz"))).toHaveLength(1);
+    const different = await build({ "linux-tarball": "one", arch: "two" });
+    await expect(different.prepareRelease("2.0.0")).rejects.toThrow("with different contents");
+  });
+
+  it.skipIf(!which("gpg"))("signs SHA256SUMS with gpg when LATCH_GPG_KEY_ID is set", async () => {
+    const home = join(dir, "gnupg");
+    await mkdir(home, { mode: 0o700 });
+    const env = { ...process.env, GNUPGHOME: home };
+    execFileSync("gpg", ["--batch", "--passphrase", "", "--quick-gen-key", "LatchVerify Test <test@example.com>", "ed25519", "sign", "1d"], { env, stdio: "ignore" });
+    const fingerprint = /fpr:+([0-9A-F]{40}):/.exec(execFileSync("gpg", ["--batch", "--with-colons", "--list-secret-keys"], { env, encoding: "utf8" }))![1]!;
+    const svc = service();
+    await finished(svc);
+    Object.assign(process.env, { GNUPGHOME: home, LATCH_GPG_KEY_ID: fingerprint });
+    try {
+      const report = await svc.prepareRelease("1.0.0");
+      expect(report.files.some((f) => f.endsWith("SHA256SUMS.asc"))).toBe(true);
+      expect(report.notes).toContain("gpg --verify SHA256SUMS.asc SHA256SUMS");
+      const release = join(dir, "packages", "1.0.0", "release");
+      expect(() => execFileSync("gpg", ["--batch", "--verify", "SHA256SUMS.asc", "SHA256SUMS"], { cwd: release, env, stdio: "ignore" })).not.toThrow();
+    } finally {
+      delete process.env.GNUPGHOME;
+      delete process.env.LATCH_GPG_KEY_ID;
+      execFileSync("gpgconf", ["--kill", "gpg-agent"], { env, stdio: "ignore" });
+    }
+  });
+
+  it("refuses a malformed GPG key id", async () => {
+    const svc = service();
+    await finished(svc);
+    process.env.LATCH_GPG_KEY_ID = "me@example.com";
+    try {
+      await expect(svc.prepareRelease("1.0.0")).rejects.toThrow("LATCH_GPG_KEY_ID must be");
+    } finally {
+      delete process.env.LATCH_GPG_KEY_ID;
+    }
   });
 });
 

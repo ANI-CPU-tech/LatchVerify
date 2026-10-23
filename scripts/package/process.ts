@@ -48,6 +48,8 @@ export interface RunOptions {
   log?: Log;
   /** Kills the process after this long. Default 15 minutes. */
   timeoutMs?: number;
+  /** Written to stdin, then closed (a passphrase, never part of argv). Default: no stdin. */
+  input?: string;
 }
 
 export interface RunResult {
@@ -62,7 +64,13 @@ export interface RunResult {
  */
 export function capture(command: string, args: string[], options: RunOptions): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? buildEnv(), shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env ?? buildEnv(),
+      shell: false,
+      stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    });
+    if (options.input !== undefined) child.stdin!.end(options.input);
     const out: string[] = [];
     const err: string[] = [];
     const follow = (stream: NodeJS.ReadableStream, sink: string[]) =>
@@ -70,8 +78,8 @@ export function capture(command: string, args: string[], options: RunOptions): P
         sink.push(line);
         options.log?.(line);
       });
-    follow(child.stdout, out);
-    follow(child.stderr, err);
+    follow(child.stdout!, out);
+    follow(child.stderr!, err);
     const timer = setTimeout(() => child.kill("SIGTERM"), options.timeoutMs ?? 15 * 60_000);
     child.once("error", (error) => {
       clearTimeout(timer);
