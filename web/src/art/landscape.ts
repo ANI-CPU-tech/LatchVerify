@@ -49,6 +49,8 @@ const MID: Peak[] = [[10, 58, 0.35], [70, 50, 0.4], [150, 56, 0.35], [215, 52, 0
 const SHORE: Array<[number, number]> = [[0, 70], [60, 75], [130, 83], [185, 91], [215, 100], [380, 100], [410, 90], [460, 79], [512, 72]];
 /** Stratus streaks as [x, y, width]; drawn in front of the sun, behind the peaks. */
 const CLOUDS: Array<[number, number, number]> = [[262, 42, 70], [318, 54, 50], [118, 26, 60], [398, 30, 46], [40, 22, 40]];
+/** Waterline of the canoe's hull, on the edge of the sun's glitter path. */
+const CANOE = { x: 284, y: 86 };
 const BIRDS: Array<[number, number]> = [[176, 30], [186, 26], [195, 31], [168, 34], [206, 24]];
 
 /** 4x4 ordered-dither thresholds, the pixel-art stand-in for a gradient. */
@@ -206,6 +208,29 @@ export function landscape(): PixelArt {
   // A bright line where the lake meets the far bank, broken by noise and warmer near the sun.
   for (let x = 0; x < WIDTH; x++) {
     if (fbm(x / 4, 80) > 0.42) set(x, LAKE, Math.abs(x - SUN.x) < 60 ? "glow" : "cloud");
+  }
+
+  // Canoe and paddler in silhouette, a broken reflection under them and a wake behind.
+  {
+    const { x, y } = CANOE;
+    for (let dx = -7; dx <= 7; dx++) set(x + dx, y, "tree");
+    for (let dx = -5; dx <= 5; dx++) set(x + dx, y + 1, "tree");
+    set(x - 8, y - 1, "tree");
+    set(x + 8, y - 1, "tree");
+    // Seated figure: head, shoulders, body.
+    set(x - 1, y - 5, "tree");
+    for (let dx = -2; dx <= 0; dx++) set(x + dx, y - 4, "tree");
+    for (let dy = -3; dy <= -1; dy++) for (let dx = -2; dx <= 0; dx++) set(x + dx, y + dy, "tree");
+    // Paddle across the body, its blade in the water.
+    for (let i = 0; i < 8; i++) set(x - 3 + i, y - 6 + i, "tree");
+    set(x + 5, y + 2, "tree");
+    set(x + 6, y + 2, "tree");
+    for (let dy = 2; dy <= 5; dy++) {
+      for (let dx = -5 + dy; dx <= 5 - dy; dx++) if ((dx + dy) % 2 === 0) set(x + dx - 1, y + dy, "mid-shade");
+    }
+    for (let dx = 9; dx <= 22; dx++) {
+      if (hash(dx, 90) > 0.4) set(x + dx, y + 1 + Math.floor(dx / 8), "cloud");
+    }
   }
 
   // Shore with grass tufts and dark speckles, then pines on it: taller where the shore rises toward the viewer.
