@@ -214,7 +214,8 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
  * "forward". A blocked call never reaches the server.
  *
  * Blocked when no tools/list has been analyzed since start or the last list_changed
- * ("unverified": the server may be serving definitions nobody has checked), or when
+ * ("unverified": the server may be serving definitions nobody has checked; startProxy holds such
+ * calls until a list is analyzed, so this only answers calls whose hold timed out), or when
  * shouldBlock() objects given the queue and this session's observed changes. The observed
  * changes keep a definition blocked after `latch review` rejects it, and after a failed state
  * write. Every block is logged and recorded as a call_blocked event.
