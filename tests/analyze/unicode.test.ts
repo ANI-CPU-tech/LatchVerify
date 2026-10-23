@@ -1,6 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { SUSPICIOUS_RANGES, decodeTagChars, findSuspiciousCodepoints, suspiciousRange } from "../../src/analyze/unicode.js";
+import {
+  SUSPICIOUS_RANGES,
+  decodeTagChars,
+  escapeForEvidence,
+  findConfusables,
+  findSuspiciousCodepoints,
+  formatCodepoint,
+  suspiciousRange,
+} from "../../src/analyze/unicode.js";
 import { McpToolListSchema, type McpTool } from "../../src/schema/index.js";
 
 const fixtureTools = (name: string): McpTool[] =>
@@ -115,5 +123,67 @@ describe("decodeTagChars", () => {
     expect(decodeTagChars("")).toBe("");
     expect(decodeTagChars("plain text \u{1f600}")).toBe("");
     for (const tool of fixtureTools("benign-tools.json")) expect(decodeTagChars(tool.description ?? "")).toBe("");
+  });
+});
+
+describe("findConfusables", () => {
+  it("flags Latin words with Cyrillic or Greek look-alike letters", () => {
+    expect(findConfusables("read the p\u{430}th")).toEqual(["p\u{430}th"]);
+    expect(findConfusables("visit g\u{3bf}ogle now")).toEqual(["g\u{3bf}ogle"]);
+  });
+
+  it("flags compatibility forms that NFKC folds to plain letters", () => {
+    expect(findConfusables("\u{ff50}\u{ff41}\u{ff54}\u{ff48}")).toEqual(["\u{ff50}\u{ff41}\u{ff54}\u{ff48}"]); // full-width
+    expect(findConfusables("open \u{fb01}le")).toEqual(["\u{fb01}le"]); // fi ligature
+    expect(findConfusables("\u{1d42b}\u{1d41e}\u{1d41a}\u{1d41d}")).toEqual(["\u{1d42b}\u{1d41e}\u{1d41a}\u{1d41d}"]); // math bold
+  });
+
+  it("does not flag single-script words in any script", () => {
+    expect(findConfusables("Get the weather forecast for a location.")).toEqual([]);
+    expect(findConfusables("\u{43f}\u{440}\u{438}\u{432}\u{435}\u{442} \u{3ba}\u{3b1}\u{3bb}\u{3b7}\u{3bc}\u{3ad}\u{3c1}\u{3b1} \u{645}\u{631}\u{62d}\u{628}\u{627}")).toEqual([]);
+  });
+
+  it("does not flag accents, precomposed or decomposed", () => {
+    expect(findConfusables("caf\u{e9} cafe\u{301} na\u{ef}ve")).toEqual([]);
+  });
+
+  it("allows the script mixes real languages use", () => {
+    expect(findConfusables("\u{6771}\u{4eac}\u{30bf}\u{30ef}\u{30fc}")).toEqual([]); // Han + Katakana
+    expect(findConfusables("T\u{30b7}\u{30e3}\u{30c4}")).toEqual([]); // Latin + Katakana
+    expect(findConfusables("\u{d55c}\u{ad6d}\u{8a9e}")).toEqual([]); // Hangul + Han
+  });
+
+  it("flags mixes outside the allowed profiles", () => {
+    expect(findConfusables("\u{d55c}\u{30bf}")).toEqual(["\u{d55c}\u{30bf}"]); // Hangul + Katakana
+    expect(findConfusables("abc\u{639}\u{631}\u{628}")).toEqual(["abc\u{639}\u{631}\u{628}"]); // Latin + Arabic
+  });
+
+  it("ignores digits and punctuation between letters", () => {
+    expect(findConfusables("p4th v1.2 user_id e-mail")).toEqual([]);
+  });
+
+  it("returns each offending word once, in order of first appearance", () => {
+    const text = "x\u{430} p\u{430}th x\u{430} \u{fb01}le p\u{430}th";
+    expect(findConfusables(text)).toEqual(["x\u{430}", "p\u{430}th", "\u{fb01}le"]);
+  });
+
+  it("finds nothing in either fixture", () => {
+    for (const tool of [...fixtureTools("benign-tools.json"), ...fixtureTools("poisoned-tools.json")]) {
+      expect(findConfusables(tool.description ?? "")).toEqual([]);
+    }
+  });
+});
+
+describe("escapeForEvidence", () => {
+  it("quotes printable ASCII unchanged", () => {
+    expect(escapeForEvidence("read ~/.ssh/id_rsa")).toBe('"read ~/.ssh/id_rsa"');
+  });
+
+  it("renders every other character as [U+XXXX], including quotes and newlines", () => {
+    expect(escapeForEvidence('a\u{200b}"\n\u{430}\u{e0068}')).toBe('"a[U+200B][U+0022][U+000A][U+0430][U+E0068]"');
+  });
+
+  it("formats codepoints with at least four uppercase hex digits", () => {
+    expect([0x9, 0x200b, 0xe0068, 0x10ffff].map(formatCodepoint)).toEqual(["U+0009", "U+200B", "U+E0068", "U+10FFFF"]);
   });
 });

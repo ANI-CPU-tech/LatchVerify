@@ -98,13 +98,86 @@ export function decodeTagChars(text: string): string {
   return decoded;
 }
 
+/** Scripts a letter is checked against, in order. Letters in none of them count as "Other". */
+const SCRIPTS: ReadonlyArray<readonly [string, RegExp]> = [
+  "Latin", "Greek", "Cyrillic", "Armenian", "Georgian", "Cherokee", "Hebrew", "Arabic", "Syriac", "Thaana",
+  "Devanagari", "Bengali", "Gurmukhi", "Gujarati", "Oriya", "Tamil", "Telugu", "Kannada", "Malayalam",
+  "Sinhala", "Thai", "Lao", "Tibetan", "Myanmar", "Khmer", "Mongolian", "Ethiopic", "Canadian_Aboriginal",
+  "Han", "Hiragana", "Katakana", "Bopomofo", "Hangul",
+].map((name) => [name, new RegExp(`^\\p{Script=${name}}$`, "u")] as const);
+
+/** Script-neutral characters (shared punctuation, combining marks) never make a word mixed. */
+const NEUTRAL_SCRIPT = /^[\p{Script=Common}\p{Script=Inherited}]$/u;
+
 /**
- * Homoglyph check.
- * TODO: compare `text` with text.normalize("NFKC") and flag words that mix scripts (e.g. Latin
- * plus Cyrillic "а") or change under NFKC. Returns the offending words.
+ * Script combinations that are normal in one word, from the UTS #39 "highly restrictive"
+ * profile: Japanese, Chinese with Bopomofo, and Korean, each optionally with Latin.
+ */
+const ALLOWED_MIXES: ReadonlyArray<ReadonlySet<string>> = [
+  new Set(["Latin", "Han", "Hiragana", "Katakana"]),
+  new Set(["Latin", "Han", "Bopomofo"]),
+  new Set(["Latin", "Han", "Hangul"]),
+];
+
+/** A word: a run of letters and the combining marks attached to them. */
+const WORD = /[\p{L}\p{M}]+/gu;
+
+/** Scripts used by the letters of `word`, in order of first appearance. */
+function scriptsOf(word: string): string[] {
+  const scripts: string[] = [];
+  for (const char of word) {
+    if (NEUTRAL_SCRIPT.test(char)) continue;
+    const script = SCRIPTS.find(([, pattern]) => pattern.test(char))?.[0] ?? "Other";
+    if (!scripts.includes(script)) scripts.push(script);
+  }
+  return scripts;
+}
+
+/**
+ * Why `word` could impersonate another word, or null when it is fine:
+ * - it mixes scripts in a way no real language does (Latin "p" + Cyrillic "\u{430}" + "th"), or
+ * - NFKC changes it beyond canonical composition (full-width "\u{ff50}ath", the "\u{fb01}" ligature,
+ *   mathematical bold letters). Comparing with NFC keeps decomposed accents from counting.
+ */
+function confusableReason(word: string): string | null {
+  const scripts = scriptsOf(word);
+  if (scripts.length > 1 && !ALLOWED_MIXES.some((allowed) => scripts.every((s) => allowed.has(s)))) {
+    return `mixes ${scripts.join(" + ")}`;
+  }
+  const folded = word.normalize("NFKC");
+  return folded === word.normalize("NFC") ? null : `folds to ${escapeForEvidence(folded)} under NFKC`;
+}
+
+/**
+ * Homoglyph check: words that mix scripts or change under NFKC, deduplicated, in order of first
+ * appearance.
+ * shortcut: a word written entirely in one look-alike script (all-Cyrillic "\u{440}\u{43e}\u{440}")
+ * needs the UTS #39 confusables table to catch; add it if such names show up in practice.
  */
 export function findConfusables(text: string): string[] {
-  throw new Error("not implemented");
+  const words = new Set<string>();
+  for (const [word] of text.matchAll(WORD)) {
+    if (!words.has(word) && confusableReason(word) !== null) words.add(word);
+  }
+  return [...words];
+}
+
+/**
+ * Printable-ASCII rendering of text for finding evidence, in double quotes. Anything outside
+ * printable ASCII becomes [U+XXXX], so evidence can never itself hide or reorder characters.
+ */
+export function escapeForEvidence(text: string): string {
+  let out = "";
+  for (const char of text) {
+    const codepoint = char.codePointAt(0)!;
+    out += codepoint >= 0x20 && codepoint <= 0x7e && char !== '"' ? char : `[${formatCodepoint(codepoint)}]`;
+  }
+  return `"${out}"`;
+}
+
+/** "U+200B", "U+E0068": at least four hex digits, uppercase. */
+export function formatCodepoint(codepoint: number): string {
+  return `U+${codepoint.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
 /**
