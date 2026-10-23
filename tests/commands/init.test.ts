@@ -414,3 +414,81 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
     expect((await init()).text).not.toContain("is not on PATH");
   });
 });
+
+describe.skipIf(process.platform === "win32")("runInit prompt", () => {
+  let home: string;
+  let lockfilePath: string;
+  const weatherEntry = { command: process.execPath, args: ["--import", tsx, join(root, "demo/weather-server.ts")] };
+  const alsoWeather = { ...weatherEntry, env: { SECOND: "1" } };
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), "latch-init-prompt-"));
+    lockfilePath = join(home, "latch.lock");
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("XDG_CONFIG_HOME", undefined);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const path = clientConfigPath("cursor");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ mcpServers: { alpha: weatherEntry, beta: alsoWeather } }));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await rm(home, { recursive: true, force: true });
+  });
+
+  /** Run init interactively, typing `keys` once the prompt is up. */
+  async function initWith(keys: string) {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let text = "";
+    output.setEncoding("utf8").on("data", (chunk: string) => {
+      text += chunk;
+      if (keys !== "" && text.includes("Which servers should latch protect?")) {
+        // After the render returns: the prompt starts listening only once it has drawn itself.
+        const typed = keys;
+        setImmediate(() => input.write(typed));
+        keys = "";
+      }
+    });
+    const code = await runInit({ dryRun: false, lockfilePath, reviewer: "dev@example.com", timeoutMs: 20_000, output, input, interactive: true });
+    return { code, text: text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "") };
+  }
+
+  const wrapped = async () =>
+    Object.entries(JSON.parse(await readFile(clientConfigPath("cursor"), "utf8")).mcpServers as Record<string, ClientServerEntry>)
+      .filter(([, entry]) => entry.command === "latch")
+      .map(([id]) => id);
+
+  it("offers every server, pre-selected, and takes them all on enter", async () => {
+    const { code, text } = await initWith("\r");
+    expect(code).toBe(0);
+    expect(text).toContain("alpha");
+    expect(text).toContain("cursor: ");
+    expect(await wrapped()).toEqual(["alpha", "beta"]);
+  });
+
+  it("wraps and pins only the servers left selected", async () => {
+    const { code } = await initWith(" \r");
+    expect(code).toBe(0);
+    expect(await wrapped()).toEqual(["beta"]);
+    expect(Object.keys(LockFileSchema.parse(JSON.parse(await readFile(lockfilePath, "utf8"))).servers)).toEqual(["beta"]);
+  });
+
+  it("changes nothing when every server is deselected", async () => {
+    const { code, text } = await initWith(" \x1b[B \r");
+    expect(code).toBe(0);
+    expect(text).toContain("no server chosen; nothing changed");
+    expect(await wrapped()).toEqual([]);
+    await expect(readFile(lockfilePath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("changes nothing and exits 1 when the prompt is cancelled", async () => {
+    const { code, text } = await initWith("\x03");
+    expect(code).toBe(1);
+    expect(text).toContain("cancelled; nothing changed");
+    expect(await wrapped()).toEqual([]);
+    await expect(readFile(lockfilePath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});

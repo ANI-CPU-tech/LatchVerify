@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { delimiter, dirname, join, resolve } from "node:path";
-import type { Writable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import { isDeepStrictEqual } from "node:util";
+import { isCancel, multiselect } from "@clack/prompts";
 import pc from "picocolors";
 import {
   PROXY_COMMAND,
@@ -35,6 +36,13 @@ export interface InitOptions {
   timeoutMs?: number;
   /** Where progress is written. Defaults to process.stdout. */
   output?: Writable;
+  /**
+   * Ask which servers to wrap. Defaults to true when stdin and stdout are terminals and this is
+   * not a dry run; otherwise every server is taken, so scripts and CI need no input.
+   */
+  interactive?: boolean;
+  /** Where answers to the prompt come from. Defaults to process.stdin. */
+  input?: Readable;
 }
 
 /** One server latch init can wrap, as configured in one or more clients. */
@@ -191,8 +199,9 @@ function stringEnv(env: unknown): Record<string, string> {
  *
  * 1. Reads latch.lock (a malformed one stops init before anything changes) and detects client
  *    configs, or only `client`'s.
- * 2. Collects their stdio servers (collectServers) and pins each server latch.lock does not have
- *    yet (pinServer), under the reviewer. A server already in latch.lock is left as pinned:
+ * 2. Collects their stdio servers (collectServers), asks which to wrap with a multiselect (all
+ *    pre-selected; skipped when not interactive), and pins each chosen server latch.lock does
+ *    not have yet (pinServer), under the reviewer. A server already in latch.lock is left as pinned:
  *    changes to it go through `latch review`, never through a re-run of init.
  * 3. Writes latch.lock, then rewrites each client entry to run `latch proxy`, with
  *    LATCH_LOCKFILE_PATH and LATCH_STATE_DIR in its env so the proxy finds this lockfile and
@@ -204,8 +213,8 @@ function stringEnv(env: unknown): Record<string, string> {
  * init again changes nothing. With `dryRun`, servers are still queried to show what would be
  * pinned, but nothing is written.
  *
- * Resolves with 0 when every server was handled, 1 when no client config was found or any
- * server was skipped or failed.
+ * Resolves with 0 when every chosen server was handled (or none was chosen), 1 when no client
+ * config was found, the prompt was cancelled, or any server was skipped or failed.
  *
  * @throws LockfileError when latch.lock exists but is malformed.
  */
@@ -238,12 +247,39 @@ export async function runInit(options: InitOptions): Promise<number> {
     return failed ? 1 : 0;
   }
 
+  const interactive = options.interactive ?? (!options.dryRun && process.stdin.isTTY === true && process.stdout.isTTY === true);
+  let chosen = servers;
+  if (interactive) {
+    say();
+    const picked = await multiselect({
+      message: "Which servers should latch protect?",
+      options: servers.map((server) => ({
+        value: server.serverId,
+        label: printable(server.serverId),
+        hint: `${server.clients.join(", ")}: ${commandLine(server.command, server.args)}${Object.hasOwn(lock.servers, server.serverId) ? " (already pinned)" : ""}`,
+      })),
+      initialValues: servers.map((server) => server.serverId),
+      required: false,
+      input: options.input ?? process.stdin,
+      output: out,
+    });
+    if (isCancel(picked)) {
+      say(pc.yellow("cancelled; nothing changed"));
+      return 1;
+    }
+    chosen = servers.filter((server) => picked.includes(server.serverId));
+    if (chosen.length === 0) {
+      say("no server chosen; nothing changed");
+      return failed ? 1 : 0;
+    }
+  }
+
   const reviewer = options.reviewer ?? defaultReviewer();
   const now = new Date();
   let next = lock;
   const ready: InitServer[] = [];
   say();
-  for (const server of servers) {
+  for (const server of chosen) {
     const id = printable(server.serverId);
     const existing = Object.hasOwn(next.servers, server.serverId) ? next.servers[server.serverId]! : undefined;
     if (existing !== undefined) {
