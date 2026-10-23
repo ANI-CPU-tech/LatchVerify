@@ -89,11 +89,17 @@ that blocks on every reword gets disabled by its users.
 `src/ui/git.ts`). It answers only on loopback hosts; writes need the
 `X-Latch-Client` header and a loopback `Origin`. Do not loosen these guards.
 
+`pnpm ui` runs `scripts/dev-ui.ts`, which also mounts the **development-only build API**
+(`/api/build/*`, `scripts/package/routes.ts`) behind the same guard through
+`startUiServer({ extend })`. `latch review --ui` never mounts it, so the shipped CLI cannot
+run builds; the Build & Distribution page then says it needs a source checkout.
+
 **Web** (`web/src`):
 - `App.tsx` routes by hash (`lib/router.ts` parses, `lib/useRoute.ts` follows `hashchange`: `#/review/<id>`, `#/tools/<server>`, ...)
   so the same bundle works under Vite and under `latch review --ui`.
 - `lib/data.tsx` loads the queue, lockfile, events and git status once and shares them
-  with every page. Refresh, or a decision, reloads all four.
+  with every page. It polls every 3 s while the API is connected. Refresh, or a decision,
+  reloads all four.
 - `lib/api.ts` validates every response with the shared zod schemas
   (`src/schema/event.ts` holds the event log schema for this reason).
 - `lib/format.ts` holds the pure view logic (plain-language explanations, server
@@ -122,6 +128,47 @@ shows the last `tools_listed` event instead.
 - The preference ("system" or a theme id) is stored in `localStorage` under
   `latch.theme`, with every access wrapped in try/catch.
 
+**Artwork.** `web/src/art/landscape.ts` generates an original pixel-art landscape: sun,
+two mountain ranges with snow, pines and birds. It comes in two scenes, `wide` for the
+Overview header and `tall` for the bottom of the sidebar, which hides on short windows.
+`PixelLandscape.tsx` draws it as inline SVG with `crispEdges`, colored by the `--art-*` tokens
+of each theme; Minimal uses muted greys. The art is decorative only: `aria-hidden`,
+`pointer-events-none`, and never placed over content. The app icon is a 16x16 grid in
+`scripts/package/icon.ts`, rendered to PNG/ICO/SVG for packages and to
+`web/public/favicon.svg`, which a test keeps in sync.
+
+## Packaging (scripts/package, packaging/)
+
+Run `pnpm package <target> --version x.y.z`, or use the Build & Distribution page. Read
+`packaging/README.md` first.
+- Every package holds the same architecture-independent app: dist, the web UI, and
+  production `node_modules` installed offline and hoisted from the pnpm store. It needs
+  Node 22+ at run time.
+- Targets:
+  - `linux-tarball`, `windows-zip` and `arch` build and verify on this CachyOS machine.
+  - `deb` needs `dpkg-deb`.
+  - `flatpak` needs flatpak-builder plus the freedesktop 24.08 runtime, SDK and node22
+    extension. It is a local bundle, not Flathub (see `packaging/flatpak/FLATHUB.md`).
+  - `windows-installer` (Inno Setup) builds only on Windows or through
+    `.github/workflows/package.yml`, which is manual-trigger only.
+- Templates in `packaging/` use `@NAME@` placeholders. `config.ts render()` throws on a
+  missing or unused value.
+- Launchers: `packaging/linux/latchverify-review` (POSIX sh) and `LatchVerify Review.cmd`
+  run `latch review --ui`. They ask for the project directory when started from a menu.
+
+Packaging rules:
+- The API and CLI take only `{target, version, arch}`, validated by
+  `src/schema/build.ts`.
+- Every command runs with `shell: false`, with fixed arguments and an allowlisted
+  environment (`process.ts buildEnv`).
+- `assertCleanTree` refuses `.env`, keys, `.npmrc`, `latch.lock` and `.latch` in a package.
+- A job succeeds only if every prerequisite, validation and verification check passes, and
+  only then are artifacts listed or downloadable.
+- Output goes to the gitignored `build/packages/<version>/<target>/`, with SHA256SUMS,
+  INSTALL.md and build.json. Job records are in `build/packages/.jobs/`.
+- "Prepare release" writes RELEASE_NOTES.md and SHA256SUMS after re-hashing every file.
+- Nothing in scripts/package pushes, uploads, tags or publishes; keep it that way.
+
 ## Build order (as built)
 
 1. `analyze/hash.ts` (canonical JSON, segment hashes) and `store/lockfile.ts`
@@ -145,7 +192,10 @@ shows the last `tools_listed` event instead.
 pnpm typecheck   # must stay at zero errors
 pnpm test
 pnpm build      # CLI into dist/, web UI into dist/web (latch review --ui)
-pnpm ui         # API on 7777 + Vite on 5173; set LATCH_LOCKFILE_PATH / LATCH_STATE_DIR
+pnpm ui         # API (+ dev build API) on 7777, Vite on 5173; set LATCH_LOCKFILE_PATH / LATCH_STATE_DIR
+pnpm package --list                     # packaging targets and missing tools
+pnpm package arch --version 0.1.0       # build + verify one package
+pnpm package --release 0.1.0            # release notes + checksums (local files only)
 ```
 
 There is no browser test runner. To check the UI visually, serve the built bundle and use
@@ -153,8 +203,12 @@ There is no browser test runner. To check the UI visually, serve the built bundl
 
 ## Remaining work
 
-- `pnpm build` does not build the web UI; it needs the separate `vite build` step.
-- The UI does not poll; it refreshes on demand and after each decision.
-- Verification results are not stored, so the Git & CI page documents `latch verify`
-  rather than showing CI runs.
-- The optional LLM advisory (`src/analyze/llm.ts`) is not wired into the proxy.
+- CI results are not stored, so the Git & CI page documents `latch verify` rather than
+  showing CI runs, and no page shows live proxy connections.
+- Packages are unsigned. There is no AppImage, because it would need a downloaded Node
+  runtime and appimagetool.
+- The `.deb`, Flatpak and Windows installer targets are implemented but have not been
+  built on this machine: the tools are missing, or the target needs Windows.
+- Flathub submission needs a source-built manifest with generated npm sources and an app id
+  matching a repository you own (`packaging/flatpak/FLATHUB.md`).
+- On Windows, MCP clients that spawn `latch` without a shell may not resolve `latch.cmd`.
