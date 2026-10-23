@@ -61,16 +61,20 @@ export async function writePending(stateDir: string, changes: readonly PendingCh
 }
 
 /**
- * TODO: add `change`, replacing any existing entry for the same serverId/toolName (only the
- * latest observed definition is reviewable). Returns the new queue.
+ * Add `change` to the end of the queue, dropping any entry for the same serverId/toolName (only
+ * the latest observed definition is reviewable) and any entry with the same id (ids stay
+ * unique, so dequeue removes exactly one change). Pure: returns a new array.
  */
 export function enqueue(queue: readonly PendingChange[], change: PendingChange): PendingChange[] {
-  throw new Error("not implemented");
+  const kept = queue.filter(
+    (entry) => entry.id !== change.id && (entry.serverId !== change.serverId || entry.toolName !== change.toolName),
+  );
+  return [...kept, change];
 }
 
-/** TODO: return the queue without the change whose id matches. */
+/** The queue without the change whose id matches; unchanged contents when none does. Pure. */
 export function dequeue(queue: readonly PendingChange[], id: string): PendingChange[] {
-  throw new Error("not implemented");
+  return queue.filter((entry) => entry.id !== id);
 }
 
 /** Temp file, fsync, rename: the target holds either the old or the new content, never a mix. */

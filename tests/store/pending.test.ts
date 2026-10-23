@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LockFileSchema, PendingChangeSchema, type PendingChange, type Tier } from "../../src/schema/index.js";
-import { PENDING_FILE, readPending, writePending } from "../../src/store/pending.js";
+import { PENDING_FILE, dequeue, enqueue, readPending, writePending } from "../../src/store/pending.js";
 
 const exampleRecord = (toolName: string) =>
   LockFileSchema.parse(JSON.parse(readFileSync(new URL("../../latch.lock.example", import.meta.url), "utf8"))).servers.weather!.tools.find(
@@ -145,5 +145,79 @@ describe("writePending", () => {
     const before = structuredClone(queue);
     await writePending(dir, queue);
     expect(queue).toEqual(before);
+  });
+});
+
+describe("enqueue", () => {
+  const ids = (queue: readonly PendingChange[]) => queue.map((entry) => entry.id);
+
+  it("appends a change for a new tool", () => {
+    const queue = enqueue(enqueue([], change("chg_1")), change("chg_2", { toolName: "get_alerts" }));
+    expect(ids(queue)).toEqual(["chg_1", "chg_2"]);
+  });
+
+  it("replaces the entry for the same server and tool with the latest change", () => {
+    const queue = [change("chg_1"), change("chg_2", { toolName: "get_alerts" })];
+    const latest = change("chg_3", { tier: 2 });
+    expect(enqueue(queue, latest)).toEqual([queue[1], latest]);
+  });
+
+  it("keeps entries for the same tool name on another server", () => {
+    const queue = [change("chg_1", { serverId: "other" })];
+    expect(ids(enqueue(queue, change("chg_2")))).toEqual(["chg_1", "chg_2"]);
+  });
+
+  it("drops an entry that reuses the new change's id, keeping ids unique", () => {
+    const queue = [change("chg_1", { toolName: "get_alerts" })];
+    expect(enqueue(queue, change("chg_1"))).toEqual([change("chg_1")]);
+  });
+
+  it("removes every stale entry for the tool, even duplicates", () => {
+    const queue = [change("chg_1"), change("chg_2", { toolName: "get_alerts" }), change("chg_3")];
+    expect(ids(enqueue(queue, change("chg_4")))).toEqual(["chg_2", "chg_4"]);
+  });
+
+  it("does not mutate the queue", () => {
+    const queue = [change("chg_1")];
+    const before = structuredClone(queue);
+    const next = enqueue(queue, change("chg_2"));
+    expect(queue).toEqual(before);
+    expect(next).not.toBe(queue);
+  });
+});
+
+describe("dequeue", () => {
+  it("removes the change with the given id", () => {
+    const queue = [change("chg_1"), change("chg_2", { toolName: "get_alerts" })];
+    expect(dequeue(queue, "chg_1")).toEqual([queue[1]]);
+  });
+
+  it("returns an equal copy when no change matches", () => {
+    const queue = [change("chg_1")];
+    const next = dequeue(queue, "chg_missing");
+    expect(next).toEqual(queue);
+    expect(next).not.toBe(queue);
+    expect(dequeue([], "chg_1")).toEqual([]);
+  });
+
+  it("matches ids exactly", () => {
+    const queue = [change("chg_1")];
+    for (const id of ["CHG_1", "chg_1 ", "chg_", ""]) expect(dequeue(queue, id)).toEqual(queue);
+  });
+
+  it("does not mutate the queue", () => {
+    const queue = [change("chg_1")];
+    const before = structuredClone(queue);
+    dequeue(queue, "chg_1");
+    expect(queue).toEqual(before);
+  });
+
+  it("round-trips through disk with enqueue and writePending", async () => {
+    let queue = await readPending(dir);
+    queue = enqueue(queue, change("chg_1"));
+    queue = enqueue(queue, change("chg_2", { toolName: "get_alerts" }));
+    await writePending(dir, queue);
+    await writePending(dir, dequeue(await readPending(dir), "chg_1"));
+    expect(await readPending(dir)).toEqual([change("chg_2", { toolName: "get_alerts" })]);
   });
 });
