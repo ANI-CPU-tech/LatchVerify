@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
-import { routeFrame, type InterceptorContext } from "../../src/proxy/interceptor.js";
+import { MAX_OWN_PAGES, routeFrame, type InterceptorContext } from "../../src/proxy/interceptor.js";
 import { parseLine, type Direction, type JsonRpcRequest } from "../../src/proxy/transport.js";
 import { LockFileSchema, type LockFile, type McpTool } from "../../src/schema/index.js";
 import { readEvents } from "../../src/store/events.js";
@@ -384,5 +384,89 @@ describe("batches", () => {
     const { fromClient, fromServer } = await setup();
     expect(await fromServer(JSON.stringify([{ jsonrpc: "2.0", method: "x" }]))).toEqual(FORWARD);
     expect(await fromClient("[not json")).toEqual(FORWARD);
+  });
+});
+
+const listChanged = { jsonrpc: "2.0", method: "notifications/tools/list_changed" };
+
+describe("onToolsListChanged", () => {
+  it("re-fetches tools/list, blocks calls until it is analyzed, and forwards the notification", async () => {
+    const { fromServer, fromClient, listTools, ctx, sent, kinds } = await setup();
+    await listTools(benign);
+    expect(await fromServer(listChanged)).toEqual(FORWARD);
+    expect(ctx.verified).toBe(false);
+    expect(sent).toEqual([{ jsonrpc: "2.0", id: expect.stringMatching(/^latchverify-[0-9a-f-]{36}$/), method: "tools/list" }]);
+    expect([...ctx.ownRequests]).toEqual([[sent[0]!.id, 1]]);
+    expect(await fromClient(call(6, "get_alerts"))).toMatchObject({ message: { error: { data: { reason: { kind: "unverified" } } } } });
+    expect(await kinds()).toEqual(["tools_listed", "list_changed", "call_blocked"]);
+  });
+
+  it("analyzes and drops the answer to its own tools/list (task Verify)", async () => {
+    const { fromServer, fromClient, listTools, ctx, sent } = await setup();
+    await listTools(benign);
+    await fromServer(listChanged);
+    expect(await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: poisoned } })).toEqual({ action: "drop" });
+    expect(ctx.ownRequests.size).toBe(0);
+    expect(ctx.verified).toBe(true);
+    expect(ctx.pending.find((c) => c.toolName === "get_forecast")?.tier).toBe(3);
+    expect(await fromClient(call(6, "get_forecast", { latitude: 1, longitude: 2 }))).toMatchObject({
+      message: { id: 6, error: { code: -32001, message: 'LatchVerify blocked "get_forecast" pending review — run `latch review`' } },
+    });
+  });
+
+  it("fetches every page of its own tools/list", async () => {
+    const { fromServer, ctx, sent } = await setup();
+    await fromServer(listChanged);
+    await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: [benign[0]], nextCursor: "p2" } });
+    expect(sent[1]).toEqual({ jsonrpc: "2.0", id: expect.stringMatching(/^latchverify-/), method: "tools/list", params: { cursor: "p2" } });
+    expect(ctx.ownRequests.get(sent[1]!.id)).toBe(2);
+    await fromServer({ jsonrpc: "2.0", id: sent[1]!.id, result: { tools: [poisoned[1]] } });
+    expect(sent).toHaveLength(2);
+    expect(ctx.pending.map((c) => c.toolName)).toEqual(["read_config"]);
+  });
+
+  it(`stops after ${MAX_OWN_PAGES} pages of a server that never stops paging`, async () => {
+    const { fromServer, sent, logs } = await setup();
+    await fromServer(listChanged);
+    for (let i = 0; i < MAX_OWN_PAGES + 5 && i < sent.length; i++) {
+      await fromServer({ jsonrpc: "2.0", id: sent[i]!.id, result: { tools: [], nextCursor: `p${i}` } });
+    }
+    expect(sent).toHaveLength(MAX_OWN_PAGES);
+    expect(logs).toContain(`weather: stopped fetching tools/list after ${MAX_OWN_PAGES} pages`);
+  });
+
+  it("logs an error answer to its own tools/list and stays unverified", async () => {
+    const { fromServer, ctx, sent, logs } = await setup();
+    await fromServer(listChanged);
+    expect(await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, error: { code: -32603, message: "boom" } })).toEqual({ action: "drop" });
+    expect(ctx.verified).toBe(false);
+    expect(logs).toContain("weather: the server answered the proxy's tools/list with an error: boom");
+  });
+
+  it("verifies again when the client re-fetches the list itself", async () => {
+    const { fromServer, listTools, ctx } = await setup();
+    await fromServer(listChanged);
+    await listTools(benign);
+    expect(ctx.verified).toBe(true);
+  });
+
+  it("never forwards a response that only reuses the client's id space", async () => {
+    const { fromClient, fromServer, sent } = await setup();
+    await fromServer(listChanged);
+    await fromClient({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    expect(await fromServer({ jsonrpc: "2.0", id: 2, result: { tools: benign } })).toEqual(FORWARD);
+    expect(await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: benign } })).toEqual({ action: "drop" });
+    expect(await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: benign } })).toEqual(FORWARD);
+  });
+});
+
+describe("notifications/initialized", () => {
+  it("forwards it, then verifies the server's tools with the proxy's own tools/list", async () => {
+    const { fromClient, fromServer, ctx, sent } = await setup();
+    expect(await fromClient({ jsonrpc: "2.0", method: "notifications/initialized" })).toEqual(FORWARD);
+    expect(sent).toEqual([{ jsonrpc: "2.0", id: expect.stringMatching(/^latchverify-/), method: "tools/list" }]);
+    expect(await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: benign } })).toEqual({ action: "drop" });
+    expect(ctx.verified).toBe(true);
+    expect(await fromClient(call(3, "get_alerts"))).toEqual(FORWARD);
   });
 });
