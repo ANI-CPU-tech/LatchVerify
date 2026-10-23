@@ -2,13 +2,22 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { hashTool } from "../../src/analyze/hash.js";
 import { emptyCapabilitySet, extractCapabilities } from "../../src/analyze/capabilities.js";
-import { anySegmentChanged, diffCapabilities, diffHashes } from "../../src/analyze/differ.js";
+import {
+  MAX_DESCRIPTION_EDIT,
+  anySegmentChanged,
+  diffCapabilities,
+  diffDescription,
+  diffHashes,
+  type DescriptionPart,
+} from "../../src/analyze/differ.js";
 import { CapabilityDeltaSchema, McpToolListSchema, type CapabilitySet, type McpTool } from "../../src/schema/index.js";
 
 const fixtureTools = (name: string): McpTool[] =>
   McpToolListSchema.parse(JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"))).tools;
 
 const fixtureTool = (file: string, name: string): McpTool => fixtureTools(file).find((t) => t.name === name)!;
+
+const description = (file: string, name: string): string => fixtureTool(file, name).description!;
 
 describe("diffHashes", () => {
   const forecast = fixtureTool("benign-tools.json", "get_forecast");
@@ -198,5 +207,74 @@ describe("diffCapabilities: allow-lists", () => {
 
   it("ignores list order", () => {
     expect(diffCapabilities(paths("/a", "/b"), paths("/b", "/a"))).toEqual({ gained: [], lost: [], loosened: [] });
+  });
+});
+
+describe("diffDescription", () => {
+  /** The two texts a diff must reproduce exactly. */
+  const sides = (parts: DescriptionPart[]) => ({
+    before: parts.filter((p) => !p.added).map((p) => p.value).join(""),
+    after: parts.filter((p) => !p.removed).map((p) => p.value).join(""),
+  });
+
+  it("marks added and removed words and keeps the rest unchanged", () => {
+    expect(diffDescription("Get active weather alerts for a US state.", "Get active weather alerts for a US state or territory.")).toEqual([
+      { value: "Get active weather alerts for a US state", added: false, removed: false },
+      { value: " or territory", added: true, removed: false },
+      { value: ".", added: false, removed: false },
+    ]);
+    expect(diffDescription("Get the forecast now.", "Get the forecast.")).toEqual([
+      { value: "Get the forecast", added: false, removed: false },
+      { value: " now", added: false, removed: true },
+      { value: ".", added: false, removed: false },
+    ]);
+  });
+
+  it("reproduces both texts exactly, including whitespace and hidden characters", () => {
+    const pairs: Array<[string, string]> = [
+      ["Get the weather forecast for a location.", description("poisoned-tools.json", "get_forecast")],
+      ["Run a diagnostic command.", description("poisoned-tools.json", "run_diagnostics")],
+      ["line one\n  line two\ttab", "line one\nline  two\ttab changed"],
+      ["", "new"],
+      ["old", ""],
+    ];
+    for (const [before, after] of pairs) expect(sides(diffDescription(before, after))).toEqual({ before, after });
+  });
+
+  it("shows an inserted zero-width space inside the changed word", () => {
+    const parts = diffDescription("Get the weather.", "Get the wea\u{200b}ther.");
+    expect(parts.filter((p) => p.added).map((p) => p.value)).toEqual(["wea\u{200b}ther"]);
+    expect(parts.filter((p) => p.removed).map((p) => p.value)).toEqual(["weather"]);
+  });
+
+  it("returns one unchanged part for identical text and nothing for two empty strings", () => {
+    expect(diffDescription("same", "same")).toEqual([{ value: "same", added: false, removed: false }]);
+    expect(diffDescription("", "")).toEqual([]);
+  });
+
+  it("handles a new or removed description", () => {
+    expect(diffDescription("", "Sync alerts.")).toEqual([{ value: "Sync alerts.", added: true, removed: false }]);
+    expect(diffDescription("Sync alerts.", "")).toEqual([{ value: "Sync alerts.", added: false, removed: true }]);
+  });
+
+  it(`falls back to a whole-text replacement when more than ${MAX_DESCRIPTION_EDIT} tokens change, quickly`, () => {
+    const words = (seed: number) => Array.from({ length: 20_000 }, (_, i) => `w${(i * seed) % 9973}`).join(" ");
+    const before = words(7);
+    const after = words(13);
+    const started = performance.now();
+    const parts = diffDescription(before, after);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(parts).toEqual([
+      { value: before, added: false, removed: true },
+      { value: after, added: true, removed: false },
+    ]);
+  });
+
+  it("still diffs a small edit inside a very long description", () => {
+    const before = Array.from({ length: 20_000 }, (_, i) => `w${i}`).join(" ");
+    const after = before.replace("w5 ", "w5 inserted ");
+    const parts = diffDescription(before, after);
+    expect(parts.filter((p) => p.added).map((p) => p.value)).toEqual(["inserted "]);
+    expect(sides(parts)).toEqual({ before, after });
   });
 });

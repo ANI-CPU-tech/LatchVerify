@@ -1,3 +1,4 @@
+import { diffWordsWithSpace } from "diff";
 import type { CapabilityDelta, CapabilitySet, ToolHashes } from "../schema/index.js";
 import { emptyCapabilitySet } from "./capabilities.js";
 
@@ -101,13 +102,36 @@ function diffAllowList(key: string, before: readonly string[], after: readonly s
   for (const entry of had) if (!has.has(entry)) lost.push(`${key}:${entry}`);
 }
 
+/** One run of a description diff, as the review UI renders it. */
+export interface DescriptionPart {
+  value: string;
+  added: boolean;
+  removed: boolean;
+}
+
 /**
- * Line diff of two description strings for the review UI.
- * TODO: wrap jsdiff's diffWordsWithSpace and return the parts with added/removed flags.
+ * Largest edit, in word and whitespace tokens, the description diff computes. Beyond it the
+ * texts are effectively rewritten, so a whole-text replacement is shown instead. Keeps a hostile
+ * multi-megabyte description from stalling the review API (worst case is milliseconds).
  */
-export function diffDescription(
-  before: string,
-  after: string,
-): Array<{ value: string; added: boolean; removed: boolean }> {
-  throw new Error("not implemented");
+export const MAX_DESCRIPTION_EDIT = 500;
+
+/**
+ * Word-level diff of two descriptions for the review UI (jsdiff diffWordsWithSpace): every
+ * word, punctuation mark and whitespace run is a token, so inserted invisible characters show
+ * up inside the changed word. Unchanged text has both flags false. Concatenating the parts that
+ * are not added gives `before`; the parts that are not removed give `after`.
+ */
+export function diffDescription(before: string, after: string): DescriptionPart[] {
+  if (before === after) return before ? [{ value: before, added: false, removed: false }] : [];
+  const changes = diffWordsWithSpace(before, after, { maxEditLength: MAX_DESCRIPTION_EDIT });
+  if (!changes) {
+    const parts: DescriptionPart[] = [];
+    if (before) parts.push({ value: before, added: false, removed: true });
+    if (after) parts.push({ value: after, added: true, removed: false });
+    return parts;
+  }
+  return changes
+    .filter((change) => change.value.length > 0)
+    .map(({ value, added, removed }) => ({ value, added, removed }));
 }
