@@ -14,6 +14,11 @@ describe("parseSurface", () => {
     expect(parseSurface(raw)).toBeCloseTo(expected, 10);
   });
 
+  it("lands exactly on the 5% grid, without floating-point noise", () => {
+    for (let percent = 0; percent <= 100; percent += 5) expect(String(parseSurface(percent / 100))).toBe(String(percent / 100));
+    expect(parseSurface(0.6)).toBe(0.6);
+  });
+
   it.each([null, undefined, "", "  ", "abc", Number.NaN, Infinity, {}, "1e999"])("falls back to the default for %j", (raw) => {
     expect(parseSurface(raw)).toBe(DEFAULT_SURFACE);
   });

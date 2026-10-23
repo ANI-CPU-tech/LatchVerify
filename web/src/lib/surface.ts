@@ -19,7 +19,9 @@ export function parseSurface(raw: unknown): number {
   const value = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : Number.NaN;
   if (!Number.isFinite(value)) return DEFAULT_SURFACE;
   const clamped = Math.min(1, Math.max(0, value));
-  return Math.round(clamped / SURFACE_STEP) * SURFACE_STEP;
+  // Divide by the step count rather than multiply by 0.05: 12 * 0.05 is 0.6000000000000001.
+  const steps = Math.round(1 / SURFACE_STEP);
+  return Math.round(clamped * steps) / steps;
 }
 
 /** The card opacity a preference gives on a theme whose floor is `min`. */
