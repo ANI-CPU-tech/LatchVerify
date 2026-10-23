@@ -1,8 +1,8 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { EVENTS_FILE, appendEvent, type LatchEvent } from "../../src/store/events.js";
+import { EVENTS_FILE, appendEvent, readEvents, type LatchEvent } from "../../src/store/events.js";
 
 const at = "2026-10-21T09:00:00.000Z";
 
@@ -89,5 +89,88 @@ describe("appendEvent", () => {
     const lines = await logLines(dir);
     expect(lines).toHaveLength(events.length);
     expect(new Set(lines)).toEqual(new Set(events.map((event) => JSON.stringify(event))));
+  });
+});
+
+describe("readEvents", () => {
+  const listed = (n: number): LatchEvent => ({ kind: "tools_listed", at, serverId: "weather", toolCount: n });
+
+  it("returns an empty list when the log or the state directory is missing", async () => {
+    expect(await readEvents(dir)).toEqual([]);
+    expect(await readEvents(join(dir, "missing"), 10)).toEqual([]);
+  });
+
+  it("reads back every appended event, oldest first", async () => {
+    for (const event of allKinds) await appendEvent(dir, event);
+    expect(await readEvents(dir)).toEqual(allKinds);
+  });
+
+  it("skips malformed lines instead of throwing", async () => {
+    const lines = [
+      JSON.stringify(allKinds[0]),
+      "garbage",
+      "",
+      "   ",
+      "{",
+      "null",
+      "[]",
+      '"text"',
+      JSON.stringify({ kind: "future_kind", at, serverId: "weather" }),
+      JSON.stringify({ ...allKinds[1], at: "not a date" }),
+      JSON.stringify(allKinds[1]),
+      '{"kind":"list_changed","at":"2026-10-21T09:0', // torn final write
+    ];
+    await writeFile(join(dir, EVENTS_FILE), lines.join("\n"));
+    expect(await readEvents(dir)).toEqual([allKinds[0], allKinds[1]]);
+  });
+
+  it("reads lines written with CRLF endings", async () => {
+    await writeFile(join(dir, EVENTS_FILE), `${JSON.stringify(allKinds[0])}\r\n${JSON.stringify(allKinds[1])}\r\n`);
+    expect(await readEvents(dir)).toEqual([allKinds[0], allKinds[1]]);
+  });
+
+  it("drops fields LatchEvent does not define", async () => {
+    await writeFile(join(dir, EVENTS_FILE), `${JSON.stringify({ ...allKinds[1], extra: true })}\n`);
+    expect(await readEvents(dir)).toEqual([allKinds[1]]);
+  });
+
+  it("returns the newest `limit` events, oldest first", async () => {
+    for (let i = 0; i < 5; i++) await appendEvent(dir, listed(i));
+    expect(await readEvents(dir, 2)).toEqual([listed(3), listed(4)]);
+    expect(await readEvents(dir, 5)).toEqual([0, 1, 2, 3, 4].map(listed));
+    expect(await readEvents(dir, 100)).toEqual([0, 1, 2, 3, 4].map(listed));
+    expect(await readEvents(dir, 0)).toEqual([]);
+  });
+
+  it("counts only valid events toward the limit", async () => {
+    await writeFile(join(dir, EVENTS_FILE), [JSON.stringify(listed(0)), JSON.stringify(listed(1)), "garbage", "garbage"].join("\n"));
+    expect(await readEvents(dir, 2)).toEqual([listed(0), listed(1)]);
+  });
+
+  it("keeps the newest events of a long log", async () => {
+    const total = 10_000;
+    await writeFile(join(dir, EVENTS_FILE), Array.from({ length: total }, (_, i) => `${JSON.stringify(listed(i))}\n`).join(""));
+    expect(await readEvents(dir, 3)).toEqual([total - 3, total - 2, total - 1].map(listed));
+    expect(await readEvents(dir, 1500)).toEqual(Array.from({ length: 1500 }, (_, i) => listed(total - 1500 + i)));
+    expect(await readEvents(dir)).toHaveLength(total);
+  });
+
+  it("rejects a limit that is not a non-negative integer", async () => {
+    for (const limit of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(readEvents(dir, limit), String(limit)).rejects.toThrow(RangeError);
+    }
+  });
+
+  it("surfaces read errors other than a missing log", async () => {
+    await writeFile(join(dir, "file"), "");
+    await expect(readEvents(join(dir, "file"))).rejects.toMatchObject({ code: "ENOTDIR" });
+  });
+
+  it("keeps the event before a garbage line (task Verify scenario)", async () => {
+    await appendEvent(dir, allKinds[1]!);
+    expect(await readEvents(dir)).toEqual([allKinds[1]]);
+    await appendFile(join(dir, EVENTS_FILE), "garbage\n");
+    expect(await readEvents(dir)).toEqual([allKinds[1]]);
+    expect(await readdir(dir)).toEqual([EVENTS_FILE]);
   });
 });

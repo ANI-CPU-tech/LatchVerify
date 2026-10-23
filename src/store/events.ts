@@ -1,5 +1,6 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, open, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { z } from "zod";
 import { TierSchema, type Tier } from "../schema/index.js";
 
@@ -65,7 +66,53 @@ export async function appendEvent(stateDir: string, event: LatchEvent): Promise<
   await appendFile(join(stateDir, EVENTS_FILE), `${JSON.stringify(result.data)}\n`, "utf8");
 }
 
-/** TODO: read the log, skipping malformed lines, and return the newest `limit` events (oldest first). */
+/**
+ * Read <stateDir>/events.jsonl and return the newest `limit` events, oldest first (all events
+ * when `limit` is omitted). A missing log is empty.
+ *
+ * Lines that are blank, not JSON, or not a valid LatchEvent (a torn final write, a hand edit,
+ * an event kind from a newer version) are skipped, never thrown: the log is an audit trail and
+ * one bad line must not hide the rest. The file is streamed, so memory stays proportional to
+ * `limit`, not to the size of the log.
+ *
+ * @throws RangeError when `limit` is not a non-negative integer.
+ */
 export async function readEvents(stateDir: string, limit?: number): Promise<LatchEvent[]> {
-  throw new Error("not implemented");
+  if (limit !== undefined && !(Number.isInteger(limit) && limit >= 0)) {
+    throw new RangeError(`readEvents: limit must be a non-negative integer, got ${limit}`);
+  }
+  let handle: FileHandle;
+  try {
+    handle = await open(join(stateDir, EVENTS_FILE), "r");
+  } catch (error) {
+    if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const events: LatchEvent[] = [];
+  try {
+    const lines = createInterface({ input: handle.createReadStream({ encoding: "utf8" }), crlfDelay: Infinity });
+    for await (const line of lines) {
+      const event = parseEvent(line);
+      if (event === null) continue;
+      events.push(event);
+      // Trim in batches: amortized O(1) per line instead of shifting on every push.
+      if (limit !== undefined && events.length >= 2 * limit + 1024) events.splice(0, events.length - limit);
+    }
+  } finally {
+    await handle.close();
+  }
+  return limit === undefined ? events : events.slice(events.length - limit);
+}
+
+/** One log line as a validated event, or null when it is blank, not JSON, or not a LatchEvent. */
+function parseEvent(line: string): LatchEvent | null {
+  if (line.trim() === "") return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const result = LatchEventSchema.safeParse(data);
+  return result.success ? result.data : null;
 }
