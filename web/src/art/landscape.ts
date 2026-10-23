@@ -31,7 +31,7 @@ export type ArtColor = (typeof ART_COLORS)[number];
 export type ArtTime = "day" | "night";
 
 /** Each theme's special touch, drawn on top of the shared scene. */
-export const ART_EXTRAS = ["balloon", "sailboat"] as const;
+export const ART_EXTRAS = ["balloon", "sailboat", "geese"] as const;
 export type ArtExtra = (typeof ART_EXTRAS)[number];
 
 /** Layers in paint order. A layer that is empty in a scene is left out of it. */
@@ -39,9 +39,12 @@ export const ART_LAYERS = [
   "stars-a",
   "stars-b",
   "stars-c",
+  "rays",
   "sky",
   "clouds",
   "balloon",
+  "geese-a",
+  "geese-b",
   "land",
   "glint-a",
   "glint-b",
@@ -483,7 +486,32 @@ function sailboat(on: Painter) {
   for (let dx = 8; dx <= 20; dx++) if (hash(dx, 91) > 0.45) set(x - dx, y + 1 + Math.floor(dx / 9), "cloud");
 }
 
-const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon, sailboat };
+/** Sun rays fanning up behind the peaks, and a V of geese flying in two wing poses. */
+function geese(on: Painter) {
+  const rays = on("rays");
+  for (let y = 2; y < LAKE; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      const [dx, dy] = [x - SUN.x, y - SUN.y];
+      const dist = Math.hypot(dx, dy);
+      const angle = Math.atan2(dx, -dy);
+      if (dist < SUN.r + 4 || dist > 150 || Math.abs(angle) > 1.45) continue;
+      const phase = angle / 0.16;
+      if (Math.abs(phase - Math.round(phase)) < 0.18 && dither(x, y, 0.45 * (1 - dist / 150))) rays(x, y, "glow");
+    }
+  }
+  // Geese, wider than the small birds: wings raised in one pose, level and dipped in the other.
+  const poses = [
+    ["geese-a", [[-3, -1], [-2, 0], [-1, 0], [0, 1], [1, 0], [2, 0], [3, -1]]],
+    ["geese-b", [[-3, 0], [-2, 0], [-1, 1], [0, 1], [1, 1], [2, 0], [3, 0]]],
+  ] as const;
+  const [ax, ay] = [226, 18];
+  const flock = [[ax, ay], ...[1, 2, 3].flatMap((k) => [[ax + 7 * k, ay - 2 * k], [ax + 7 * k, ay + 2 * k]])];
+  for (const [gx, gy] of flock) {
+    for (const [layer, pixels] of poses) for (const [dx, dy] of pixels) on(layer)(gx! + dx, gy! + dy, "bird");
+  }
+}
+
+const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon, sailboat, geese };
 
 /** A grid of pixels as horizontal runs of one color. */
 function toLayer(name: ArtLayer, grid: Grid, width: number, height: number): PixelLayer {

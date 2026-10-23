@@ -350,7 +350,8 @@
  */
 .art-glint-b,
 .art-smoke-b,
-.art-birds-b {
+.art-birds-b,
+.art-geese-b {
   opacity: 0;
 }
 
@@ -404,6 +405,19 @@
   }
   .art-sailboat {
     animation: art-sail 50s ease-in-out infinite alternate;
+  }
+  .art-rays {
+    animation: art-pulse 9s ease-in-out infinite alternate;
+  }
+  /* The V of geese heads left across the sky, flapping slower than the small birds. */
+  .art-geese-a,
+  .art-geese-b {
+    animation:
+      art-migrate 64s linear -26s infinite,
+      art-swap 1s steps(1) infinite;
+  }
+  .art-geese-b {
+    animation-delay: -26s, -0.5s;
   }
   .art-window {
     animation: art-flicker 5s linear infinite;
@@ -460,6 +474,19 @@
   @keyframes art-sail {
     to {
       transform: translateX(34px);
+    }
+  }
+  @keyframes art-pulse {
+    from {
+      opacity: 0.5;
+    }
+  }
+  @keyframes art-migrate {
+    from {
+      transform: translateX(300px);
+    }
+    to {
+      transform: translateX(-340px);
     }
   }
   @keyframes art-bob {
