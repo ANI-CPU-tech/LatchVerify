@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { McpTool, Sha256Hex, ToolHashes } from "../schema/index.js";
 
 /**
@@ -76,9 +77,28 @@ function serialize(value: unknown, ancestors: Set<object>): string {
   }
 }
 
-/** TODO: node:crypto SHA-256 over UTF-8 input. Returns lowercase hex. */
+/** Matches an unpaired surrogate: with the `u` flag, valid pairs are read as one code point. */
+const LONE_SURROGATE = /[\ud800-\udfff]/u;
+
+/** 0xFF never occurs in UTF-8, so prefixing it cannot collide with any well-formed string. */
+const ILL_FORMED_MARKER = Uint8Array.of(0xff);
+
+/**
+ * SHA-256 of a string as lowercase hex.
+ *
+ * Well-formed strings are hashed as their UTF-8 bytes. UTF-8 cannot encode lone surrogates
+ * (Node silently substitutes U+FFFD, which would make "\ud800" and "\ufffd" collide), so an
+ * ill-formed string is hashed as 0xFF followed by the UTF-8 of its JSON-escaped form. The
+ * encoding is injective: distinct strings never share an input byte sequence.
+ */
 export function sha256Hex(input: string): Sha256Hex {
-  throw new Error("not implemented");
+  const hash = createHash("sha256");
+  if (LONE_SURROGATE.test(input)) {
+    hash.update(ILL_FORMED_MARKER).update(JSON.stringify(input), "utf8");
+  } else {
+    hash.update(input, "utf8");
+  }
+  return hash.digest("hex");
 }
 
 /**

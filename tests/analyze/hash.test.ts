@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { MAX_CANONICAL_DEPTH, canonicalJson } from "../../src/analyze/hash.js";
-import { McpToolListSchema } from "../../src/schema/index.js";
+import { createHash } from "node:crypto";
+import { MAX_CANONICAL_DEPTH, canonicalJson, sha256Hex } from "../../src/analyze/hash.js";
+import { McpToolListSchema, Sha256HexSchema } from "../../src/schema/index.js";
 
 const fixtureTools = (name: string) =>
   McpToolListSchema.parse(JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"))).tools;
@@ -125,5 +126,51 @@ describe("canonicalJson", () => {
     canonicalJson(value);
     expect(value).toEqual(before);
     expect(Object.keys(value)).toEqual(["b", "a"]);
+  });
+});
+
+describe("sha256Hex", () => {
+  it("matches published SHA-256 test vectors", () => {
+    expect(sha256Hex("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    expect(sha256Hex("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  });
+
+  it("hashes well-formed text as UTF-8", () => {
+    // Reference digests from `printf 'é' | sha256sum` and `printf '😀' | sha256sum`.
+    expect(sha256Hex("é")).toBe("4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c");
+    expect(sha256Hex("😀")).toBe("f0443a342c5ef54783a111b51ba56c938e474c32324d90c3a60c9c8e3a37e2d9");
+  });
+
+  it("returns a lowercase 64-character hex digest accepted by Sha256HexSchema", () => {
+    for (const input of ["", "abc", "\u200b", "\ud800", "x".repeat(100_000)]) {
+      expect(Sha256HexSchema.safeParse(sha256Hex(input)).success).toBe(true);
+    }
+  });
+
+  it("is deterministic", () => {
+    expect(sha256Hex("same input")).toBe(sha256Hex("same input"));
+  });
+
+  it("does not normalize Unicode, so invisible or composed variants hash differently", () => {
+    expect(sha256Hex("forecast")).not.toBe(sha256Hex("fore\u200bcast"));
+    expect(sha256Hex("\u00e9")).not.toBe(sha256Hex("e\u0301")); // NFC vs NFD é
+  });
+
+  it("keeps lone surrogates distinct from U+FFFD and from their escaped text", () => {
+    const lone = sha256Hex("\ud800");
+    expect(lone).not.toBe(sha256Hex("\ufffd"));
+    expect(lone).not.toBe(sha256Hex('"\\ud800"'));
+    expect(lone).not.toBe(sha256Hex("\udc00"));
+    // A valid surrogate pair is well-formed and takes the plain UTF-8 path.
+    expect(sha256Hex("\ud83d\ude00")).toBe(sha256Hex("😀"));
+  });
+
+  it("hashes ill-formed strings as 0xFF followed by their JSON-escaped UTF-8", () => {
+    const input = "a\ud800b";
+    const expected = createHash("sha256")
+      .update(Uint8Array.of(0xff))
+      .update(JSON.stringify(input), "utf8")
+      .digest("hex");
+    expect(sha256Hex(input)).toBe(expected);
   });
 });
