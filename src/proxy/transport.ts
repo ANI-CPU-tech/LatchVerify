@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
 // Raw line-delimited JSON-RPC. Deliberately NOT the MCP SDK: a transparent
@@ -79,11 +80,32 @@ export function serialize(message: JsonRpcMessage): string {
 }
 
 /**
- * TODO: readline over `input`, calling onFrame for each line in order. Returns a function that
- * closes the reader.
+ * Read `input` line by line and call onFrame with each parsed line, in order. A final line
+ * without a terminator is delivered when the stream ends. Multi-byte UTF-8 characters split
+ * across chunks are decoded correctly.
+ *
+ * "\n", "\r\n" and a lone "\r" all end a line (readline's rule); the terminator is not part of
+ * Frame.raw, so writeLine re-terminates every forwarded line with "\n".
+ *
+ * Returns a function that stops the reader: no frame is delivered after it is called, even for
+ * lines already buffered. Errors on `input` are left to the caller's own "error" listener.
+ * onFrame runs inside the stream's data handler and must not throw.
  */
 export function readFrames(input: Readable, onFrame: (frame: Frame) => void): () => void {
-  throw new Error("not implemented");
+  // terminal: false, or a TTY stdin would get line editing and echo.
+  const reader = createInterface({ input, crlfDelay: Infinity, terminal: false });
+  // readline re-emits input errors on the interface; without a listener that is an uncaught
+  // exception, even though the caller handles the same error on `input`.
+  reader.on("error", () => {});
+  let closed = false;
+  // readline keeps emitting lines already split from the current chunk after close().
+  reader.on("line", (line) => {
+    if (!closed) onFrame(parseLine(line));
+  });
+  return () => {
+    closed = true;
+    reader.close();
+  };
 }
 
 /**

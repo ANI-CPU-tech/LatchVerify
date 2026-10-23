@@ -5,8 +5,10 @@ import {
   isRequest,
   isResponse,
   parseLine,
+  readFrames,
   serialize,
   writeLine,
+  type Frame,
   type JsonRpcMessage,
 } from "../../src/proxy/transport.js";
 
@@ -259,5 +261,98 @@ describe("writeLine", () => {
     });
     out.on("error", () => {});
     await expect(writeLine(out, "x")).rejects.toThrow("EPIPE");
+  });
+});
+
+/** Feed `chunks` into readFrames and collect every frame until the input ends. */
+async function framesOf(chunks: Array<string | Buffer>): Promise<Frame[]> {
+  const input = new PassThrough();
+  const frames: Frame[] = [];
+  readFrames(input, (frame) => frames.push(frame));
+  const ended = new Promise((resolve) => input.on("end", resolve));
+  for (const chunk of chunks) input.write(chunk);
+  input.end();
+  await ended;
+  await tick();
+  return frames;
+}
+
+describe("readFrames", () => {
+  it("delivers each line in order as a parsed frame", async () => {
+    const frames = await framesOf(['{"jsonrpc":"2.0","id":1,"method":"a"}\nnot json\n\n{"jsonrpc":"2.0","method":"b"}\n']);
+    expect(frames).toEqual([
+      { raw: '{"jsonrpc":"2.0","id":1,"method":"a"}', message: { jsonrpc: "2.0", id: 1, method: "a" } },
+      { raw: "not json", message: null },
+      { raw: "", message: null },
+      { raw: '{"jsonrpc":"2.0","method":"b"}', message: { jsonrpc: "2.0", method: "b" } },
+    ]);
+  });
+
+  it("reassembles lines split across chunks, including inside a UTF-8 character", async () => {
+    const line = '{"jsonrpc":"2.0","method":"caf\u00e9 😀"}';
+    const bytes = Buffer.from(`${line}\n`, "utf8");
+    const emoji = bytes.indexOf(Buffer.from("😀", "utf8"));
+    const frames = await framesOf([bytes.subarray(0, 5), bytes.subarray(5, emoji + 2), bytes.subarray(emoji + 2)]);
+    expect(frames.map((f) => f.raw)).toEqual([line]);
+    expect(frames[0]!.message).toEqual({ jsonrpc: "2.0", method: "caf\u00e9 😀" });
+  });
+
+  it("delivers a final line that has no terminator", async () => {
+    const frames = await framesOf(['{"jsonrpc":"2.0","method":"a"}\n{"jsonrpc":"2.0","method":"last"}']);
+    expect(frames.map((f) => f.raw)).toEqual(['{"jsonrpc":"2.0","method":"a"}', '{"jsonrpc":"2.0","method":"last"}']);
+  });
+
+  it("treats CRLF as one terminator, even when split across chunks", async () => {
+    const frames = await framesOf(['{"jsonrpc":"2.0","method":"a"}\r', '\n{"jsonrpc":"2.0","method":"b"}\r\n']);
+    expect(frames.map((f) => f.raw)).toEqual(['{"jsonrpc":"2.0","method":"a"}', '{"jsonrpc":"2.0","method":"b"}']);
+  });
+
+  it("stops delivering frames once closed, even lines already buffered", async () => {
+    const input = new PassThrough();
+    const raws: string[] = [];
+    const close = readFrames(input, (frame) => {
+      raws.push(frame.raw);
+      if (frame.raw === "b") close();
+    });
+    input.write("a\nb\nc\nd\n");
+    input.write("e\n");
+    await tick();
+    expect(raws).toEqual(["a", "b"]);
+    close();
+  });
+
+  it("does not turn an input error into an uncaught exception", async () => {
+    const input = new PassThrough();
+    const seen: Error[] = [];
+    input.on("error", (error) => seen.push(error));
+    const frames: Frame[] = [];
+    readFrames(input, (frame) => frames.push(frame));
+    input.write("a\n");
+    await tick();
+    input.destroy(new Error("boom"));
+    await tick();
+    expect(seen.map((e) => e.message)).toEqual(["boom"]);
+    expect(frames.map((f) => f.raw)).toEqual(["a"]);
+  });
+
+  it("round-trips lines byte-for-byte through writeLine, unknown fields included", async () => {
+    const lines = [
+      '{"jsonrpc":"2.0","id":1,"method":"x","x-extra":{"kept":true}}',
+      "not json",
+      "",
+      '  {"jsonrpc" : "2.0", "id":"a" ,"result":{"_meta":{"v":1.50},"text":"caf\\u00e9 \u200b"}}  ',
+      '[{"jsonrpc":"2.0","id":2,"method":"batch"}]',
+    ];
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const text = collect(output);
+    const writes: Promise<void>[] = [];
+    readFrames(input, (frame) => writes.push(writeLine(output, frame.raw)));
+    const ended = new Promise((resolve) => input.on("end", resolve));
+    input.end(lines.map((line) => `${line}\n`).join(""));
+    await ended;
+    await Promise.all(writes);
+    expect(writes).toHaveLength(lines.length);
+    expect(text()).toBe(lines.map((line) => `${line}\n`).join(""));
   });
 });
