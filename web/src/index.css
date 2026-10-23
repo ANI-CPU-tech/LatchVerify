@@ -600,10 +600,12 @@
   }
 }
 
-/* Simulation flow: a message crosses from its sender (--from) to its receiver (--to). */
+/* Simulation flow: a message crosses from its sender (--from) to its receiver (--to), anchored
+   by its own position so it stays inside the diagram at either end. */
 @keyframes sim-travel {
   from {
     left: var(--from);
+    transform: translateX(calc(var(--from) * -1));
     opacity: 0;
   }
   15% {
@@ -611,6 +613,7 @@
   }
   to {
     left: var(--to);
+    transform: translateX(calc(var(--to) * -1));
     opacity: 1;
   }
 }

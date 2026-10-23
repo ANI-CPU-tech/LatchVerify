@@ -3,8 +3,11 @@ import type { Tone } from "../lib/format";
 import type { SimActor, SimStep } from "../lib/simulation";
 import { BlockIcon, LockIcon, ServerIcon, TerminalIcon } from "./icons";
 
-/** Horizontal position of each actor across the diagram. */
-const X: Record<SimActor, number> = { agent: 10, proxy: 50, server: 90 };
+/**
+ * Horizontal position of each actor across the diagram, inset far enough that a node and its
+ * label (w-24) fit inside the box on a phone.
+ */
+const X: Record<SimActor, number> = { agent: 14, proxy: 50, server: 86 };
 
 const PACKET: Record<Tone, string> = {
   neutral: "border-border bg-card text-foreground",
@@ -32,7 +35,7 @@ const DOT_GAP_S = 0.12;
 
 function Node({ x, icon, label, sub, alert, scanning = false }: { x: number; icon: ReactNode; label: string; sub: string; alert: boolean; scanning?: boolean }) {
   return (
-    <div className="absolute bottom-0 flex w-28 -translate-x-1/2 flex-col items-center text-center" style={{ left: `${x}%` }}>
+    <div className="absolute bottom-0 flex w-24 -translate-x-1/2 flex-col items-center text-center" style={{ left: `${x}%` }}>
       <span
         className={`relative flex h-11 w-11 items-center justify-center rounded-full border-2 bg-card-glass text-xl ${
           alert ? "border-destructive text-destructive motion-safe:animate-pulse" : "border-primary/60 text-primary"
@@ -59,7 +62,7 @@ export function SimFlow({ step, swapped, speed }: { step: SimStep; swapped: bool
   return (
     <figure className="space-y-2">
       <div className="relative h-48 overflow-hidden" aria-hidden="true">
-        <div className="absolute bottom-[3.6rem] left-[10%] right-[10%] border-t-2 border-dashed border-border" />
+        <div className="absolute bottom-[3.6rem] border-t-2 border-dashed border-border" style={{ left: `${X.agent}%`, right: `${100 - X.server}%` }} />
         {step.messages.map((message, i) => {
           const [from, to] = [X[message.from], X[message.to]];
           const delay = (i * HOP_S) / speed;
@@ -103,6 +106,9 @@ export function SimFlow({ step, swapped, speed }: { step: SimStep; swapped: bool
             "--from": `${X[message.from]}%`,
             "--to": `${X[message.to]}%`,
             left: `${X[message.to]}%`,
+            // Anchored by its own position (14% of its width at 14%, half at the middle), so a
+            // label near either end stays inside the box; sim-travel moves this with it.
+            transform: `translateX(-${X[message.to]}%)`,
             top: `${i * 1.6}rem`,
             animationDuration: `${HOP_S / speed}s`,
             animationDelay: `${(i * HOP_S) / speed}s`,
@@ -111,7 +117,7 @@ export function SimFlow({ step, swapped, speed }: { step: SimStep; swapped: bool
             <span
               key={`${step.id}-${i}`}
               style={style}
-              className={`absolute -translate-x-1/2 whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-[11px] shadow-card motion-safe:animate-[sim-travel_ease-in-out_both] ${PACKET[message.tone]}`}
+              className={`absolute whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-[11px] shadow-card motion-safe:animate-[sim-travel_ease-in-out_both] ${PACKET[message.tone]}`}
             >
               {message.from === "proxy" && message.tone === "destructive" && <BlockIcon className="mr-1 inline align-[-2px]" />}
               {message.label}
