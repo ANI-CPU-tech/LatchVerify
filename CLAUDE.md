@@ -102,8 +102,12 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
   `backwards` fill so nothing keeps a transform; it is a later rule than Tailwind's utilities,
   so a direct child of a page cannot animate itself), buttons lift and press, tabs slide their
   underline, Overview numbers count up (`lib/motion.ts`, `lib/useCountUp.ts`), clickable cards
-  lift, loading states spin, the API status dot pulses, and colors cross-fade on a theme change
-  (`html.theme-switching`, 400 ms). Keyframes: `ui-rise` and `ui-fade` in `index.css`.
+  lift, loading states spin, and the API status dot pulses. A theme change the viewer picks goes
+  through the View Transition API (`setPreference` in `lib/theme.tsx`): a snapshot of the whole
+  page cross-fades, because gradients and the swapped day/night art cannot transition per
+  property. Keyframes: `ui-rise`, `ui-fade` and `ui-pop` in `index.css`.
+- Dropdowns use `components/Select.tsx` (themed, WAI-ARIA select-only combobox; key logic in
+  `lib/listbox.ts`), never a native `<select>`, whose popup the OS paints in its own colors.
 - `lib/data.tsx` loads the queue, lockfile, events and git status once and shares them
   with every page. It polls every 3 s while the API is connected. Refresh, or a decision,
   reloads all four.
