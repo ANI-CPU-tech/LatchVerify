@@ -1,7 +1,9 @@
+import { stat } from "node:fs/promises";
 import { constants } from "node:os";
+import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { readLockfile } from "../store/lockfile.js";
-import { readPending } from "../store/pending.js";
+import { PENDING_FILE, readPending } from "../store/pending.js";
 import { BLOCK_ERROR_CODE } from "./blocker.js";
 import { routeFrame, type InterceptDecision, type InterceptorContext } from "./interceptor.js";
 import {
@@ -56,6 +58,9 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
  * get their calls checked against the right definitions instead of refused. After
  * `holdTimeoutMs` the held frames are routed anyway, and calls still unverified are blocked.
  *
+ * latch.lock and the queue are re-read whenever they change on disk, so an approval or rejection
+ * made with `latch review` applies to the next tools/call without restarting the proxy.
+ *
  * When the client closes its input, the server's stdin is closed once everything queued for
  * it is written; when the client stops reading, the server is sent SIGTERM. SIGINT, SIGTERM and
  * SIGHUP are passed on to the server. Only JSON-RPC is written to `output`; diagnostics go to
@@ -68,7 +73,11 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
   const output = options.output ?? process.stdout;
   const log = (message: string) => void process.stderr.write(`[latch] ${message}\n`);
 
+  const pendingPath = join(options.stateDir, PENDING_FILE);
+  // Stamp before reading: a change that lands in between is picked up by the next refresh.
+  let lockStamp = await fileStamp(options.lockfilePath);
   const lockfile = await readLockfile(options.lockfilePath);
+  let pendingStamp = await fileStamp(pendingPath);
   const pending = await readPending(options.stateDir);
   if (!Object.hasOwn(lockfile.servers, options.serverId)) {
     log(`server "${options.serverId}" is not in ${options.lockfilePath}; its tool calls stay blocked until it is pinned`);
@@ -102,7 +111,27 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     verified: false,
     ownRequests: new Map(),
     sendToServer: (message) => void outbox.push(message),
-    refresh: async () => {},
+    refresh: async () => {
+      const nextLock = await fileStamp(options.lockfilePath).catch(() => lockStamp);
+      if (nextLock !== lockStamp) {
+        // Advance the stamp even on failure: a bad file is reported once, not on every call.
+        lockStamp = nextLock;
+        try {
+          ctx.lockfile = await readLockfile(options.lockfilePath);
+        } catch (error) {
+          log(`kept the previous latch.lock: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      const nextPending = await fileStamp(pendingPath).catch(() => pendingStamp);
+      if (nextPending !== pendingStamp) {
+        pendingStamp = nextPending;
+        try {
+          ctx.pending = await readPending(options.stateDir);
+        } catch (error) {
+          log(`kept the previous pending queue: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    },
     log,
   };
 
@@ -194,6 +223,20 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     stopClient();
     stopServer();
     for (const [signal, handler] of handlers) process.off(signal, handler);
+  }
+}
+
+/**
+ * Identity of a file's current content: inode, size and mtime ("missing" when absent). Atomic
+ * writes rename a new file into place, so every write changes the inode.
+ */
+async function fileStamp(path: string): Promise<string> {
+  try {
+    const info = await stat(path);
+    return `${info.ino}:${info.size}:${info.mtimeMs}`;
+  } catch (error) {
+    if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+    throw error;
   }
 }
 

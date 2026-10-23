@@ -9,15 +9,16 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startProxy, type ProxyOptions } from "../../src/proxy/index.js";
 import { readEvents } from "../../src/store/events.js";
-import { readPending } from "../../src/store/pending.js";
+import { applyApproval, readLockfile, writeLockfile } from "../../src/store/lockfile.js";
+import { dequeue, readPending, writePending } from "../../src/store/pending.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const lockfilePath = join(root, "latch.lock.example");
 const benignTools = JSON.parse(readFileSync(join(root, "tests/fixtures/benign-tools.json"), "utf8")).tools as unknown[];
 
-/** A stub server: lists the benign tools and echoes every other request's raw line back. */
-const ECHO_SERVER = `
-const tools = ${JSON.stringify(benignTools)};
+/** A stub server: lists `tools` and echoes every other request's raw line back. */
+const echoServer = (tools: unknown[]) => `
+const tools = ${JSON.stringify(tools)};
 process.stdout.write('{ "jsonrpc" : "2.0", "method":"notifications/custom", "x-vendor":{"a":[1, 2.50]} }\\n');
 require("readline").createInterface({ input: process.stdin }).on("line", (line) => {
   const m = JSON.parse(line);
@@ -93,7 +94,7 @@ async function run(
 }
 
 const evil = { args: ["--import", "tsx", join(root, "demo/evil-server.ts")] };
-const echo = { args: ["-e", ECHO_SERVER] };
+const echo = { args: ["-e", echoServer(benignTools)] };
 
 describe("startProxy", () => {
   it("blocks the rug-pulled get_forecast after list_changed (task Verify)", async () => {
@@ -231,4 +232,54 @@ startProxy({ serverId: "weather", command: process.execPath, args: ["--import", 
     expect(lines.map((l) => (JSON.parse(l) as { id: number }).id).sort()).toEqual([1, 2, 3]);
     expect(await readFile(join(stateDir, "events.jsonl"), "utf8")).toContain('"call_blocked"');
   }, 30_000);
+});
+
+describe("decisions made by latch review while the proxy runs", () => {
+  const extra = { name: "extra_tool", description: "Does extra things.", inputSchema: { type: "object" } };
+  const withExtra = { args: ["-e", echoServer([...benignTools, extra])] };
+  const callExtra = (id: number) => request(id, "tools/call", { name: "extra_tool", arguments: {} });
+
+  it("applies an approval to the next call without a restart", async () => {
+    const lock = join(stateDir, "latch.lock");
+    await writeFile(lock, await readFile(lockfilePath, "utf8"));
+    const { messages } = await run(
+      withExtra,
+      [
+        request(1, "tools/list"),
+        callExtra(2),
+        (out) => waitFor(() => out().includes('"id":2')),
+        async () => {
+          // What `latch review` does on approve.
+          const [change] = await readPending(stateDir);
+          await writeLockfile(lock, applyApproval(await readLockfile(lock), change!, "dev@example.com", new Date()));
+          await writePending(stateDir, dequeue(await readPending(stateDir), change!.id));
+        },
+        callExtra(3),
+        (out) => waitFor(() => out().includes('"id":3')),
+      ],
+      { lockfilePath: lock },
+    );
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { data: { reason: { kind: "unpinned" } } } });
+    expect(messages.find((m) => m.id === 3)).toMatchObject({ result: { raw: expect.stringContaining("extra_tool") } });
+  });
+
+  it("keeps the last good lockfile when a malformed one is written", async () => {
+    const lock = join(stateDir, "latch.lock");
+    await writeFile(lock, await readFile(lockfilePath, "utf8"));
+    const { messages } = await run(
+      echo,
+      [
+        request(1, "tools/list"),
+        (out) => waitFor(() => out().includes('"id":1')),
+        () => writeFile(lock, "{ broken"),
+        request(2, "tools/call", { name: "get_alerts", arguments: {} }),
+        request(3, "tools/call", { name: "get_alerts", arguments: {} }),
+        (out) => waitFor(() => out().includes('"id":3')),
+      ],
+      { lockfilePath: lock },
+    );
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ result: { raw: expect.any(String) } });
+    expect(messages.find((m) => m.id === 3)).toMatchObject({ result: { raw: expect.any(String) } });
+    expect(stderr.join("").match(/kept the previous latch\.lock/g)).toHaveLength(1);
+  });
 });
