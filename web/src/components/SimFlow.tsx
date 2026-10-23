@@ -9,12 +9,16 @@ import { BlockIcon, LockIcon, ServerIcon, TerminalIcon } from "./icons";
  */
 const X: Record<SimActor, number> = { agent: 14, proxy: 50, server: 86 };
 
+/**
+ * Message labels: outcomes solid in their status color with its paired foreground (each pair is
+ * AA-tested in tests/web/themes.test.ts), so they stand out on light themes as well as dark.
+ */
 const PACKET: Record<Tone, string> = {
-  neutral: "border-border bg-card text-foreground",
-  success: "border-success/50 bg-success/15 text-success",
-  warning: "border-warning/50 bg-warning/15 text-warning",
-  destructive: "border-destructive/50 bg-destructive/15 text-destructive",
-  info: "border-info/50 bg-info/15 text-info",
+  neutral: "border-primary/60 bg-card text-foreground",
+  success: "border-success bg-success text-success-foreground",
+  warning: "border-warning bg-warning text-warning-foreground",
+  destructive: "border-destructive bg-destructive text-destructive-foreground",
+  info: "border-info bg-info text-info-foreground",
 };
 
 /** Line and dot color for each outcome; neutral messages use the primary color to stay visible. */
@@ -37,7 +41,7 @@ function Node({ x, icon, label, sub, alert, scanning = false }: { x: number; ico
   return (
     <div className="absolute bottom-0 flex w-24 -translate-x-1/2 flex-col items-center text-center" style={{ left: `${x}%` }}>
       <span
-        className={`relative flex h-11 w-11 items-center justify-center rounded-full border-2 bg-card-glass text-xl ${
+        className={`relative flex h-11 w-11 items-center justify-center rounded-full border-2 bg-card text-xl shadow-card ${
           alert ? "border-destructive text-destructive motion-safe:animate-pulse" : "border-primary/60 text-primary"
         }`}
       >
@@ -62,7 +66,7 @@ export function SimFlow({ step, swapped, speed }: { step: SimStep; swapped: bool
   return (
     <figure className="space-y-2">
       <div className="relative h-48 overflow-hidden" aria-hidden="true">
-        <div className="absolute bottom-[3.6rem] border-t-2 border-dashed border-border" style={{ left: `${X.agent}%`, right: `${100 - X.server}%` }} />
+        <div className="absolute bottom-[3.6rem] border-t-2 border-dashed border-foreground/25" style={{ left: `${X.agent}%`, right: `${100 - X.server}%` }} />
         {step.messages.map((message, i) => {
           const [from, to] = [X[message.from], X[message.to]];
           const delay = (i * HOP_S) / speed;
@@ -71,13 +75,13 @@ export function SimFlow({ step, swapped, speed }: { step: SimStep; swapped: bool
             <div key={`${step.id}-track-${i}`} className={`hidden motion-safe:block ${TRACK[message.tone]}`}>
               {/* The stretch of line this message crosses, dashes marching toward the receiver. */}
               <span
-                className="absolute bottom-[3.6rem] h-0.5 opacity-0"
+                className="absolute bottom-[calc(3.6rem_-_0.5px)] h-[3px] rounded-full opacity-0 [filter:drop-shadow(0_0_3px_currentColor)]"
                 style={
                   {
                     left: `${Math.min(from, to)}%`,
                     width: `${Math.abs(to - from)}%`,
-                    backgroundImage: "repeating-linear-gradient(90deg, currentColor 0 6px, transparent 6px 12px)",
-                    "--march": to > from ? "12px" : "-12px",
+                    backgroundImage: "repeating-linear-gradient(90deg, currentColor 0 8px, transparent 8px 14px)",
+                    "--march": to > from ? "14px" : "-14px",
                     animation: `sim-march 0.45s linear infinite, sim-window ${hop}s linear ${delay}s both`,
                   } as CSSProperties
                 }
@@ -85,14 +89,15 @@ export function SimFlow({ step, swapped, speed }: { step: SimStep; swapped: bool
               {DOTS.map((k) => (
                 <span
                   key={k}
-                  className="absolute bottom-[calc(3.6rem_-_3px)] -translate-x-1/2 rounded-full bg-current opacity-0 shadow-[0_0_8px_currentColor]"
+                  className="absolute -translate-x-1/2 translate-y-1/2 rounded-full bg-current opacity-0 shadow-[0_0_10px_2px_currentColor] ring-2 ring-card"
                   style={
                     {
                       "--from": `${from}%`,
                       "--to": `${to}%`,
                       left: `${to}%`,
-                      width: `${8 - k * 2}px`,
-                      height: `${8 - k * 2}px`,
+                      bottom: "calc(3.6rem + 1px)",
+                      width: `${10 - k * 3}px`,
+                      height: `${10 - k * 3}px`,
                       animation: `sim-dot ${hop}s ease-in-out ${delay + (k * DOT_GAP_S) / speed}s both`,
                     } as CSSProperties
                   }
@@ -117,7 +122,7 @@ export function SimFlow({ step, swapped, speed }: { step: SimStep; swapped: bool
             <span
               key={`${step.id}-${i}`}
               style={style}
-              className={`absolute whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-[11px] shadow-card motion-safe:animate-[sim-travel_ease-in-out_both] ${PACKET[message.tone]}`}
+              className={`absolute whitespace-nowrap rounded-full border px-2.5 py-0.5 font-mono text-xs font-medium shadow-card motion-safe:animate-[sim-travel_ease-in-out_both] ${PACKET[message.tone]}`}
             >
               {message.from === "proxy" && message.tone === "destructive" && <BlockIcon className="mr-1 inline align-[-2px]" />}
               {message.label}
