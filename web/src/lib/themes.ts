@@ -6,7 +6,7 @@ import type { ArtExtra, ArtTime } from "../art/landscape.js";
  */
 export const THEMES = [
   { id: "light", label: "Default Light", description: "Cream, off-white, orange", dark: false, art: "balloon" },
-  { id: "warm", label: "Warm Retro", description: "Ivory, muted orange, brown", dark: false, art: null },
+  { id: "warm", label: "Warm Retro", description: "Ivory, muted orange, brown", dark: false, art: "sailboat" },
   { id: "sunset", label: "Sunset", description: "Apricot, burnt orange", dark: false, art: null },
   { id: "terminal", label: "Terminal Dark", description: "Charcoal, cream text, orange", dark: true, art: null },
   { id: "minimal", label: "Minimal", description: "Neutral, muted artwork", dark: false, art: null },

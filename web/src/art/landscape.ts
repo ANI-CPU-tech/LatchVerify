@@ -31,7 +31,7 @@ export type ArtColor = (typeof ART_COLORS)[number];
 export type ArtTime = "day" | "night";
 
 /** Each theme's special touch, drawn on top of the shared scene. */
-export const ART_EXTRAS = ["balloon"] as const;
+export const ART_EXTRAS = ["balloon", "sailboat"] as const;
 export type ArtExtra = (typeof ART_EXTRAS)[number];
 
 /** Layers in paint order. A layer that is empty in a scene is left out of it. */
@@ -45,6 +45,7 @@ export const ART_LAYERS = [
   "land",
   "glint-a",
   "glint-b",
+  "sailboat",
   "canoe",
   "front",
   "window",
@@ -459,7 +460,30 @@ function balloon(on: Painter) {
   for (let dy = 10; dy <= 11; dy++) for (let dx = -2; dx <= 2; dx++) set(cx + dx, cy + dy, "near");
 }
 
-const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon };
+/** Sailboat on the open lake right of the canoe: hull, mast, mainsail and jib, a wake behind. */
+function sailboat(on: Painter) {
+  const set = on("sailboat");
+  const [x, y] = [336, 81];
+  for (let dx = -6; dx <= 6; dx++) set(x + dx, y, "tree");
+  for (let dx = -5; dx <= 4; dx++) set(x + dx, y + 1, "tree");
+  set(x + 7, y - 1, "tree");
+  for (let dy = 1; dy <= 13; dy++) set(x, y - dy, "tree");
+  // Mainsail behind the mast, widest at the boom; a smaller jib before it.
+  for (let r = 0; r < 11; r++) {
+    const width = Math.round((10 - r) * 0.6) + 1;
+    for (let dx = 1; dx <= width; dx++) set(x + dx, y - 2 - r, dx === width && r % 2 ? "snow-shade" : "snow");
+  }
+  for (let r = 0; r < 8; r++) {
+    for (let dx = 1; dx <= Math.round((7 - r) * 0.5); dx++) set(x - dx, y - 2 - r, "snow-shade");
+  }
+  // Rippled reflection of the sails, and the wake trailing behind.
+  for (let dy = 2; dy <= 8; dy++) {
+    for (let dx = 1; dx <= Math.max(1, 7 - dy); dx++) if ((dx + dy) % 2 === 0) set(x + dx, y + dy, "snow-shade");
+  }
+  for (let dx = 8; dx <= 20; dx++) if (hash(dx, 91) > 0.45) set(x - dx, y + 1 + Math.floor(dx / 9), "cloud");
+}
+
+const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon, sailboat };
 
 /** A grid of pixels as horizontal runs of one color. */
 function toLayer(name: ArtLayer, grid: Grid, width: number, height: number): PixelLayer {

@@ -402,6 +402,9 @@
   .art-balloon {
     animation: art-float 40s ease-in-out infinite alternate;
   }
+  .art-sailboat {
+    animation: art-sail 50s ease-in-out infinite alternate;
+  }
   .art-window {
     animation: art-flicker 5s linear infinite;
   }
@@ -452,6 +455,11 @@
   @keyframes art-float {
     to {
       transform: translate(36px, -5px);
+    }
+  }
+  @keyframes art-sail {
+    to {
+      transform: translateX(34px);
     }
   }
   @keyframes art-bob {
