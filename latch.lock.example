@@ -17,7 +17,8 @@
             "name": "20cc0770fb993bd81a180376ca5276544482c8c4cedbe3929e4885d788699d73",
             "description": "e41db1892853e17be8af18b183cfab1a7bc0a0d30f531f747994c026bb7234b4",
             "inputSchema": "bf2e4a0b08fca3375b8d276596bc65b1a794dc0303958a4135b035d6f0fc550b",
-            "composite": "b444a323d762a62b7a789ce64249cd0676e64aa0f9020791c5c9591248da85c6"
+            "metadata": "2c426943292e5e5b2798ede7229c88510ea466d4c477690327607fbbcc4ff930",
+            "composite": "00806834f216c5faf99c78ebf4fa232a8f890cf416d031eb71aaa8890cc87b21"
           },
           "capabilities": {
             "filesystem": {
@@ -58,7 +59,8 @@
             "name": "1faab823216cca436bbac57c375152ea5725000023b5b109b5b006a4c5221b7f",
             "description": "bbde70f96f651dd4161411667e968ffbbd660c3238fe6c8269a1bc76fd282a59",
             "inputSchema": "bfa0f8af9bc056c35fd292c301656f821435b4b7a12734e14cedec1a631fa612",
-            "composite": "717a11b8e28f12c61ed48f4c8951d682bd16a0e21b5123b969303d8263275641"
+            "metadata": "7c5b7789c4387f8f8d75d92c97131b91ca5d3a45572c1ed1688eb96c30ac7981",
+            "composite": "5524802dad1b2b816f658d4034991a366f76c263d5f534b35d5550a5c9a1667c"
           },
           "capabilities": {
             "filesystem": {

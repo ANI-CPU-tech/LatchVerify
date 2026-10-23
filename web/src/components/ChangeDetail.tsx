@@ -18,6 +18,7 @@ const SEGMENTS = [
   ["name", "Name"],
   ["description", "Description"],
   ["inputSchema", "Input schema"],
+  ["metadata", "Title and annotations"],
 ] as const;
 
 /**

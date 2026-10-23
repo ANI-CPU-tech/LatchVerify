@@ -105,7 +105,7 @@ function analyzeTool(context: ToolContext, name: string, raw: unknown): Detected
     const { capabilities, findings } = extractCapabilities(tool, context.knownTools);
     findings.push(...textFindings(tool, context.knownTools));
     const segments: SegmentChanges =
-      before === null ? { name: true, description: true, inputSchema: true } : diffHashes(before.hashes, hashes);
+      before === null ? { name: true, description: true, inputSchema: true, metadata: true } : diffHashes(before.hashes, hashes);
     const capabilityDelta = diffCapabilities(before?.capabilities ?? null, capabilities);
     const decision = classifyTier(segments, capabilityDelta, findings);
     const after: ToolRecord = {
@@ -154,7 +154,7 @@ function unanalyzable(context: ToolContext, name: string, problem: string): Dete
       after: {
         name,
         serverId: context.serverId,
-        hashes: { name: nonce, description: nonce, inputSchema: nonce, composite: nonce },
+        hashes: { name: nonce, description: nonce, inputSchema: nonce, metadata: nonce, composite: nonce },
         capabilities: emptyCapabilitySet(),
         approvedBy: UNAPPROVED,
         approvedAt: context.now.toISOString(),

@@ -13,8 +13,8 @@ const fixtureTools = (name: string): McpTool[] =>
 
 const fixtureTool = (file: string, name: string): McpTool => fixtureTools(file).find((t) => t.name === name)!;
 
-const NO_SEGMENTS: SegmentChanges = { name: false, description: false, inputSchema: false };
-const DESCRIPTION_ONLY: SegmentChanges = { name: false, description: true, inputSchema: false };
+const NO_SEGMENTS: SegmentChanges = { name: false, description: false, inputSchema: false, metadata: false };
+const DESCRIPTION_ONLY: SegmentChanges = { name: false, description: true, inputSchema: false, metadata: false };
 const EMPTY_DELTA: CapabilityDelta = { gained: [], lost: [], loosened: [] };
 
 const finding = (type: Finding["type"], severity: Finding["severity"], message = `${type} ${severity}`): Finding => ({
@@ -35,7 +35,7 @@ function pipeline(before: McpTool | null, after: McpTool, otherServerTools: stri
     ...detectUnicode(after.description ?? "", "description"),
     ...detectPatterns(after.description ?? "", "description", { otherServerTools }),
   ];
-  const segments = before ? diffHashes(hashTool(before), hashTool(after)) : { name: true, description: true, inputSchema: true };
+  const segments = before ? diffHashes(hashTool(before), hashTool(after)) : { name: true, description: true, inputSchema: true, metadata: true };
   const beforeCaps = before ? extractCapabilities(before, otherServerTools).capabilities : null;
   return classifyTier(segments, diffCapabilities(beforeCaps, extracted.capabilities), findings);
 }
@@ -138,7 +138,7 @@ describe("classifyTier rules", () => {
   });
 
   it("lists which segments changed for a tier 0 text change", () => {
-    expect(classifyTier({ name: true, description: true, inputSchema: false }, EMPTY_DELTA, []).reason).toBe(
+    expect(classifyTier({ name: true, description: true, inputSchema: false, metadata: false }, EMPTY_DELTA, []).reason).toBe(
       "Text changed (name, description); capabilities unchanged",
     );
   });

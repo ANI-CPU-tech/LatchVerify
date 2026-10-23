@@ -107,11 +107,13 @@ export function sha256Hex(input: string): Sha256Hex {
  * - name:        sha256(name)
  * - description: sha256(description ?? "")
  * - inputSchema: sha256(canonicalJson(inputSchema))
- * - composite:   sha256 of the three hex digests joined by ":"
+ * - metadata:    sha256(canonicalJson({ title, annotations })), absent fields omitted
+ * - composite:   sha256 of the four hex digests joined by ":"
  *
  * Text is hashed as-is, without Unicode normalization, so zero-width or confusable characters
- * still change the hash. Only these three segments are hashed: annotations are tracked as
- * claims in the capability set, and other fields (title, vendor extensions) are not pinned.
+ * still change the hash. The title and annotations are pinned too: clients show the title to the
+ * model, so a rug pull can hide instructions there, and a flipped readOnlyHint is a changed claim.
+ * Vendor extension fields are not pinned.
  *
  * @throws as canonicalJson does, if inputSchema holds values JSON cannot represent.
  */
@@ -119,5 +121,6 @@ export function hashTool(tool: McpTool): ToolHashes {
   const name = sha256Hex(tool.name);
   const description = sha256Hex(tool.description ?? "");
   const inputSchema = sha256Hex(canonicalJson(tool.inputSchema));
-  return { name, description, inputSchema, composite: sha256Hex(`${name}:${description}:${inputSchema}`) };
+  const metadata = sha256Hex(canonicalJson({ title: tool.title, annotations: tool.annotations }));
+  return { name, description, inputSchema, metadata, composite: sha256Hex(`${name}:${description}:${inputSchema}:${metadata}`) };
 }

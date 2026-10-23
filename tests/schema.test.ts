@@ -28,7 +28,7 @@ const noCapabilities: CapabilitySet = {
 const record = (overrides: Partial<ToolRecord> = {}): ToolRecord => ({
   name: "get_forecast",
   serverId: "weather",
-  hashes: { name: HASH, description: HASH, inputSchema: HASH, composite: HASH },
+  hashes: { name: HASH, description: HASH, inputSchema: HASH, metadata: HASH, composite: HASH },
   capabilities: noCapabilities,
   approvedBy: "alice@example.com",
   approvedAt: "2026-10-01T12:00:00.000Z",
@@ -98,8 +98,8 @@ describe("ToolRecordSchema", () => {
   });
 
   it("rejects non-hex or uppercase hashes", () => {
-    const upper = record({ hashes: { name: HASH, description: HASH, inputSchema: HASH, composite: "A".repeat(64) } });
-    const short = record({ hashes: { name: "abc", description: HASH, inputSchema: HASH, composite: HASH } });
+    const upper = record({ hashes: { name: HASH, description: HASH, inputSchema: HASH, metadata: HASH, composite: "A".repeat(64) } });
+    const short = record({ hashes: { name: "abc", description: HASH, inputSchema: HASH, metadata: HASH, composite: HASH } });
     expect(ToolRecordSchema.safeParse(upper).success).toBe(false);
     expect(ToolRecordSchema.safeParse(short).success).toBe(false);
   });
