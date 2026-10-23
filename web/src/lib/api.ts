@@ -1,5 +1,15 @@
 import { z } from "zod";
-import { LatchEventSchema, LockFileSchema, PendingChangeSchema, type LatchEvent, type LockFile, type PendingChange } from "@schema/index.js";
+import {
+  LatchEventSchema,
+  LockFileSchema,
+  PendingChangeSchema,
+  SimulationResultSchema,
+  type LatchEvent,
+  type LockFile,
+  type PendingChange,
+  type SimulationRequest,
+  type SimulationResult,
+} from "@schema/index.js";
 
 /** One diff part as produced by jsdiff (src/analyze/differ.ts diffDescription). */
 export interface DiffPart {
@@ -104,11 +114,11 @@ export function toReviewItem(change: PendingChange): ReviewItem {
 }
 
 /**
- * GETs `path` and validates the JSON body with `schema`. A malformed or invalid reply is an
- * ApiError naming `what`, never rendered as is.
+ * GETs `path` (or sends `init`) and validates the JSON body with `schema`. A malformed or invalid
+ * reply is an ApiError naming `what`, never rendered as is.
  */
-async function getJson<T>(path: string, schema: z.ZodType<T>, what: string, signal?: AbortSignal): Promise<T> {
-  const response = await call(path, { signal });
+async function getJson<T>(path: string, schema: z.ZodType<T>, what: string, signal?: AbortSignal, init: RequestInit = {}): Promise<T> {
+  const response = await call(path, { ...init, signal });
   if (!isJson(response)) throw new ApiUnreachableError("The review API did not answer with JSON; is it running?");
   let body: unknown;
   try {
@@ -158,4 +168,16 @@ export async function approveChange(id: string): Promise<void> {
 /** Rejects a change. Resolves once it is dequeued; the tool stays blocked. */
 export async function rejectChange(id: string): Promise<void> {
   await write(id, "reject");
+}
+
+/**
+ * Rehearses a rug pull with the proxy's own pipeline (POST /api/simulate). Nothing is written:
+ * not latch.lock, not the queue, not the event log.
+ */
+export async function simulateRugPull(request: SimulationRequest, signal?: AbortSignal): Promise<SimulationResult> {
+  return getJson("/api/simulate", SimulationResultSchema, "simulation", signal, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", [CLIENT_HEADER]: CLIENT_NAME },
+    body: JSON.stringify(request),
+  });
 }
