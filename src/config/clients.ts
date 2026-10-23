@@ -1,6 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { posix, win32, type PlatformPath } from "node:path";
+import { dirname, posix, win32, type PlatformPath } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 /** MCP clients whose config files `latch init` knows how to rewrite. */
 export const SUPPORTED_CLIENTS = ["claude-desktop", "claude-code", "cursor", "vscode"] as const;
@@ -195,9 +197,106 @@ function withCommand(entry: ClientServerEntry, command: string, args: string[]):
 }
 
 /**
- * TODO: write config.raw back to config.path with config.servers merged in, after writing
- * a timestamped .bak copy of the original file. Resolves once the file is flushed.
+ * Write `config.servers` into the client's config file, after a timestamped `.bak` copy of the
+ * file as it was. Resolves once the new file is flushed to disk.
+ *
+ * - Servers are merged into the file's server map: entries not in `config.servers` (HTTP
+ *   servers, servers the user did not pick) and every unrelated key are kept.
+ * - The merge starts from the file as it is now, not from `config.raw`: clients rewrite their
+ *   config while they run (Claude Code updates ~/.claude.json constantly), and `latch init` may
+ *   sit on a prompt between detecting and writing. `config.raw` is used only if the file is gone.
+ * - Nothing is written, and no backup made, when the merged servers equal what the file
+ *   already holds, so re-running init is a no-op.
+ * - Indentation, CRLF line endings and the trailing newline (or its absence) are kept, so the
+ *   diff shows only the changed entries.
+ * - The backup and the new file get the original file's permission bits (a new file gets 0600):
+ *   configs often hold API tokens in `env`.
+ * - A symlinked config (dotfile managers) stays a symlink; its target is rewritten.
+ * - The new content goes to a temp file that is fsynced and renamed over the target, so the
+ *   client never reads half a config.
+ *
+ * @throws Error naming the file when it exists but is no longer a JSON object; it is left as is.
  */
 export async function writeClientConfig(config: ClientConfig): Promise<void> {
-  throw new Error("not implemented");
+  const target = await resolveSymlinks(config.path);
+  const current = await readIfExists(target);
+  const base = current === undefined ? config.raw : parseJsonObject(current.text);
+  if (base === undefined) {
+    throw new Error(`${config.path} is no longer a JSON object; not rewriting it`);
+  }
+
+  const key = serversKey(config.client);
+  const existing = isPlainObject(base[key]) ? base[key] : {};
+  const next = { ...base, [key]: { ...existing, ...config.servers } };
+  // Compare values, not text: a hand-formatted file must not be reformatted when nothing changed.
+  if (current !== undefined && isDeepStrictEqual(next, base)) return;
+  const text = formatLike(next, current?.text);
+
+  const mode = current === undefined ? 0o600 : current.mode;
+  if (current !== undefined) await writeBackup(config.path, current.text, mode);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFileAtomic(target, text, mode);
+}
+
+async function resolveSymlinks(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return path;
+    throw error;
+  }
+}
+
+async function readIfExists(path: string): Promise<{ text: string; mode: number } | undefined> {
+  try {
+    const [text, info] = await Promise.all([readFile(path, "utf8"), stat(path)]);
+    return { text, mode: info.mode & 0o777 };
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return undefined;
+    throw error;
+  }
+}
+
+/** JSON in the style of `previous`: its indentation, line endings and final newline. */
+function formatLike(value: unknown, previous: string | undefined): string {
+  const indent = previous?.match(/\n([ \t]+)\S/)?.[1] ?? "  ";
+  let text = JSON.stringify(value, null, indent);
+  if (previous === undefined || /\n\s*$/.test(previous)) text += "\n";
+  return previous?.includes("\r\n") ? text.replace(/\n/g, "\r\n") : text;
+}
+
+/** `<path>.<UTC timestamp>.bak`, never overwriting an earlier backup. */
+async function writeBackup(path: string, text: string, mode: number): Promise<void> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  for (let attempt = 0; ; attempt++) {
+    const backup = `${path}.${stamp}${attempt === 0 ? "" : `-${attempt}`}.bak`;
+    try {
+      await writeFile(backup, text, { encoding: "utf8", flag: "wx", mode });
+      return;
+    } catch (error) {
+      if (!isErrno(error, "EEXIST") || attempt >= 99) throw error;
+    }
+  }
+}
+
+/** Temp file, fsync, rename: the target holds either the old or the new content, never a mix. */
+async function writeFileAtomic(path: string, text: string, mode: number): Promise<void> {
+  const temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    const handle = await open(temp, "wx", mode);
+    try {
+      await handle.writeFile(text, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temp, path);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
+  }
+}
+
+function isErrno(error: unknown, code: string): boolean {
+  return error instanceof Error && (error as NodeJS.ErrnoException).code === code;
 }

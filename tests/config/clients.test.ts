@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,8 @@ import {
   serversKey,
   unwrapProxy,
   wrapWithProxy,
+  writeClientConfig,
+  type ClientConfig,
   type ClientId,
   type ClientServerEntry,
 } from "../../src/config/clients.js";
@@ -324,5 +326,160 @@ describe.skipIf(onWindows)("detectClients", () => {
     const [config] = await detectClients();
     expect(Object.hasOwn(config!.servers, "__proto__")).toBe(true);
     expect(Object.getPrototypeOf(config!.servers)).toBe(Object.prototype);
+  });
+});
+
+describe.skipIf(onWindows)("writeClientConfig", () => {
+  let home: string;
+  const weather = { command: "npx", args: ["tsx", "demo/weather-server.ts"] };
+  const BACKUP = /\.\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z(-\d+)?\.bak$/;
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await rm(home, { recursive: true, force: true });
+  });
+
+  /** Write `contents` as Claude Desktop's config and detect it. */
+  async function detected(contents: unknown, client: ClientId = "claude-desktop"): Promise<ClientConfig> {
+    home = await fakeHome();
+    await writeConfig(client, contents);
+    const config = (await detectClients()).find((c) => c.client === client);
+    if (config === undefined) throw new Error("config not detected");
+    return config;
+  }
+
+  const wrapAll = (config: ClientConfig): ClientConfig => ({
+    ...config,
+    servers: Object.fromEntries(Object.entries(config.servers).map(([id, entry]) => [id, wrapWithProxy(id, entry)])),
+  });
+
+  const filesBeside = async (path: string) => (await readdir(dirname(path))).sort();
+  const backups = async (path: string) => (await filesBeside(path)).filter((name) => BACKUP.test(name));
+
+  it("wraps the servers, keeps unknown keys and leaves one .bak with the original bytes", async () => {
+    const original = { mcpServers: { weather }, other: 1 };
+    const config = await detected(original);
+    const before = await readFile(config.path, "utf8");
+    await writeClientConfig(wrapAll(config));
+
+    expect(JSON.parse(await readFile(config.path, "utf8"))).toEqual({ mcpServers: { weather: wrapWithProxy("weather", weather) }, other: 1 });
+    const [backup, ...more] = await backups(config.path);
+    expect(more).toEqual([]);
+    expect(backup!.startsWith("claude_desktop_config.json.")).toBe(true);
+    expect(await readFile(join(dirname(config.path), backup!), "utf8")).toBe(before);
+    expect(await filesBeside(config.path)).toEqual(["claude_desktop_config.json", backup]);
+  });
+
+  it("is a no-op, with no new backup, when nothing changes", async () => {
+    const config = wrapAll(await detected({ mcpServers: { weather }, other: 1 }));
+    await writeClientConfig(config);
+    const after = await readFile(config.path, "utf8");
+    await writeClientConfig(wrapAll((await detectClients())[0]!));
+    expect(await readFile(config.path, "utf8")).toBe(after);
+    expect(await backups(config.path)).toHaveLength(1);
+  });
+
+  it("does not reformat a hand-formatted file when nothing changes", async () => {
+    const config = await detected('{"mcpServers": {"weather": {"command": "npx", "args": ["tsx", "demo/weather-server.ts"]}}}');
+    await writeClientConfig(config);
+    expect(await readFile(config.path, "utf8")).toBe('{"mcpServers": {"weather": {"command": "npx", "args": ["tsx", "demo/weather-server.ts"]}}}');
+    expect(await backups(config.path)).toEqual([]);
+  });
+
+  it("keeps servers it was not given, including HTTP servers", async () => {
+    const http = { type: "http", url: "https://mcp.example" };
+    const config = await detected({ mcpServers: { weather, other: { command: "x" }, http } });
+    await writeClientConfig({ ...config, servers: { weather: wrapWithProxy("weather", weather) } });
+    expect(JSON.parse(await readFile(config.path, "utf8")).mcpServers).toEqual({
+      weather: wrapWithProxy("weather", weather),
+      other: { command: "x" },
+      http,
+    });
+  });
+
+  it("keeps changes the client made to the file after detection", async () => {
+    const config = await detected({ mcpServers: { weather }, numStartups: 1 });
+    await writeFile(config.path, JSON.stringify({ mcpServers: { weather }, numStartups: 2, added: true }));
+    await writeClientConfig(wrapAll(config));
+    expect(JSON.parse(await readFile(config.path, "utf8"))).toEqual({
+      mcpServers: { weather: wrapWithProxy("weather", weather) },
+      numStartups: 2,
+      added: true,
+    });
+  });
+
+  it("refuses to rewrite a file that stopped being JSON, leaving it as is", async () => {
+    const config = await detected({ mcpServers: { weather } });
+    await writeFile(config.path, "{ half written");
+    await expect(writeClientConfig(wrapAll(config))).rejects.toThrow(`${config.path} is no longer a JSON object; not rewriting it`);
+    expect(await readFile(config.path, "utf8")).toBe("{ half written");
+    expect(await filesBeside(config.path)).toEqual(["claude_desktop_config.json"]);
+  });
+
+  it("writes from config.raw, with no backup and mode 0600, when the file is gone", async () => {
+    const config = await detected({ mcpServers: { weather }, other: 1 });
+    await rm(dirname(config.path), { recursive: true });
+    await writeClientConfig(wrapAll(config));
+    expect(JSON.parse(await readFile(config.path, "utf8"))).toEqual({ mcpServers: { weather: wrapWithProxy("weather", weather) }, other: 1 });
+    expect((await stat(config.path)).mode & 0o777).toBe(0o600);
+    expect(await filesBeside(config.path)).toEqual(["claude_desktop_config.json"]);
+  });
+
+  it("writes VS Code servers under servers", async () => {
+    const config = await detected({ servers: { weather: { type: "stdio", ...weather } }, inputs: [] }, "vscode");
+    await writeClientConfig(wrapAll(config));
+    expect(JSON.parse(await readFile(config.path, "utf8"))).toEqual({
+      servers: { weather: wrapWithProxy("weather", { type: "stdio", ...weather }) },
+      inputs: [],
+    });
+  });
+
+  it("keeps the file's indentation, line endings and final newline", async () => {
+    const cases: Array<[string, (text: string) => boolean]> = [
+      ['{\n\t"mcpServers": {\n\t\t"weather": {"command": "a"}\n\t}\n}\n', (t) => t.startsWith('{\n\t"mcpServers"') && t.endsWith("}\n")],
+      ['{\n    "mcpServers": {"weather": {"command": "a"}}\n}', (t) => t.startsWith('{\n    "mcpServers"') && t.endsWith("}")],
+      ['{\r\n  "mcpServers": {"weather": {"command": "a"}}\r\n}\r\n', (t) => !/[^\r]\n/.test(t) && t.endsWith("}\r\n")],
+    ];
+    for (const [text, check] of cases) {
+      const config = await detected(text);
+      await writeClientConfig(wrapAll(config));
+      const written = await readFile(config.path, "utf8");
+      expect(check(written), JSON.stringify(written)).toBe(true);
+      expect(JSON.parse(written).mcpServers.weather.command).toBe("latch");
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the original permissions on the new file and the backup", async () => {
+    const config = await detected({ mcpServers: { weather }, token: "secret" });
+    await chmod(config.path, 0o600);
+    await writeClientConfig(wrapAll(config));
+    expect((await stat(config.path)).mode & 0o777).toBe(0o600);
+    const [backup] = await backups(config.path);
+    expect((await stat(join(dirname(config.path), backup!))).mode & 0o777).toBe(0o600);
+  });
+
+  it("rewrites the target of a symlinked config and keeps the link", async () => {
+    const config = await detected({ mcpServers: { weather } });
+    const real = join(home, "dotfiles", "claude.json");
+    await mkdir(dirname(real), { recursive: true });
+    await writeFile(real, await readFile(config.path, "utf8"));
+    await rm(config.path);
+    await symlink(real, config.path);
+    await writeClientConfig(wrapAll(config));
+    expect((await lstat(config.path)).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(await readFile(real, "utf8")).mcpServers.weather.command).toBe("latch");
+  });
+
+  it("never overwrites an earlier backup taken in the same millisecond", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T09:00:00.000Z"));
+    const config = await detected({ mcpServers: { weather } });
+    await writeClientConfig(wrapAll(config));
+    await writeClientConfig({ ...config, servers: { weather: { command: "other" } } });
+    expect(await backups(config.path)).toEqual([
+      "claude_desktop_config.json.2026-10-23T09-00-00-000Z-1.bak",
+      "claude_desktop_config.json.2026-10-23T09-00-00-000Z.bak",
+    ]);
   });
 });
