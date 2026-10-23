@@ -74,7 +74,9 @@ export function explainChange(change: PendingChange): { headline: string; detail
   if (change.findings.length > 0) {
     details.push(`${plural(change.findings.length, "finding")}${critical > 0 ? `, ${critical} critical` : ""}.`);
   }
-  details.push(`The proxy ${tier.action} calls to it${change.tier >= 2 ? " until you approve this definition" : ""}.`);
+  // Tier 2's action reads "blocked until reviewed", which would say "until" twice in this sentence.
+  const verb = change.tier === 2 ? "blocked" : tier.action;
+  details.push(`The proxy ${verb} calls to it${change.tier >= 2 ? " until you approve this definition" : ""}.`);
   return { headline, details, tone };
 }
 

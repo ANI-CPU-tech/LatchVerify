@@ -65,6 +65,12 @@ describe("explainChange", () => {
     expect(explainChange(forecast).tone).toBe("destructive");
   });
 
+  it("reads as a sentence for a tier-2 change", () => {
+    const review = explainChange({ ...forecast, tier: 2 as const });
+    expect(review.details.join(" ")).toContain("The proxy blocked calls to it until you approve this definition.");
+    expect(review.details.join(" ")).not.toContain("until reviewed calls");
+  });
+
   it("reports narrowing", () => {
     const narrowed = { ...alerts, tier: 1 as const, capabilityDelta: { gained: [], lost: ["network.egress"], loosened: [] } };
     expect(explainChange(narrowed).headline).toBe("Its capabilities only narrowed.");
