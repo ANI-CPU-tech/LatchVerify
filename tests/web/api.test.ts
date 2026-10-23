@@ -1,12 +1,29 @@
 import { readFileSync } from "node:fs";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CLIENT_HEADER as SERVER_CLIENT_HEADER } from "../../src/ui/routes.js";
+import { CLIENT_HEADER as SERVER_CLIENT_HEADER, MAX_EVENT_LIMIT, createRoutes } from "../../src/ui/routes.js";
+import { appendEvent } from "../../src/store/events.js";
+import { writePending } from "../../src/store/pending.js";
 import { LockFileSchema, type PendingChange } from "../../src/schema/index.js";
 
 // web/ resolves "@schema/*" through a Vite alias that this (node) test config does not define.
 vi.mock("@schema/index.js", () => import("../../src/schema/index.js"));
 
-const { ApiError, ApiUnreachableError, CLIENT_HEADER, approveChange, fetchPending, rejectChange, toReviewItem } = await import(
+const {
+  ApiError,
+  ApiUnreachableError,
+  CLIENT_HEADER,
+  MAX_EVENTS,
+  approveChange,
+  fetchEvents,
+  fetchLockfile,
+  fetchLockfileGit,
+  fetchPending,
+  rejectChange,
+  toReviewItem,
+} = await import(
   "../../web/src/lib/api.js"
 );
 
@@ -137,5 +154,42 @@ describe("approveChange and rejectChange", () => {
 describe("toReviewItem", () => {
   it("wraps a pending change with no description text", () => {
     expect(toReviewItem(change)).toEqual({ change, descriptionBefore: null, descriptionAfter: null, descriptionDiff: null });
+  });
+});
+
+describe("fetchEvents, fetchLockfile, fetchLockfileGit", () => {
+  it("ask for the most events the API allows by default", async () => {
+    expect(MAX_EVENTS).toBe(MAX_EVENT_LIMIT);
+    const fetchMock = stubFetch(async () => jsonResponse([]));
+    await fetchEvents();
+    expect(fetchMock).toHaveBeenCalledWith(`/api/events?limit=${MAX_EVENT_LIMIT}`, expect.anything());
+  });
+
+  it("reject replies that do not match their schema", async () => {
+    stubFetch(async () => jsonResponse([{ kind: "approved", at: "yesterday" }]));
+    expect(((await failure(fetchEvents())) as Error).message).toContain("invalid event log");
+    stubFetch(async () => jsonResponse({ version: "1" }));
+    expect(((await failure(fetchLockfile())) as Error).message).toContain("invalid lockfile");
+    stubFetch(async () => jsonResponse({ available: true }));
+    expect(((await failure(fetchLockfileGit())) as Error).message).toContain("invalid git status");
+  });
+
+  it("read what the real review API serves", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "latch-web-api-"));
+    try {
+      const deps = { lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), reviewer: "alice@example.com" };
+      await copyFile(new URL("../../latch.lock.example", import.meta.url), deps.lockfilePath);
+      await writePending(deps.stateDir, [change]);
+      await appendEvent(deps.stateDir, { kind: "tools_listed", at: "2026-10-23T09:00:00.000Z", serverId: "weather", toolCount: 2 });
+      const app = createRoutes(deps);
+      stubFetch(async (input, init) => app.request(String(input), init));
+
+      expect(await fetchLockfile()).toEqual(lock);
+      expect(await fetchEvents()).toEqual([{ kind: "tools_listed", at: "2026-10-23T09:00:00.000Z", serverId: "weather", toolCount: 2 }]);
+      expect((await fetchPending()).map((item) => item.change)).toEqual([change]);
+      expect(await fetchLockfileGit()).toMatchObject({ available: expect.any(Boolean) });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

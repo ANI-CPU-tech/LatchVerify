@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PendingChangeSchema, type PendingChange } from "@schema/index.js";
+import { LatchEventSchema, LockFileSchema, PendingChangeSchema, type LatchEvent, type LockFile, type PendingChange } from "@schema/index.js";
 
 /** One diff part as produced by jsdiff (src/analyze/differ.ts diffDescription). */
 export interface DiffPart {
@@ -48,6 +48,16 @@ export class ApiUnreachableError extends Error {
 const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
 
 const PendingQueueSchema = z.array(PendingChangeSchema);
+const EventLogSchema = z.array(LatchEventSchema);
+const LockfileGitStatusSchema = z.discriminatedUnion("available", [
+  z.object({ available: z.literal(false), reason: z.string() }),
+  z.object({
+    available: z.literal(true),
+    tracked: z.boolean(),
+    modified: z.boolean(),
+    lastCommit: z.object({ hash: z.string(), date: z.string(), subject: z.string() }).nullable(),
+  }),
+]);
 
 const isJson = (response: Response): boolean => (response.headers.get("content-type") ?? "").includes("application/json");
 
@@ -94,11 +104,11 @@ export function toReviewItem(change: PendingChange): ReviewItem {
 }
 
 /**
- * The review queue, in the order the API returns it (highest tier first). Every entry is
- * validated with PendingChangeSchema: a malformed reply is an ApiError, never rendered as is.
+ * GETs `path` and validates the JSON body with `schema`. A malformed or invalid reply is an
+ * ApiError naming `what`, never rendered as is.
  */
-export async function fetchPending(signal?: AbortSignal): Promise<ReviewItem[]> {
-  const response = await call("/api/pending", { signal });
+async function getJson<T>(path: string, schema: z.ZodType<T>, what: string, signal?: AbortSignal): Promise<T> {
+  const response = await call(path, { signal });
   if (!isJson(response)) throw new ApiUnreachableError("The review API did not answer with JSON; is it running?");
   let body: unknown;
   try {
@@ -106,9 +116,35 @@ export async function fetchPending(signal?: AbortSignal): Promise<ReviewItem[]> 
   } catch {
     throw new ApiError(response.status, "The review API sent malformed JSON");
   }
-  const result = PendingQueueSchema.safeParse(body);
-  if (!result.success) throw new ApiError(response.status, `The review API sent an invalid queue:\n${z.prettifyError(result.error)}`);
-  return result.data.map(toReviewItem);
+  const result = schema.safeParse(body);
+  if (!result.success) throw new ApiError(response.status, `The review API sent an invalid ${what}:\n${z.prettifyError(result.error)}`);
+  return result.data;
+}
+
+/** The review queue, in the order the API returns it (highest tier first). */
+export async function fetchPending(signal?: AbortSignal): Promise<ReviewItem[]> {
+  return (await getJson("/api/pending", PendingQueueSchema, "queue", signal)).map(toReviewItem);
+}
+
+/** Most events GET /api/events returns (src/ui/routes.ts MAX_EVENT_LIMIT). */
+export const MAX_EVENTS = 1_000;
+
+/** The newest `limit` events from .latch/events.jsonl, oldest first. */
+export async function fetchEvents(limit: number = MAX_EVENTS, signal?: AbortSignal): Promise<LatchEvent[]> {
+  return getJson(`/api/events?limit=${limit}`, EventLogSchema, "event log", signal);
+}
+
+/** The approved state in latch.lock. */
+export async function fetchLockfile(signal?: AbortSignal): Promise<LockFile> {
+  return getJson("/api/lockfile", LockFileSchema, "lockfile", signal);
+}
+
+/** Git state of latch.lock (src/ui/git.ts LockfileGitStatus). */
+export type LockfileGitStatus = z.infer<typeof LockfileGitStatusSchema>;
+
+/** Whether latch.lock is tracked, has uncommitted changes, and its last commit. */
+export async function fetchLockfileGit(signal?: AbortSignal): Promise<LockfileGitStatus> {
+  return getJson("/api/lockfile/git", LockfileGitStatusSchema, "git status", signal);
 }
 
 const write = (id: string, action: "approve" | "reject"): Promise<Response> =>
