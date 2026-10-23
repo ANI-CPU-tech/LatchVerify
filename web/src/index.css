@@ -640,3 +640,37 @@
     opacity: 0;
   }
 }
+
+/* Simulation flow, on the dotted line: dashes march toward the receiver (--march) while the
+   message is in flight (sim-window), and dots run from --from to --to, fading at both ends. */
+@keyframes sim-march {
+  to {
+    background-position: var(--march) 0;
+  }
+}
+@keyframes sim-window {
+  0% {
+    opacity: 0;
+  }
+  10%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes sim-dot {
+  from {
+    left: var(--from);
+    opacity: 0;
+  }
+  12%,
+  88% {
+    opacity: 1;
+  }
+  to {
+    left: var(--to);
+    opacity: 0;
+  }
+}
