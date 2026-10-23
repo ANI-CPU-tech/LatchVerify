@@ -526,16 +526,82 @@ export function annotationMismatches(capabilities: CapabilitySet): Finding[] {
   }));
 }
 
+/** Schema keys whose string values are prose the model reads. */
+const PROSE_KEYS: ReadonlySet<string> = new Set(["description", "title"]);
+
 /**
- * Full extraction: pass 1, then pass 2, then (if supplied) the cached pass-3 advisory.
- * TODO: merge in priority order, never letting the advisory narrow a deterministic signal,
- * and fill crossServerRefs from `knownTools` names found in the description. Returns the
- * capability set and every finding produced along the way.
+ * All prose the model sees for a tool: its title and description, plus every description and
+ * title nested in inputSchema, where hidden instructions are just as effective.
+ */
+function toolProse(tool: McpTool): string[] {
+  const texts = [tool.title, tool.description].filter((t): t is string => typeof t === "string");
+  const seen = new Set<object>();
+  const collect = (value: unknown, depth: number): void => {
+    if (value === null || typeof value !== "object" || seen.has(value)) return;
+    if (depth > MAX_CANONICAL_DEPTH) {
+      throw new RangeError(`extractCapabilities: schema nesting deeper than ${MAX_CANONICAL_DEPTH} levels`);
+    }
+    seen.add(value);
+    for (const [key, child] of Object.entries(value)) {
+      if (typeof child === "string" && PROSE_KEYS.has(key)) texts.push(child);
+      else collect(child, depth + 1);
+    }
+  };
+  collect(tool.inputSchema, 0);
+  return texts;
+}
+
+/** Characters that can be part of a tool name: a mention must not continue into one. */
+const NAME_CHAR = String.raw`[\p{L}\p{N}_-]`;
+
+/** Escapes the characters a `u`-flag RegExp treats as syntax. */
+const escapeRegExp = (text: string): string => text.replace(/[\^$\\.*+?()[\]{}|/]/g, "\\$&");
+
+/**
+ * Names from `knownTools` mentioned as whole words anywhere in the tool's prose, sorted.
+ * Text is NFKC-folded with invisible characters removed first, so "send_\u200bemail" still
+ * counts. Matching is case-sensitive, like tool names. The tool's own name is never a reference.
+ */
+function crossServerReferences(tool: McpTool, knownTools: readonly string[]): string[] {
+  const prose = toolProse(tool).map((t) => t.normalize("NFKC").replace(IGNORABLE, "")).join("\n");
+  const refs = new Set<string>();
+  for (const name of new Set(knownTools)) {
+    if (name.length === 0 || name === tool.name || refs.has(name)) continue;
+    const mention = new RegExp(`(?<!${NAME_CHAR})${escapeRegExp(name)}(?!${NAME_CHAR})`, "u");
+    if (mention.test(prose)) refs.add(name);
+  }
+  return [...refs].sort();
+}
+
+/**
+ * Full extraction, in priority order. Later passes only add, never narrow:
+ *
+ * 1. deriveFromSchema: the deterministic schema signals.
+ * 2. readDeclared: annotations stored as claims. A claim may widen the set but never narrows
+ *    it: openWorldHint true adds network egress even without a URL parameter. The destination
+ *    is then chosen by the server, not the model, so it is not marked unconstrained.
+ *    Contradictions become annotation_mismatch findings.
+ * 3. crossServerRefs: `knownTools` (tools on other servers) mentioned anywhere in the tool's
+ *    prose, including descriptions nested in inputSchema.
+ * 4. advisory (pass 3, optional): its findings are appended. It cannot change capabilities, so
+ *    it can never narrow a deterministic signal. The caller supplies only an advisory whose
+ *    cache key matches this definition (see analyze/llm.ts).
+ *
+ * Returns the capability set and every finding, mismatches first, then advisory findings.
+ *
+ * @throws RangeError for schemas nested or expanded beyond the limits of deriveFromSchema.
  */
 export function extractCapabilities(
   tool: McpTool,
   knownTools: readonly string[],
   advisory?: LlmAdvisory,
 ): { capabilities: CapabilitySet; findings: Finding[] } {
-  throw new Error("not implemented");
+  const capabilities = deriveFromSchema(tool);
+  capabilities.declared = readDeclared(tool);
+  if (capabilities.declared.openWorldHint === true) capabilities.network.egress = true;
+  capabilities.crossServerRefs = crossServerReferences(tool, knownTools);
+
+  const findings = annotationMismatches(capabilities);
+  if (advisory) findings.push(...advisory.findings.map((finding) => ({ ...finding })));
+  return { capabilities, findings };
 }

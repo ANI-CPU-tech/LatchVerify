@@ -6,6 +6,7 @@ import {
   annotationMismatches,
   deriveFromSchema,
   emptyCapabilitySet,
+  extractCapabilities,
   isEnvMatch,
   matchParamSignals,
   readDeclared,
@@ -17,6 +18,7 @@ import {
   McpToolListSchema,
   type CapabilitySet,
   type DeclaredAnnotations,
+  type Finding,
   type McpTool,
 } from "../../src/schema/index.js";
 
@@ -517,5 +519,129 @@ describe("annotationMismatches", () => {
       c.filesystem = { read: true, write: false, scope: "unconstrained", paths: [] };
     };
     expect(annotationMismatches(caps({ readOnlyHint: true }, readOnlyAccess))).toEqual([]);
+  });
+});
+
+describe("extractCapabilities", () => {
+  describe("fixtures", () => {
+    it("gives the benign weather tools network egress only, from their open-world claim", () => {
+      for (const tool of fixtureTools("benign-tools.json")) {
+        const { capabilities, findings } = extractCapabilities(tool, []);
+        expect(capabilities).toEqual({
+          ...emptyCapabilitySet(),
+          network: { egress: true, domains: [], unconstrained: false },
+          declared: { readOnlyHint: true, openWorldHint: true },
+        });
+        expect(findings).toEqual([]);
+      }
+    });
+
+    it("matches the Task 2 acceptance criteria on the poisoned fixture", () => {
+      const result = (name: string) => extractCapabilities(fixtureTool("poisoned-tools.json", name), ["send_email"]);
+
+      expect(result("read_config").capabilities.filesystem).toEqual({ read: true, write: false, scope: "unconstrained", paths: [] });
+      expect(result("read_config").findings).toEqual([]);
+
+      const diagnostics = result("run_diagnostics");
+      expect(diagnostics.capabilities.exec).toEqual({ enabled: true, shell: true });
+      expect(diagnostics.findings.map((f) => f.evidence)).toEqual([
+        "annotations.readOnlyHint = true; derived exec.enabled",
+        "annotations.destructiveHint = false; derived exec.enabled",
+      ]);
+
+      const sync = result("sync_alerts").capabilities;
+      expect(sync.network).toEqual({ egress: true, domains: [], unconstrained: true });
+      expect(sync.crossServerRefs).toEqual(["send_email"]);
+    });
+
+    it("returns schema-valid capabilities and findings for every fixture tool", () => {
+      for (const tool of [...fixtureTools("benign-tools.json"), ...fixtureTools("poisoned-tools.json")]) {
+        const { capabilities, findings } = extractCapabilities(tool, ["send_email", "get_alerts"]);
+        expect(CapabilitySetSchema.parse(capabilities)).toEqual(capabilities);
+        for (const finding of findings) expect(FindingSchema.parse(finding)).toEqual(finding);
+      }
+    });
+  });
+
+  describe("claims", () => {
+    it("lets an open-world claim add egress but not mark it unconstrained", () => {
+      const tool = toolWith({ q: { type: "string" } }, {}, { annotations: { openWorldHint: true } });
+      expect(extractCapabilities(tool, []).capabilities.network).toEqual({ egress: true, domains: [], unconstrained: false });
+    });
+
+    it("never lets a claim narrow what the schema shows", () => {
+      const tool = toolWith({ url: { type: "string" }, command: { type: "string" } }, {}, {
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      });
+      const { capabilities, findings } = extractCapabilities(tool, []);
+      expect(capabilities.network).toEqual({ egress: true, domains: [], unconstrained: true });
+      expect(capabilities.exec.enabled).toBe(true);
+      expect(findings.map((f) => f.type)).toEqual(["annotation_mismatch", "annotation_mismatch", "annotation_mismatch"]);
+    });
+
+    it("keeps schema-derived domains when an open-world claim is also present", () => {
+      const tool = toolWith({ url: { enum: ["https://api.x.com/"] } }, {}, { annotations: { openWorldHint: true } });
+      expect(extractCapabilities(tool, []).capabilities.network).toEqual({ egress: true, domains: ["api.x.com"], unconstrained: false });
+    });
+  });
+
+  describe("cross-server references", () => {
+    const refs = (meta: Partial<McpTool>, knownTools: string[], properties: Record<string, unknown> = {}) =>
+      extractCapabilities(toolWith(properties, {}, meta), knownTools).capabilities.crossServerRefs;
+
+    it("finds known tool names mentioned as whole words, sorted and unique", () => {
+      expect(refs({ description: "Then call send_email, and send_email again, then list_files." }, ["send_email", "list_files", "send_email"])).toEqual([
+        "list_files",
+        "send_email",
+      ]);
+    });
+
+    it("does not match names that continue into other identifier characters", () => {
+      expect(refs({ description: "Use send_email_v2 or resend_email or send_email-batch." }, ["send_email"])).toEqual([]);
+    });
+
+    it("looks in the title and in descriptions nested in inputSchema", () => {
+      expect(refs({ title: "Wraps read_secret" }, ["read_secret"])).toEqual(["read_secret"]);
+      expect(refs({}, ["send_email"], { notes: { type: "string", description: "Forward this to send_email." } })).toEqual(["send_email"]);
+    });
+
+    it("sees through invisible characters inside a mentioned name", () => {
+      expect(refs({ description: "call send_\u200bemail now" }, ["send_email"])).toEqual(["send_email"]);
+    });
+
+    it("is case-sensitive, ignores the tool's own name and empty names", () => {
+      expect(refs({ description: "SEND_EMAIL probe" }, ["send_email", "probe", ""])).toEqual([]);
+    });
+
+    it("treats regex syntax in tool names literally", () => {
+      expect(refs({ description: "use fetchXjson" }, ["fetch.json"])).toEqual([]);
+      expect(refs({ description: "use fetch.json(now)" }, ["fetch.json", "a+b", "x(y"])).toEqual(["fetch.json"]);
+    });
+  });
+
+  describe("advisory", () => {
+    const advisoryFinding: Finding = { type: "pattern", severity: "warn", message: "LLM: suspicious phrasing", evidence: "..." };
+    const advisory = { contentHash: "a".repeat(64), model: "claude-haiku-5-5", findings: [advisoryFinding] };
+
+    it("appends advisory findings after the deterministic ones without changing capabilities", () => {
+      const tool = fixtureTool("poisoned-tools.json", "run_diagnostics");
+      const without = extractCapabilities(tool, []);
+      const withAdvisory = extractCapabilities(tool, [], advisory);
+      expect(withAdvisory.capabilities).toEqual(without.capabilities);
+      expect(withAdvisory.findings).toEqual([...without.findings, advisoryFinding]);
+    });
+
+    it("copies advisory findings instead of aliasing them", () => {
+      const { findings } = extractCapabilities(fixtureTool("benign-tools.json", "get_alerts"), [], advisory);
+      findings[0]!.message = "changed";
+      expect(advisoryFinding.message).toBe("LLM: suspicious phrasing");
+    });
+  });
+
+  it("is deterministic and does not mutate the tool", () => {
+    const tool = Object.freeze(structuredClone(fixtureTool("poisoned-tools.json", "sync_alerts")));
+    const before = structuredClone(tool);
+    expect(extractCapabilities(tool, ["send_email"])).toEqual(extractCapabilities(tool, ["send_email"]));
+    expect(tool).toEqual(before);
   });
 });
