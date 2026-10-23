@@ -1,7 +1,8 @@
 import type { Config } from "tailwindcss";
 
-// shadcn/ui-style tokens: colors resolve to CSS variables defined in src/index.css.
+// shadcn/ui-style tokens: colors resolve to CSS variables defined per theme in src/index.css.
 const token = (name: string) => `hsl(var(--${name}) / <alpha-value>)`;
+const pair = (name: string) => ({ DEFAULT: token(name), foreground: token(`${name}-foreground`) });
 
 export default {
   content: { relative: true, files: ["./index.html", "./src/**/*.{ts,tsx}"] },
@@ -9,22 +10,34 @@ export default {
     extend: {
       colors: {
         border: token("border"),
+        input: token("input"),
+        ring: token("ring"),
         background: token("background"),
         foreground: token("foreground"),
-        muted: { DEFAULT: token("muted"), foreground: token("muted-foreground") },
-        card: { DEFAULT: token("card"), foreground: token("card-foreground") },
-        primary: { DEFAULT: token("primary"), foreground: token("primary-foreground") },
-        destructive: { DEFAULT: token("destructive"), foreground: token("destructive-foreground") },
-        warning: { DEFAULT: token("warning"), foreground: token("warning-foreground") },
-        success: { DEFAULT: token("success"), foreground: token("success-foreground") },
+        muted: pair("muted"),
+        card: pair("card"),
+        primary: pair("primary"),
+        accent: pair("accent"),
+        destructive: pair("destructive"),
+        warning: pair("warning"),
+        success: pair("success"),
+        info: pair("info"),
+        sidebar: pair("sidebar"),
+        terminal: { ...pair("terminal"), muted: token("terminal-muted"), accent: token("terminal-accent") },
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      boxShadow: {
+        card: "var(--shadow)",
+      },
       fontFamily: {
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        mono: ["ui-monospace", "SFMono-Regular", "JetBrains Mono", "Menlo", "monospace"],
+        // Retro headings: a monospace face, bold. Local fonts only; the UI loads nothing remote.
+        display: ["JetBrains Mono", "IBM Plex Mono", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
     },
   },

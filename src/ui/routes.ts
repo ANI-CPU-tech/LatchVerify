@@ -4,6 +4,7 @@ import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
+import { lockfileGitStatus } from "./git.js";
 
 /** Filesystem locations the review API reads and writes. */
 export interface RouteDeps {
@@ -167,6 +168,9 @@ export function createRoutes(deps: RouteDeps): Hono {
 
   // The approved state in latch.lock. Returns LockFile.
   app.get("/api/lockfile", async (c) => c.json(await readLockfile(deps.lockfilePath)));
+
+  // Whether latch.lock is committed: tracked, modified, last commit. Read-only. Returns LockfileGitStatus.
+  app.get("/api/lockfile/git", async (c) => c.json(await lockfileGitStatus(deps.lockfilePath)));
 
   app.notFound((c) => c.json({ error: `no route for ${c.req.method} ${c.req.path}` }, 404));
 

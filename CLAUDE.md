@@ -68,7 +68,7 @@ that blocks on every reword gets disabled by its users.
 ## Where things live
 
 - **Keystone schema:** `src/schema/` (`capability.ts`, `tool.ts`, `lockfile.ts`,
-  `pending.ts`, re-exported from `index.ts`).
+  `pending.ts`, `event.ts`, re-exported from `index.ts`).
 - Proxy: `src/proxy/` (`transport.ts` framing, `interceptor.ts` the three
   interception points, `blocker.ts` verdict and error).
 - Analysis pipeline: `src/analyze/` (hash, capabilities, unicode, patterns,
@@ -76,9 +76,51 @@ that blocks on every reword gets disabled by its users.
 - State: `src/store/` (`lockfile.ts` for `latch.lock`; `pending.ts` and
   `events.ts` for `.latch/`).
 - CLI: `src/cli.ts` wires `src/commands/*`.
-- Review UI: `src/ui/` (hono API, loopback only) and `web/` (Vite app).
+- Review UI: `src/ui/` (hono API, loopback only) and `web/` (Vite app). See
+  "Review UI" below.
 - Fixtures: `tests/fixtures/benign-tools.json` and `poisoned-tools.json`, which
   the demo servers also serve.
+
+## Review UI
+
+**API** (`src/ui/routes.ts`): `GET /api/pending`, `GET /api/pending/:id`,
+`POST /api/pending/:id/approve|reject`, `GET /api/events?limit=`, `GET /api/lockfile`,
+`GET /api/lockfile/git` (read-only `git status`/`git log` of `latch.lock`, in
+`src/ui/git.ts`). It answers only on loopback hosts; writes need the
+`X-Latch-Client` header and a loopback `Origin`. Do not loosen these guards.
+
+**Web** (`web/src`):
+- `App.tsx` routes by hash (`lib/router.ts` parses, `lib/useRoute.ts` follows `hashchange`: `#/review/<id>`, `#/tools/<server>`, ...)
+  so the same bundle works under Vite and under `latch review --ui`.
+- `lib/data.tsx` loads the queue, lockfile, events and git status once and shares them
+  with every page. Refresh, or a decision, reloads all four.
+- `lib/api.ts` validates every response with the shared zod schemas
+  (`src/schema/event.ts` holds the event log schema for this reason).
+- `lib/format.ts` holds the pure view logic (plain-language explanations, server
+  summaries). Keep logic there, not in components, so `tests/web/` can test it in node.
+- `pages/` holds one file per sidebar entry. `components/ui.tsx` holds the shared pieces
+  (Panel, Badge, Tabs, Terminal, buttonClass), and `components/icons.tsx` holds inline SVG
+  icons (no icon dependency).
+
+**Security boundaries.** The UI displays tiers and decisions; the proxy and the API
+decide. There are no client-side security checks, no invented data, and nothing is
+sent off the machine (no remote fonts or scripts). Sample data (`lib/mock.ts`) appears
+only on the Review Queue, only when the API is unreachable, labeled, with actions
+disabled. No page shows live connection state, because nothing reports it: Servers
+shows the last `tools_listed` event instead.
+
+**Themes.** Every color is a CSS variable in `web/src/index.css`, one block per
+`[data-theme]`. `tailwind.config.ts` maps the variables to classes (`bg-card`,
+`text-primary`, `bg-terminal`, ...). Use those classes and never hardcode colors.
+- To add a theme: add a token block to `index.css`, an entry to `web/src/lib/themes.ts`,
+  and the id to the boot script in `web/index.html`, which applies the theme before
+  first paint.
+- `tests/web/themes.test.ts` fails if a theme misses a token, if a text pair drops below
+  WCAG AA 4.5:1, or if the boot script drifts from the registry.
+- `primary` is the AA-safe color for text and buttons. `accent` is the brand orange and
+  is for decoration only.
+- The preference ("system" or a theme id) is stored in `localStorage` under
+  `latch.theme`, with every access wrapped in try/catch.
 
 ## Build order (as built)
 
@@ -102,6 +144,17 @@ that blocks on every reword gets disabled by its users.
 ```sh
 pnpm typecheck   # must stay at zero errors
 pnpm test
-pnpm build
-pnpm ui
+pnpm build      # CLI into dist/, web UI into dist/web (latch review --ui)
+pnpm ui         # API on 7777 + Vite on 5173; set LATCH_LOCKFILE_PATH / LATCH_STATE_DIR
 ```
+
+There is no browser test runner. To check the UI visually, serve the built bundle and use
+`firefox --headless --screenshot`.
+
+## Remaining work
+
+- `pnpm build` does not build the web UI; it needs the separate `vite build` step.
+- The UI does not poll; it refreshes on demand and after each decision.
+- Verification results are not stored, so the Git & CI page documents `latch verify`
+  rather than showing CI runs.
+- The optional LLM advisory (`src/analyze/llm.ts`) is not wired into the proxy.
