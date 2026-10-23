@@ -49,6 +49,8 @@ const MID: Peak[] = [[10, 58, 0.35], [70, 50, 0.4], [150, 56, 0.35], [215, 52, 0
 const SHORE: Array<[number, number]> = [[0, 70], [60, 75], [130, 83], [185, 91], [215, 100], [380, 100], [410, 90], [460, 79], [512, 72]];
 /** Stratus streaks as [x, y, width]; drawn in front of the sun, behind the peaks. */
 const CLOUDS: Array<[number, number, number]> = [[262, 42, 70], [318, 54, 50], [118, 26, 60], [398, 30, 46], [40, 22, 40]];
+/** Log cabin on the left shore: left edge and width. */
+const CABIN = { x: 144, w: 17 };
 /** Waterline of the canoe's hull, on the edge of the sun's glitter path. */
 const CANOE = { x: 284, y: 86 };
 const BIRDS: Array<[number, number]> = [[176, 30], [186, 26], [195, 31], [168, 34], [206, 24]];
@@ -243,7 +245,8 @@ export function landscape(): PixelArt {
   }
   for (let cx = -4; cx < WIDTH + 4; cx += 2 + Math.floor(hash(cx, 50) * 4)) {
     const ground = shoreAt(Math.min(Math.max(cx, 0), WIDTH - 1));
-    if (ground > 93) continue;
+    // A clearing around the cabin.
+    if (ground > 93 || (cx > CABIN.x - 3 && cx < CABIN.x + CABIN.w + 2)) continue;
     const h = Math.round(8 + (94 - ground) * 0.55 + hash(cx, 51) * 7);
     const base = ground + 2;
     const lit = cx < SUN.x ? 1 : -1;
@@ -258,6 +261,35 @@ export function landscape(): PixelArt {
       }
     }
     set(cx, base - 1, "tree");
+  }
+
+  // Cabin in a clearing: sunlit log walls, a lit window, a door, a roof and chimney smoke.
+  {
+    const { x, w } = CABIN;
+    let base = 0;
+    for (let dx = 0; dx < w; dx++) base = Math.max(base, shoreAt(x + dx));
+    for (let dy = 1; dy <= 7; dy++) {
+      for (let dx = 0; dx < w; dx++) set(x + dx, base - dy, dy % 2 === 0 ? "near" : "far-shade");
+    }
+    for (let dy = 3; dy <= 5; dy++) for (let dx = 3; dx <= 6; dx++) set(x + dx, base - dy, dy === 4 && dx === 4 ? "glow" : "sun");
+    for (let dy = 1; dy <= 5; dy++) for (let dx = 10; dx <= 12; dx++) set(x + dx, base - dy, "tree");
+    // Shingled roof, its ridge catching the sunset: overhangs the walls, narrows to the top.
+    for (let r = 0; r <= 5; r++) {
+      for (let dx = -2 + r; dx <= w + 1 - r; dx++) set(x + dx, base - 8 - r, r === 5 ? "far" : r % 2 === 0 ? "tree" : "near");
+    }
+    const chimney = x + w - 5;
+    for (let dy = 11; dy <= 16; dy++) for (let dx = 0; dx <= 1; dx++) set(chimney + dx, base - dy, "tree");
+    // Smoke: puffs that grow, thin out and drift away from the sun as they rise.
+    for (let i = 0; i < 7; i++) {
+      const px = chimney - i * 2 - Math.round(Math.sin(i) * 1.5);
+      const py = base - 19 - i * 3;
+      const r = 1 + i * 0.45;
+      for (let y = Math.floor(py - r); y <= py + r; y++) {
+        for (let x = Math.floor(px - r); x <= px + r; x++) {
+          if ((x - px) ** 2 + (y - py) ** 2 <= r * r && dither(x, y, 0.95 - i * 0.12)) set(x, y, "cloud");
+        }
+      }
+    }
   }
 
   // Birds: a small flock gliding with raised wings.
