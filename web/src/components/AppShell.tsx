@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { PixelLandscape } from "../art/PixelLandscape";
+import { PixelLandscape, StarrySky } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
 import { useTheme } from "../lib/theme";
 import { isDarkTheme } from "../lib/themes";
@@ -66,6 +66,7 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
 export function AppShell({ current, children }: { current: Page; children: ReactNode }) {
   const { api, busy, reload } = useData();
   const { theme } = useTheme();
+  const night = isDarkTheme(theme);
   const status = API_STATUS[api];
   return (
     <div className="flex min-h-screen flex-col">
@@ -117,10 +118,13 @@ export function AppShell({ current, children }: { current: Page; children: React
       </div>
       {/*
         Backdrop behind the content column (the sidebar stays plain): the landscape at full width,
-        its sky stretched up to the top as a gradient. Fixed, so content scrolls over it.
+        its sky stretched up to the top as a gradient, starry at night. Fixed, so content scrolls
+        over it.
       */}
-      <div className="pointer-events-none fixed inset-0 -z-10 flex flex-col justify-end bg-gradient-to-b from-art-sky to-art-horizon md:left-56">
-        <PixelLandscape time={isDarkTheme(theme) ? "night" : "day"} className="block h-auto min-h-40 w-full" />
+      <div className="pointer-events-none fixed inset-0 top-14 -z-10 flex flex-col justify-end bg-gradient-to-b from-art-sky to-art-horizon md:left-56">
+        {/* Stars thin out toward the top, where page headings sit on the sky without a card. */}
+        {night && <StarrySky className="block min-h-0 w-full flex-1 [mask-image:linear-gradient(to_bottom,transparent,black_75%)]" />}
+        <PixelLandscape time={night ? "night" : "day"} className="block h-auto min-h-40 w-full shrink-0" />
       </div>
     </div>
   );

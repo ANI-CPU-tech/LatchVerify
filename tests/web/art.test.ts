@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ART_COLORS, landscape, type ArtTime } from "../../web/src/art/landscape.js";
+import { ART_COLORS, landscape, starrySky, type ArtTime } from "../../web/src/art/landscape.js";
 import { THEMES } from "../../web/src/lib/themes.js";
 
 const css = readFileSync(new URL("../../web/src/index.css", import.meta.url), "utf8");
@@ -52,6 +52,21 @@ describe("day and night", () => {
     expect(count("day", "snow", 18)).toBe(0);
     expect(count("night", "snow", 18)).toBeGreaterThan(40);
     expect(count("night", "bird")).toBe(0);
+  });
+});
+
+describe("starry sky", () => {
+  const sky = starrySky();
+
+  it("is deterministic, as wide as the landscape, and only stars inside its canvas", () => {
+    expect(starrySky()).toEqual(sky);
+    expect(sky.width).toBe(landscape().width);
+    for (const run of sky.runs) {
+      expect(["snow", "snow-shade"]).toContain(run.color);
+      expect(run.x + run.w).toBeLessThanOrEqual(sky.width);
+      expect(run.y).toBeLessThan(sky.height);
+    }
+    expect(sky.runs.length).toBeGreaterThan(300);
   });
 });
 

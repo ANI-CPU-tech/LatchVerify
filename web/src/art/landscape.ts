@@ -380,16 +380,43 @@ export function landscape(time: ArtTime = "day"): PixelArt {
     }
   }
 
+  return toRuns(grid, WIDTH, HEIGHT);
+}
+
+/** A grid of pixels as horizontal runs of one color. */
+function toRuns(grid: Array<ArtColor | null>, width: number, height: number): PixelArt {
   const runs: PixelArt["runs"] = [];
-  for (let y = 0; y < HEIGHT; y++) {
+  for (let y = 0; y < height; y++) {
     let x = 0;
-    while (x < WIDTH) {
-      const color = grid[y * WIDTH + x];
+    while (x < width) {
+      const color = grid[y * width + x];
       let end = x + 1;
-      while (end < WIDTH && grid[y * WIDTH + end] === color) end++;
+      while (end < width && grid[y * width + end] === color) end++;
       if (color) runs.push({ x, y, w: end - x, color });
       x = end;
     }
   }
-  return { width: WIDTH, height: HEIGHT, runs };
+  return { width, height, runs };
+}
+
+/**
+ * Stars for the night sky stretched above the landscape: as wide as it and at the same pixel
+ * scale, so the field meets the landscape's own stars without a seam.
+ */
+export function starrySky(): PixelArt {
+  const height = 256;
+  const grid: Array<ArtColor | null> = new Array(WIDTH * height).fill(null);
+  for (let i = 0; i < 640; i++) {
+    const x = Math.floor(hash(i, 200) * WIDTH);
+    const y = Math.floor(hash(i, 201) * height);
+    if (grid[y * WIDTH + x]) continue;
+    const bright = hash(i, 202) > 0.9;
+    grid[y * WIDTH + x] = bright || hash(i, 203) > 0.5 ? "snow" : "snow-shade";
+    if (!bright) continue;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const [px, py] = [x + dx, y + dy];
+      if (px >= 0 && px < WIDTH && py >= 0 && py < height && !grid[py * WIDTH + px]) grid[py * WIDTH + px] = "snow-shade";
+    }
+  }
+  return toRuns(grid, WIDTH, height);
 }
