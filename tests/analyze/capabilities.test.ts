@@ -3,13 +3,22 @@ import { describe, expect, it } from "vitest";
 import {
   PARAM_SIGNALS,
   anchoredPrefix,
+  annotationMismatches,
   deriveFromSchema,
   emptyCapabilitySet,
   isEnvMatch,
   matchParamSignals,
+  readDeclared,
   type SchemaSignal,
 } from "../../src/analyze/capabilities.js";
-import { CapabilitySetSchema, McpToolListSchema, type CapabilitySet, type McpTool } from "../../src/schema/index.js";
+import {
+  CapabilitySetSchema,
+  FindingSchema,
+  McpToolListSchema,
+  type CapabilitySet,
+  type DeclaredAnnotations,
+  type McpTool,
+} from "../../src/schema/index.js";
 
 const fixtureTools = (name: string): McpTool[] =>
   McpToolListSchema.parse(JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"))).tools;
@@ -414,5 +423,99 @@ describe("deriveFromSchema", () => {
       deriveFromSchema(tool);
       expect(tool).toEqual(before);
     });
+  });
+});
+
+describe("readDeclared", () => {
+  it("copies the three hints as claims", () => {
+    expect(readDeclared(fixtureTool("poisoned-tools.json", "run_diagnostics"))).toEqual({ readOnlyHint: true, destructiveHint: false });
+    expect(readDeclared(fixtureTool("benign-tools.json", "get_forecast"))).toEqual({ readOnlyHint: true, openWorldHint: true });
+  });
+
+  it("returns {} when there are no annotations, without filling in MCP defaults", () => {
+    expect(readDeclared(fixtureTool("poisoned-tools.json", "sync_alerts"))).toEqual({});
+    expect(readDeclared(toolWith({}, {}, { annotations: { title: "x", idempotentHint: true } }))).toEqual({});
+  });
+
+  it("ignores non-boolean values a loose server might send", () => {
+    const tool = toolWith({}, {}, { annotations: { readOnlyHint: "yes", destructiveHint: 0, openWorldHint: false } as never });
+    expect(readDeclared(tool)).toEqual({ openWorldHint: false });
+  });
+
+  it("returns a fresh object that does not alias the tool's annotations", () => {
+    const tool = fixtureTool("benign-tools.json", "get_alerts");
+    const declared = readDeclared(tool);
+    declared.readOnlyHint = false;
+    expect(tool.annotations?.readOnlyHint).toBe(true);
+  });
+});
+
+describe("annotationMismatches", () => {
+  /** The empty set with the given claims and capability overrides. */
+  const caps = (declared: DeclaredAnnotations, mutate: (c: CapabilitySet) => void = () => {}): CapabilitySet => {
+    const c = emptyCapabilitySet();
+    c.declared = declared;
+    mutate(c);
+    return c;
+  };
+  const enableExec = (c: CapabilitySet) => {
+    c.exec.enabled = true;
+  };
+  const writeAnywhere = (c: CapabilitySet) => {
+    c.filesystem = { read: true, write: true, scope: "unconstrained", paths: [] };
+  };
+  const evidence = (c: CapabilitySet) => annotationMismatches(c).map((f) => f.evidence);
+
+  it("flags read-only claims contradicted by write or exec", () => {
+    expect(evidence(caps({ readOnlyHint: true }, writeAnywhere))).toEqual(["annotations.readOnlyHint = true; derived filesystem.write"]);
+    expect(evidence(caps({ readOnlyHint: true }, enableExec))).toEqual(["annotations.readOnlyHint = true; derived exec.enabled"]);
+  });
+
+  it("flags non-destructive claims contradicted by exec or writing anywhere", () => {
+    expect(evidence(caps({ destructiveHint: false }, enableExec))).toEqual(["annotations.destructiveHint = false; derived exec.enabled"]);
+    expect(evidence(caps({ destructiveHint: false }, writeAnywhere))).toEqual([
+      "annotations.destructiveHint = false; derived filesystem.write with unconstrained scope",
+    ]);
+  });
+
+  it("does not flag non-destructive claims for constrained writes", () => {
+    const constrainedWrite = (c: CapabilitySet) => {
+      c.filesystem = { read: true, write: true, scope: "constrained", paths: ["/tmp/out/*"] };
+    };
+    expect(annotationMismatches(caps({ destructiveHint: false }, constrainedWrite))).toEqual([]);
+  });
+
+  it("flags closed-world claims contradicted by network egress", () => {
+    const egress = (c: CapabilitySet) => {
+      c.network = { egress: true, domains: ["api.x.com"], unconstrained: false };
+    };
+    expect(evidence(caps({ openWorldHint: false }, egress))).toEqual(["annotations.openWorldHint = false; derived network.egress"]);
+  });
+
+  it("reports every contradiction, in rule order, as valid warn findings", () => {
+    const everything = caps({ readOnlyHint: true, destructiveHint: false, openWorldHint: false }, (c) => {
+      writeAnywhere(c);
+      enableExec(c);
+      c.network.egress = true;
+    });
+    const findings = annotationMismatches(everything);
+    expect(findings).toHaveLength(5);
+    for (const finding of findings) {
+      expect(FindingSchema.parse(finding)).toEqual(finding);
+      expect(finding).toMatchObject({ type: "annotation_mismatch", severity: "warn" });
+    }
+  });
+
+  it("does not flag claims that agree with the capabilities, or absent claims", () => {
+    expect(annotationMismatches(caps({ readOnlyHint: true, destructiveHint: false, openWorldHint: false }))).toEqual([]);
+    expect(annotationMismatches(caps({}, (c) => (writeAnywhere(c), enableExec(c))))).toEqual([]);
+    expect(annotationMismatches(caps({ readOnlyHint: false, destructiveHint: true, openWorldHint: true }, enableExec))).toEqual([]);
+  });
+
+  it("treats reading as consistent with a read-only claim", () => {
+    const readOnlyAccess = (c: CapabilitySet) => {
+      c.filesystem = { read: true, write: false, scope: "unconstrained", paths: [] };
+    };
+    expect(annotationMismatches(caps({ readOnlyHint: true }, readOnlyAccess))).toEqual([]);
   });
 });

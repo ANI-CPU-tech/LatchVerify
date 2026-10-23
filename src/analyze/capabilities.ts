@@ -445,18 +445,85 @@ export function deriveFromSchema(tool: McpTool): CapabilitySet {
   return caps;
 }
 
-/** Pass 2: TODO: copy readOnlyHint / destructiveHint / openWorldHint from tool.annotations as claims. */
-export function readDeclared(tool: McpTool): DeclaredAnnotations {
-  throw new Error("not implemented");
-}
+const DECLARED_KEYS = ["readOnlyHint", "destructiveHint", "openWorldHint"] as const;
 
 /**
- * TODO: compare declared claims with derived capabilities and return one "annotation_mismatch"
- * finding per contradiction, e.g. readOnlyHint true with filesystem.write or exec.enabled, or
- * openWorldHint false with network.egress.
+ * Pass 2: the server's annotations, copied as claims. Only boolean values are kept and absent
+ * hints stay absent: MCP's defaults (not read-only, destructive, open-world) are never filled
+ * in, so the record shows exactly what the server asserted.
+ */
+export function readDeclared(tool: McpTool): DeclaredAnnotations {
+  const declared: DeclaredAnnotations = {};
+  if (!tool.annotations) return declared;
+  for (const key of DECLARED_KEYS) {
+    const value: unknown = own(tool.annotations, key);
+    if (typeof value === "boolean") declared[key] = value;
+  }
+  return declared;
+}
+
+/** One contradiction between a server claim and the derived capabilities. */
+interface MismatchRule {
+  claim: (typeof DECLARED_KEYS)[number];
+  claimed: boolean;
+  contradicted: (caps: CapabilitySet) => boolean;
+  derived: string;
+  message: string;
+}
+
+/** The claim / contradiction table from docs/CAPABILITIES.md, in a fixed order. */
+const MISMATCH_RULES: readonly MismatchRule[] = [
+  {
+    claim: "readOnlyHint",
+    claimed: true,
+    contradicted: (c) => c.filesystem.write,
+    derived: "filesystem.write",
+    message: "Tool claims to be read-only but its filesystem access can write",
+  },
+  {
+    claim: "readOnlyHint",
+    claimed: true,
+    contradicted: (c) => c.exec.enabled,
+    derived: "exec.enabled",
+    message: "Tool claims to be read-only but can execute commands",
+  },
+  {
+    claim: "destructiveHint",
+    claimed: false,
+    contradicted: (c) => c.exec.enabled,
+    derived: "exec.enabled",
+    message: "Tool claims to be non-destructive but can execute commands",
+  },
+  {
+    claim: "destructiveHint",
+    claimed: false,
+    contradicted: (c) => c.filesystem.write && c.filesystem.scope === "unconstrained",
+    derived: "filesystem.write with unconstrained scope",
+    message: "Tool claims to be non-destructive but can write anywhere on the filesystem",
+  },
+  {
+    claim: "openWorldHint",
+    claimed: false,
+    contradicted: (c) => c.network.egress,
+    derived: "network.egress",
+    message: "Tool claims not to reach external systems but has network egress",
+  },
+];
+
+/**
+ * Compares the declared claims in `capabilities.declared` with the derived capabilities and
+ * returns one "annotation_mismatch" finding (severity warn) per contradiction, in rule order.
+ * A server that lies about being read-only is more suspicious than one that says nothing.
  */
 export function annotationMismatches(capabilities: CapabilitySet): Finding[] {
-  throw new Error("not implemented");
+  return MISMATCH_RULES.filter(
+    (rule) => capabilities.declared[rule.claim] === rule.claimed && rule.contradicted(capabilities),
+  ).map((rule) => ({
+    type: "annotation_mismatch",
+    severity: "warn",
+    message: rule.message,
+    evidence: `annotations.${rule.claim} = ${rule.claimed}; derived ${rule.derived}`,
+  }));
 }
 
 /**
