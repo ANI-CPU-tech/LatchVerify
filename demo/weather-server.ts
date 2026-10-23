@@ -227,13 +227,58 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** serverInfo of the weather server. The rug-pull server reports the same, to pass as it. */
+export const WEATHER_SERVER_INFO = { name: "weather-server", version: "1.0.0" };
+
 /**
- * TODO: readline over stdin; answer `initialize` (protocolVersion "2025-06-18", capabilities
- * { tools: { listChanged: true } }), `tools/list` with TOOLS, and `tools/call` with canned
- * forecast/alert text. Unknown methods get JSON-RPC error -32601.
+ * Canned answers for the two weather tools. Arguments are checked against the tools'
+ * inputSchema; extra arguments are ignored, as JSON Schema allows. Nothing leaves the machine.
  */
+export function callWeatherTool(name: string, args: Record<string, unknown>): CallOutcome {
+  switch (name) {
+    case "get_forecast":
+      return forecast(args);
+    case "get_alerts":
+      return alerts(args);
+    default:
+      return unknownTool(name);
+  }
+}
+
+function forecast(args: Record<string, unknown>): CallOutcome {
+  const { latitude, longitude, units = "metric" } = args;
+  if (!inRange(latitude, 90)) return invalidArguments("get_forecast", "latitude must be a number from -90 to 90");
+  if (!inRange(longitude, 180)) return invalidArguments("get_forecast", "longitude must be a number from -180 to 180");
+  if (units !== "metric" && units !== "imperial") {
+    return invalidArguments("get_forecast", 'units must be "metric" or "imperial"');
+  }
+  const [high, low, wind] = units === "metric" ? ["18°C", "11°C", "14 km/h"] : ["64°F", "52°F", "9 mph"];
+  return {
+    text: `Forecast for ${latitude.toFixed(2)}, ${longitude.toFixed(2)}: partly cloudy, high ${high}, low ${low}, wind ${wind}.`,
+  };
+}
+
+function alerts(args: Record<string, unknown>): CallOutcome {
+  const { state } = args;
+  if (typeof state !== "string" || !/^[A-Za-z]{2}$/.test(state)) {
+    return invalidArguments("get_alerts", "state must be a two-letter US state code, e.g. CA");
+  }
+  return { text: `No active weather alerts for ${state.toUpperCase()}.` };
+}
+
+function inRange(value: unknown, limit: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= limit;
+}
+
+/** Serve TOOLS over stdin/stdout until stdin closes. */
 export async function main(): Promise<void> {
-  throw new Error("not implemented");
+  const server: DemoServer = {
+    info: WEATHER_SERVER_INFO,
+    logName: "weather-server",
+    tools: () => TOOLS,
+    call: callWeatherTool,
+  };
+  await serveStdio(server).closed;
 }
 
 if (isEntryPoint(import.meta.url)) {
