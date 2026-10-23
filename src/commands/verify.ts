@@ -2,11 +2,11 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Writable } from "node:stream";
 import pc from "picocolors";
-import { formatCodepoint } from "../analyze/unicode.js";
 import { analyzeToolList } from "../proxy/analysis.js";
 import { captureTools } from "../proxy/capture.js";
 import type { CapabilityDelta, Finding, LockFile, ServerEntry, Tier } from "../schema/index.js";
 import { readLockfile } from "../store/lockfile.js";
+import { plural, printable } from "./text.js";
 
 export interface VerifyOptions {
   lockfilePath: string;
@@ -220,14 +220,4 @@ function renderTool(tool: ToolReport, width: number): string[] {
   }
   if (critical.length > 5) lines.push(pc.dim(`${indent}… ${plural(critical.length - 5, "more critical finding")}`));
   return lines;
-}
-
-const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
-
-/**
- * Text safe to print on a terminal: control and format characters (escape sequences, bidi
- * overrides, zero-width characters, line separators) become [U+XXXX]. Other Unicode is kept.
- */
-export function printable(text: string): string {
-  return text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (char) => `[${formatCodepoint(char.codePointAt(0)!)}]`);
 }

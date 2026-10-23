@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { VERIFY_EXIT, VERIFY_REPORT_VERSION, printable, runVerify, type VerifyReport } from "../../src/commands/verify.js";
+import { VERIFY_EXIT, VERIFY_REPORT_VERSION, runVerify, type VerifyReport } from "../../src/commands/verify.js";
 import { LockFileSchema, type LockFile, type ServerEntry } from "../../src/schema/index.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -162,13 +162,6 @@ describe("runVerify", () => {
     const { text } = await verify(await lockfile(listing([...benignTools, hostile])));
     expect(text).not.toMatch(/[\u001b‮]/);
     expect(text).toContain("evil[U+001B][2J[U+202E]tool");
-  });
-});
-
-describe("printable", () => {
-  it("escapes control and format characters but keeps other Unicode", () => {
-    expect(printable("café 😀 ok")).toBe("café 😀 ok");
-    expect(printable("a\u0000b\nc​d e\u{e0068}")).toBe("a[U+0000]b[U+000A]c[U+200B]d[U+2028]e[U+E0068]");
   });
 });
 
