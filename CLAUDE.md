@@ -86,8 +86,11 @@ that blocks on every reword gets disabled by its users.
 **API** (`src/ui/routes.ts`): `GET /api/pending`, `GET /api/pending/:id`,
 `POST /api/pending/:id/approve|reject`, `GET /api/events?limit=`, `GET /api/lockfile`,
 `GET /api/lockfile/git` (read-only `git status`/`git log` of `latch.lock`, in
-`src/ui/git.ts`). It answers only on loopback hosts; writes need the
-`X-Latch-Client` header and a loopback `Origin`. Do not loosen these guards.
+`src/ui/git.ts`), `POST /api/simulate` (a rug pull rehearsed in memory by
+`src/ui/simulation.ts` with the proxy's own analyzeToolList, applyApproval, shouldBlock and
+buildBlockError; it reads and writes no file, body capped at 1 MiB). It answers only on
+loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a loopback
+`Origin`. Do not loosen these guards.
 
 **Web** (`web/src`):
 - `App.tsx` routes by hash (`lib/router.ts` parses, `lib/useRoute.ts` follows `hashchange`: `#/review/<id>`, `#/tools/<server>`, ...)
@@ -99,6 +102,11 @@ that blocks on every reword gets disabled by its users.
   (`src/schema/event.ts` holds the event log schema for this reason).
 - `lib/format.ts` holds the pure view logic (plain-language explanations, server
   summaries). Keep logic there, not in components, so `tests/web/` can test it in node.
+- `lib/simulation.ts` holds the Simulation page's scenario (`RUG_PULL`, built from
+  `tests/fixtures`) and turns the API's result into steps; `components/SimFlow.tsx` animates
+  each step's messages between agent, proxy and server. Every verdict, tier, finding and error
+  on that page comes from `POST /api/simulate`; without the API the page shows an error, never
+  sample data.
 - `pages/` holds one file per sidebar entry. `components/ui.tsx` holds the shared pieces
   (Panel, Badge, Tabs, Terminal, buttonClass), and `components/icons.tsx` holds inline SVG
   icons (no icon dependency).
