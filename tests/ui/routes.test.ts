@@ -2,7 +2,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, createRoutes, type RouteDeps } from "../../src/ui/routes.js";
+import { CLIENT_HEADER, DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, createRoutes, type RouteDeps } from "../../src/ui/routes.js";
 import { EVENTS_FILE, appendEvent, readEvents, type LatchEvent } from "../../src/store/events.js";
 import { findRecord, readLockfile } from "../../src/store/lockfile.js";
 import { readPending, writePending } from "../../src/store/pending.js";
@@ -147,7 +147,8 @@ describe("unknown routes", () => {
 });
 
 /** POSTs to a fresh app built from `deps`. */
-const post = async (path: string, app = createRoutes(deps)): Promise<Response> => app.request(path, { method: "POST" });
+const post = async (path: string, app = createRoutes(deps)): Promise<Response> =>
+  app.request(path, { method: "POST", headers: { [CLIENT_HEADER]: "review-ui" } });
 
 describe("createRoutes", () => {
   it("requires a reviewer, since approvals record who made them", () => {
@@ -268,5 +269,55 @@ describe("POST /api/pending/:id/reject", () => {
 
   it("returns 404 for an unknown change", async () => {
     expect((await post("/api/pending/nope/reject")).status).toBe(404);
+  });
+});
+
+describe("request guard", () => {
+  beforeEach(async () => {
+    await writePending(deps.stateDir, [await pendingChange("chg_1", "get_forecast", 3, "2026-10-23T09:00:00.000Z")]);
+  });
+
+  const approve = async (init: RequestInit = {}, url = "/api/pending/chg_1/approve"): Promise<Response> =>
+    createRoutes(deps).request(url, { method: "POST", ...init });
+
+  it(`refuses writes without the ${CLIENT_HEADER} header, so a cross-site form cannot approve`, async () => {
+    const response = await approve({ headers: { "content-type": "application/x-www-form-urlencoded" } });
+    expect(response.status).toBe(403);
+    expect(await json(response)).toEqual({ error: `missing ${CLIENT_HEADER} header` });
+    expect(await readPending(deps.stateDir)).toHaveLength(1);
+  });
+
+  it("refuses writes from a foreign or opaque origin even with the header", async () => {
+    for (const origin of ["https://evil.example", "http://127.0.0.1.evil.example:7777", "null"]) {
+      const response = await approve({ headers: { origin, [CLIENT_HEADER]: "x" } });
+      expect(response.status).toBe(403);
+    }
+    expect(await readPending(deps.stateDir)).toHaveLength(1);
+  });
+
+  it("accepts writes from loopback origins, including the Vite dev server", async () => {
+    const response = await approve({ headers: { origin: "http://localhost:5173", [CLIENT_HEADER]: "review-ui" } });
+    expect(response.status).toBe(200);
+  });
+
+  it("refuses any request addressed to a non-loopback host (DNS rebinding)", async () => {
+    for (const url of ["http://evil.example/api/pending", "http://192.168.1.5:7777/api/pending", "http://localhost.evil.example/api/lockfile"]) {
+      const response = await createRoutes(deps).request(url);
+      expect(response.status).toBe(403);
+      expect(await json(response)).toEqual({ error: "the review API only answers on localhost" });
+    }
+    expect((await createRoutes(deps).request("http://127.0.0.1:7777/api/pending")).status).toBe(200);
+    expect((await createRoutes(deps).request("http://[::1]:7777/api/pending")).status).toBe(200);
+  });
+
+  it("lets reads through without the header", async () => {
+    expect((await request("/api/pending")).status).toBe(200);
+  });
+
+  it("marks responses, including errors, as uncacheable and not sniffable", async () => {
+    for (const response of [await request("/api/pending"), await request("/api/pending/nope")]) {
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    }
   });
 });

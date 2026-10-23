@@ -29,6 +29,28 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Header every state-changing request must carry. A web page on another origin cannot add a
+ * custom header without a CORS preflight, and this API never grants one, so a drive-by page in
+ * the reviewer's browser cannot approve or reject changes.
+ */
+export const CLIENT_HEADER = "X-Latch-Client";
+
+/** Host names that reach this machine's loopback interface. */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** True when `url`'s host is a loopback name; false for anything unparseable, including "null". */
+function isLoopbackUrl(url: string): boolean {
+  try {
+    return LOOPBACK_HOSTS.has(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/** Methods that only read. Everything else changes state and must prove it comes from the UI. */
+const SAFE_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
+
 /** Highest tier first, then oldest first, then by id so the order is fully determined. */
 function reviewOrder(a: PendingChange, b: PendingChange): number {
   return b.tier - a.tier || Date.parse(a.detectedAt) - Date.parse(b.detectedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -69,7 +91,8 @@ async function logEvent(stateDir: string, event: LatchEvent): Promise<void> {
 
 /**
  * Review API consumed by web/src/lib/api.ts. Every response is JSON; errors are
- * `{ "error": message }` with a 4xx status for client mistakes and 500 otherwise.
+ * `{ "error": message }` with a 4xx status for client mistakes and 500 otherwise. Requests must
+ * reach it as localhost, and every write must carry CLIENT_HEADER (see the request guard).
  */
 export function createRoutes(deps: RouteDeps): Hono {
   const reviewer = deps.reviewer.trim();
@@ -77,6 +100,22 @@ export function createRoutes(deps: RouteDeps): Hono {
   const now = deps.now ?? (() => new Date());
   const exclusive = createMutex();
   const app = new Hono();
+
+  // Request guard, ahead of every route:
+  // - Host must be loopback. A DNS-rebinding page reaches 127.0.0.1 under its own host name.
+  // - Writes must come from a loopback Origin (when one is sent) and carry CLIENT_HEADER.
+  // Responses are never cached and never content-sniffed.
+  app.use("*", async (c, next) => {
+    if (!isLoopbackUrl(c.req.url)) return c.json({ error: "the review API only answers on localhost" }, 403);
+    if (!SAFE_METHODS.has(c.req.method)) {
+      const origin = c.req.header("origin");
+      if (origin !== undefined && !isLoopbackUrl(origin)) return c.json({ error: `requests from ${origin} are not allowed` }, 403);
+      if (c.req.header(CLIENT_HEADER) === undefined) return c.json({ error: `missing ${CLIENT_HEADER} header` }, 403);
+    }
+    c.header("Cache-Control", "no-store");
+    c.header("X-Content-Type-Options", "nosniff");
+    await next();
+  });
 
   /** The pending change with this id, or a 404. */
   const pendingById = async (id: string): Promise<{ queue: PendingChange[]; change: PendingChange }> => {
