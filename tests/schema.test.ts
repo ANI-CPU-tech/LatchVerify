@@ -4,8 +4,11 @@ import {
   CapabilitySetSchema,
   FindingSchema,
   LockFileSchema,
+  MAX_SIMULATED_CALLS,
   McpToolListSchema,
   PendingChangeSchema,
+  SimulationRequestSchema,
+  SimulationResultSchema,
   ToolRecordSchema,
   type CapabilitySet,
   type ToolRecord,
@@ -165,5 +168,28 @@ describe("PendingChangeSchema", () => {
   it("rejects tiers outside 0-3", () => {
     expect(PendingChangeSchema.safeParse({ ...change, tier: 4 }).success).toBe(false);
     expect(PendingChangeSchema.safeParse({ ...change, tier: "2" }).success).toBe(false);
+  });
+});
+
+describe("SimulationRequestSchema", () => {
+  const request = { serverId: "weather", pinned: fixture("benign-tools.json"), served: fixture("poisoned-tools.json"), callsBefore: ["get_alerts"], callsAfter: ["get_forecast"] };
+
+  it("accepts a rug pull built from the fixtures", () => {
+    expect(SimulationRequestSchema.parse(request)).toEqual(request);
+  });
+
+  it("caps the number of replayed calls and rejects empty names", () => {
+    expect(SimulationRequestSchema.safeParse({ ...request, callsAfter: Array(MAX_SIMULATED_CALLS + 1).fill("x") }).success).toBe(false);
+    expect(SimulationRequestSchema.safeParse({ ...request, callsBefore: [""] }).success).toBe(false);
+    expect(SimulationRequestSchema.safeParse({ ...request, serverId: "" }).success).toBe(false);
+  });
+});
+
+describe("SimulationResultSchema", () => {
+  it("parses forwarded and blocked calls", () => {
+    const blocked = { jsonrpc: "2.0", id: 1, error: { code: -32001, message: "blocked", data: { reason: { kind: "unpinned" } } } };
+    const result = { serverId: "weather", pinned: [record()], callsBefore: [{ toolName: "get_forecast", blocked: null }], changes: [], unchanged: ["get_forecast"], callsAfter: [{ toolName: "get_forecast", blocked }] };
+    expect(SimulationResultSchema.parse(result)).toEqual(result);
+    expect(SimulationResultSchema.safeParse({ ...result, callsAfter: [{ toolName: "x", blocked: { id: 1 } }] }).success).toBe(false);
   });
 });
