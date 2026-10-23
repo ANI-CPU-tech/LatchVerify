@@ -626,3 +626,16 @@
     transform: scale(1) rotate(0);
   }
 }
+
+/* Nav: links slide in one after another on first load; the highlight fades in with them. */
+@keyframes nav-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+@keyframes nav-fade {
+  from {
+    opacity: 0;
+  }
+}

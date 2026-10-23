@@ -55,7 +55,10 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
     if (!root) return;
     const measure = () => {
       const link = root.querySelector<HTMLElement>('[aria-current="page"]');
-      setBox(link ? { x: link.offsetLeft, y: link.offsetTop, width: link.offsetWidth, height: link.offsetHeight } : null);
+      // Offsets of the <li>, not the link: while the entrance animation transforms an <li>, it
+      // becomes the link's offset parent and the link's own offsets read as zero.
+      const item = link?.parentElement;
+      setBox(link && item ? { x: item.offsetLeft, y: item.offsetTop, width: link.offsetWidth, height: link.offsetHeight } : null);
     };
     measure();
     // The phone strip scrolls sideways: bring the active link into view.
@@ -74,15 +77,16 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
       {box && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute left-0 top-0 rounded-md bg-primary shadow-card transition-[transform,width,height] duration-300 ease-out motion-reduce:transition-none"
+          className="pointer-events-none absolute left-0 top-0 rounded-md bg-primary shadow-card transition-[transform,width,height] duration-300 ease-out motion-reduce:transition-none motion-safe:animate-[nav-fade_0.5s_ease-out_both]"
           style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.width, height: box.height }}
         />
       )}
       <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"}>
-        {NAV.map((item) => {
+        {NAV.map((item, i) => {
           const active = item.page === current;
           return (
-            <li key={item.page}>
+            // Links arrive one after another on first load; keys are stable, so navigation does not replay it.
+            <li key={item.page} className="motion-safe:animate-[nav-enter_0.45s_ease-out_both]" style={{ animationDelay: `${i * 45}ms` }}>
               <a
                 href={item.href}
                 aria-current={active ? "page" : undefined}
