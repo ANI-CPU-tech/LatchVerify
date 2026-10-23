@@ -159,3 +159,44 @@ describe("diffCapabilities", () => {
     expect([before, after]).toEqual(snapshot);
   });
 });
+
+describe("diffCapabilities: allow-lists", () => {
+  const paths = (...list: string[]) =>
+    caps((c) => {
+      c.filesystem = { read: true, write: false, scope: "constrained", paths: list };
+    });
+  const domains = (...list: string[]) =>
+    caps((c) => {
+      c.network = { egress: true, domains: list, unconstrained: false };
+    });
+
+  it("reports paths added to a constrained list as loosened and removed ones as lost", () => {
+    expect(diffCapabilities(paths("/data/*"), paths("/data/*", "/etc/*"))).toEqual({ gained: [], lost: [], loosened: ["filesystem.paths:/etc/*"] });
+    expect(diffCapabilities(paths("/data/*", "/etc/*"), paths("/data/*"))).toEqual({ gained: [], lost: ["filesystem.paths:/etc/*"], loosened: [] });
+    expect(diffCapabilities(paths("/a"), paths("/b"))).toEqual({ gained: [], lost: ["filesystem.paths:/a"], loosened: ["filesystem.paths:/b"] });
+  });
+
+  it("reports pinned domains the same way", () => {
+    expect(diffCapabilities(domains("api.weather.gov"), domains("api.weather.gov", "evil.net"))).toEqual({
+      gained: [],
+      lost: [],
+      loosened: ["network.domains:evil.net"],
+    });
+  });
+
+  it("leaves list changes to the scope keys when one side is not constrained", () => {
+    const anywhere = caps((c) => {
+      c.filesystem = { read: true, write: false, scope: "unconstrained", paths: [] };
+    });
+    expect(diffCapabilities(paths("/data/*"), anywhere)).toEqual({ gained: [], lost: [], loosened: ["filesystem.scope"] });
+    const anyUrl = caps((c) => {
+      c.network = { egress: true, domains: [], unconstrained: true };
+    });
+    expect(diffCapabilities(domains("api.x.com"), anyUrl)).toEqual({ gained: [], lost: [], loosened: ["network.unconstrained"] });
+    expect(diffCapabilities(emptyCapabilitySet(), domains("api.x.com"))).toEqual({ gained: ["network.egress"], lost: [], loosened: [] });
+  });
+
+  it("ignores list order", () => {
+    expect(diffCapabilities(paths("/a", "/b"), paths("/b", "/a"))).toEqual({ gained: [], lost: [], loosened: [] });
+  });
+});

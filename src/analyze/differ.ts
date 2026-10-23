@@ -57,7 +57,9 @@ const sortedUnique = (keys: Iterable<string>): string[] => [...new Set(keys)].so
  *   "credentials.readsSecrets", ...) and cross-server references ("crossServerRefs:send_email")
  *   present on only one side;
  * - loosened: a constraint removed. "filesystem.scope" when scope widens (none < constrained <
- *   unconstrained), "network.unconstrained" when any URL becomes acceptable;
+ *   unconstrained), "network.unconstrained" when any URL becomes acceptable, and
+ *   "filesystem.paths:<path>" / "network.domains:<host>" for each entry added to an allow-list
+ *   that is constrained on both sides (a list appearing or vanishing is already a scope change);
  * - lost also takes the opposite width changes: a constraint added narrows the tool.
  * `before` null (a tool seen for the first time) is compared with the empty set, so every
  * capability it has is gained. Declared annotations are claims, not capabilities, and are not
@@ -78,7 +80,25 @@ export function diffCapabilities(before: CapabilitySet | null, after: Capability
   if (after.network.unconstrained && !base.network.unconstrained) loosened.push("network.unconstrained");
   if (!after.network.unconstrained && base.network.unconstrained) lost.push("network.unconstrained");
 
+  if (base.filesystem.scope === "constrained" && after.filesystem.scope === "constrained") {
+    diffAllowList("filesystem.paths", base.filesystem.paths, after.filesystem.paths, loosened, lost);
+  }
+  if (isPinnedNetwork(base) && isPinnedNetwork(after)) {
+    diffAllowList("network.domains", base.network.domains, after.network.domains, loosened, lost);
+  }
+
   return { gained: sortedUnique(gained), lost: sortedUnique(lost), loosened: sortedUnique(loosened) };
+}
+
+/** Egress limited to schema-pinned destinations. */
+const isPinnedNetwork = (caps: CapabilitySet): boolean => caps.network.egress && !caps.network.unconstrained;
+
+/** Entries added to an allow-list widen it; entries removed narrow it. */
+function diffAllowList(key: string, before: readonly string[], after: readonly string[], loosened: string[], lost: string[]): void {
+  const had = new Set(before);
+  const has = new Set(after);
+  for (const entry of has) if (!had.has(entry)) loosened.push(`${key}:${entry}`);
+  for (const entry of had) if (!has.has(entry)) lost.push(`${key}:${entry}`);
 }
 
 /**
