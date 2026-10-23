@@ -8,7 +8,15 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyCapabilitySet } from "../../src/analyze/capabilities.js";
-import { INSPECT_EXIT, describeAnnotations, describeCapabilities, runInspect, type InspectOptions } from "../../src/commands/inspect.js";
+import {
+  INSPECT_EXIT,
+  INSPECT_REPORT_VERSION,
+  describeAnnotations,
+  describeCapabilities,
+  runInspect,
+  type InspectOptions,
+  type InspectReport,
+} from "../../src/commands/inspect.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const fixture = (name: string) => join(root, "tests/fixtures", name);
@@ -34,6 +42,15 @@ async function inspect(options: Omit<InspectOptions, "json" | "output">) {
   output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
   const code = await runInspect({ json: false, output, timeoutMs: 20_000, ...options });
   return { code, text: text.replace(/\x1b\[[0-9;]*m/g, "") };
+}
+
+/** Run inspect --json and return its exit code and parsed report. */
+async function inspectJson(options: Omit<InspectOptions, "json" | "output">) {
+  const output = new PassThrough();
+  let text = "";
+  output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+  const code = await runInspect({ json: true, output, timeoutMs: 20_000, ...options });
+  return { code, text, report: JSON.parse(text) as InspectReport };
 }
 
 /** The block of text describing one tool. */
@@ -182,5 +199,72 @@ describe("describeAnnotations", () => {
     expect(describeAnnotations({ readOnlyHint: true, destructiveHint: false, openWorldHint: undefined })).toBe(
       "readOnlyHint, destructiveHint: false",
     );
+  });
+});
+
+describe("runInspect --json", () => {
+  it("reports the benign file as one clean JSON document (task Verify)", async () => {
+    const { code, report, text } = await inspectJson({ file: fixture("benign-tools.json") });
+    expect(code).toBe(INSPECT_EXIT.ok);
+    expect(text.endsWith("}\n")).toBe(true);
+    expect(report).toMatchObject({
+      version: INSPECT_REPORT_VERSION,
+      source: { file: fixture("benign-tools.json") },
+      specVersion: null,
+      status: "ok",
+      exitCode: 0,
+      ignored: 0,
+    });
+    expect(report.tools.map((t) => [t.name, t.tier, t.findings])).toEqual([
+      ["get_forecast", 2, []],
+      ["get_alerts", 2, []],
+    ]);
+    expect(report.tools[0]!.capabilities).toMatchObject({ network: { egress: true }, declared: { readOnlyHint: true, openWorldHint: true } });
+  });
+
+  it("carries every finding for the poisoned tools", async () => {
+    const { code, report } = await inspectJson({ file: fixture("poisoned-tools.json") });
+    expect(code).toBe(INSPECT_EXIT.hardBlock);
+    expect(report.status).toBe("hard_block");
+    expect(report.tools.map((t) => [t.name, t.tier, t.findings.length])).toEqual([
+      ["get_forecast", 3, 6],
+      ["read_config", 2, 0],
+      ["run_diagnostics", 3, 5],
+      ["sync_alerts", 3, 2],
+    ]);
+    expect(report.tools[0]!.reason).toMatch(/^Critical pattern finding/);
+  });
+
+  it("names the live server and its protocol version", async () => {
+    const command = [process.execPath, "--import", tsx, join(root, "demo/weather-server.ts")];
+    const { report } = await inspectJson({ server: command });
+    expect(report.source).toEqual({ command });
+    expect(report.specVersion).toBe("2025-06-18");
+    const file = await inspectJson({ file: fixture("benign-tools.json") });
+    expect(report.tools).toEqual(file.report.tools);
+  });
+
+  it("reports errors in the same shape", async () => {
+    const missing = join(dir, "missing.json");
+    const { code, report } = await inspectJson({ file: missing });
+    expect(code).toBe(INSPECT_EXIT.error);
+    expect(report).toEqual({
+      version: INSPECT_REPORT_VERSION,
+      source: { file: missing },
+      specVersion: null,
+      status: "error",
+      exitCode: 3,
+      error: expect.stringContaining("ENOENT"),
+      ignored: 0,
+      tools: [],
+    });
+  });
+
+  it("keeps tool strings verbatim, escaped only by JSON", async () => {
+    const path = join(dir, "hostile.json");
+    await writeFile(path, JSON.stringify({ tools: [{ name: "evil\u001btool", inputSchema: { type: "object" } }] }));
+    const { report, text } = await inspectJson({ file: path });
+    expect(text).not.toContain("\u001b");
+    expect(report.tools[0]!.name).toBe("evil\u001btool");
   });
 });

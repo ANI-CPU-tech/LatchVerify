@@ -40,7 +40,12 @@ export interface InspectedTool {
   findings: Finding[];
 }
 
+/** Format version of the --json report; bumped on incompatible changes. */
+export const INSPECT_REPORT_VERSION = 1;
+
+/** The --json report. Strings are as the tools carried them; JSON escaping keeps them inert. */
 export interface InspectReport {
+  version: typeof INSPECT_REPORT_VERSION;
   /** Where the tools came from: a file (absolute path) or a server command line. */
   source: { file: string } | { command: string[] };
   /** Protocol version a live server answered with; null for a file or when it named none. */
@@ -67,10 +72,12 @@ export interface InspectReport {
  * Resolves with INSPECT_EXIT: 2 when any tool would be tier 3 (a hard block: hidden instructions,
  * obfuscation, exec or credential access), 3 when the tools cannot be loaded or the options are
  * wrong, 0 otherwise. Tier 2 is not a failure: every capability is new to an empty lockfile.
+ *
+ * With `json`, the output is exactly one InspectReport document.
  */
 export async function runInspect(options: InspectOptions): Promise<number> {
   const report = await buildReport(options);
-  (options.output ?? process.stdout).write(renderText(report));
+  (options.output ?? process.stdout).write(options.json ? `${JSON.stringify(report, null, 2)}\n` : renderText(report));
   return report.exitCode;
 }
 
@@ -79,6 +86,7 @@ async function buildReport(options: InspectOptions): Promise<InspectReport> {
   const source: InspectReport["source"] =
     options.file !== undefined ? { file: resolve(options.file) } : { command: server ?? [] };
   const failed = (error: string): InspectReport => ({
+    version: INSPECT_REPORT_VERSION,
     source,
     specVersion: null,
     status: "error",
@@ -118,6 +126,7 @@ async function buildReport(options: InspectOptions): Promise<InspectReport> {
   const ignored = tools.filter((tool) => !hasName(tool)).length;
   const hardBlock = inspected.some((tool) => tool.tier === 3);
   return {
+    version: INSPECT_REPORT_VERSION,
     source,
     specVersion,
     status: hardBlock ? "hard_block" : "ok",
