@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { Tone } from "../lib/format";
 import { describeError } from "../lib/data";
-import { AlertIcon, ArrowRightIcon } from "./icons";
+import { AlertIcon, ArrowRightIcon, RefreshIcon } from "./icons";
 
 /** Shared building blocks. Colors come only from theme tokens (src/index.css). */
 
@@ -150,7 +150,8 @@ export function JsonView({ value, label }: { value: unknown; label?: string }) {
 
 export function LoadingState({ label }: { label: string }) {
   return (
-    <p role="status" className="py-6 text-center text-sm text-muted-foreground">
+    <p role="status" className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+      <RefreshIcon aria-hidden="true" className="text-primary motion-safe:animate-spin" />
       {label}
     </p>
   );

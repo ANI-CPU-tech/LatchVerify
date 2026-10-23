@@ -179,7 +179,13 @@ export function AppShell({ current, children }: { current: Page; children: React
           <span className="hidden border-l pl-3 font-mono text-xs uppercase tracking-widest text-muted-foreground sm:inline">MCP security proxy</span>
           <div className="ml-auto flex items-center gap-2">
             <span role="status" title={status.detail} className="flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs">
-              <StatusDot tone={status.tone} />
+              {/* A slow ring while connected, a blink while checking; nothing moves when unreachable. */}
+              <span className={`relative flex ${api === "checking" ? "motion-safe:animate-pulse" : ""}`}>
+                {api === "connected" && (
+                  <span aria-hidden="true" className="absolute inset-0 hidden rounded-full bg-success opacity-50 motion-safe:block motion-safe:animate-[ping_2.4s_cubic-bezier(0,0,0.2,1)_infinite]" />
+                )}
+                <StatusDot tone={status.tone} />
+              </span>
               <span className="hidden sm:inline">{status.label}</span>
               <span className="sr-only sm:hidden">{status.label}</span>
             </span>
