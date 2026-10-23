@@ -15,8 +15,10 @@ export default {
         background: token("background"),
         foreground: token("foreground"),
         muted: pair("muted"),
-        // glass: cards over the landscape, see-through by the theme's --surface-alpha.
-        card: { ...pair("card"), glass: "hsl(var(--card) / var(--surface-alpha))" },
+        // glass: cards over the landscape. Opacity starts at the theme's --surface-alpha (its AA
+        // floor) and --surface-mix, the viewer's preference from 0 to 1, moves it toward solid
+        // (web/src/lib/surface.ts surfaceAlpha).
+        card: { ...pair("card"), glass: "hsl(var(--card) / calc(var(--surface-alpha) + var(--surface-mix, 0) * (1 - var(--surface-alpha))))" },
         primary: pair("primary"),
         accent: pair("accent"),
         destructive: pair("destructive"),

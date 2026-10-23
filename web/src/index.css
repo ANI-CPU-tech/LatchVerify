@@ -12,7 +12,8 @@
  * data-theme on its own element and render with that theme's real tokens.
  *
  * surface-alpha: opacity of cards over the landscape backdrop (bg-card-glass); the lowest that
- *          keeps every text color at AA over any art color, per tests/web/themes.test.ts.
+ *          keeps every text color at AA over any art color, per tests/web/themes.test.ts. The
+ *          viewer's --surface-mix (Settings, 0 to 1) only raises it toward solid.
  * primary: buttons, links, the active nav item; dark enough for AA text on background.
  * accent:  brand orange for decoration only (icons, artwork, highlights), never for body text.
  * art-*:   the pixel-art landscape (web/src/art/landscape.ts), recolored per theme; art-sky and

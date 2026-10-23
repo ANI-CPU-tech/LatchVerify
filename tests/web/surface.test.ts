@@ -50,3 +50,11 @@ describe("readSurface and writeSurface", () => {
     expect(writeSurface(undefined, 0.5)).toBe(false);
   });
 });
+
+describe("bg-card-glass", () => {
+  it("applies surfaceAlpha's formula in CSS: the theme floor, raised by --surface-mix", async () => {
+    const { readFileSync } = await import("node:fs");
+    const config = readFileSync(new URL("../../web/tailwind.config.ts", import.meta.url), "utf8");
+    expect(config).toContain('glass: "hsl(var(--card) / calc(var(--surface-alpha) + var(--surface-mix, 0) * (1 - var(--surface-alpha))))"');
+  });
+});

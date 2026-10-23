@@ -10,6 +10,7 @@ import {
   resolveTheme,
   writePreference,
 } from "../../web/src/lib/themes.js";
+import { surfaceAlpha } from "../../web/src/lib/surface.js";
 
 const css = readFileSync(new URL("../../web/src/index.css", import.meta.url), "utf8");
 const html = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
@@ -104,6 +105,19 @@ describe("theme tokens in index.css", () => {
 
       it.each(["destructive", "warning", "success", "info", "primary"])("%s text on its own light tint meets 4.5:1", (status) => {
         expect(contrast(color(status), blend(color(status), color("card"), 0.1))).toBeGreaterThanOrEqual(4.5);
+      });
+
+      it("keeps text on glass cards at 4.5:1 at every opacity setting", () => {
+        const min = Number(blocks.get(id)!.get("surface-alpha"));
+        const behind = [...blocks.get(id)!.keys()].filter((name) => name.startsWith("art-")).concat("background");
+        for (let step = 0; step <= 20; step++) {
+          const alpha = surfaceAlpha(min, step / 20);
+          for (const text of ["foreground", "muted-foreground", "primary", "destructive"]) {
+            for (const art of behind) {
+              expect(contrast(color(text), blend(color("card"), color(art), alpha)), `${text} over ${art} at ${alpha}`).toBeGreaterThanOrEqual(4.5);
+            }
+          }
+        }
       });
 
       it("keeps text on glass cards at 4.5:1 over every color of the landscape backdrop", () => {
