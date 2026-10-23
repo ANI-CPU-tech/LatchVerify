@@ -343,3 +343,13 @@
   }
 }
 
+
+/*
+ * Landscape layers (web/src/art/landscape.ts): each is a <g class="art-<layer>">. Second copies
+ * and alternate poses are hidden here, so the scene is complete and still without animation.
+ */
+.art-glint-b,
+.art-smoke-b,
+.art-birds-b {
+  opacity: 0;
+}
