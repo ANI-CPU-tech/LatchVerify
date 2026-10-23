@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { PixelLandscape } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
+import { useTheme } from "../lib/theme";
+import { isDarkTheme } from "../lib/themes";
 import { href, type Page } from "../lib/router";
 import { GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
@@ -63,6 +65,7 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
 
 export function AppShell({ current, children }: { current: Page; children: ReactNode }) {
   const { api, busy, reload } = useData();
+  const { theme } = useTheme();
   const status = API_STATUS[api];
   return (
     <div className="flex min-h-screen flex-col">
@@ -113,7 +116,7 @@ export function AppShell({ current, children }: { current: Page; children: React
             <div className="mx-auto max-w-6xl space-y-6">{children}</div>
           </main>
           {/* Footer art spans the content column only, so the sidebar stays plain to the bottom. */}
-          <PixelLandscape className="mt-8 block h-40 w-full sm:h-56 lg:h-64 2xl:h-80" />
+          <PixelLandscape time={isDarkTheme(theme) ? "night" : "day"} className="mt-8 block h-40 w-full sm:h-56 lg:h-64 2xl:h-80" />
         </div>
       </div>
     </div>
