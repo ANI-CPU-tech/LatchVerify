@@ -129,11 +129,15 @@ far range and forested mid range (each with sunlit and shadowed faces), a lake t
 them with the sun's glitter path, a canoe, pine shores with a cabin, jetty, rocks and reeds,
 and birds. Dark themes (`dark: true` in `themes.ts`, matching `color-scheme: dark`) get the
 night scene: a cratered moon, stars and a moonlit path instead of the sun, no birds.
-`AppShell` shows it as a footer across the content column below every page; the sidebar
-stays plain. `PixelLandscape.tsx` draws it as inline SVG with `crispEdges`, anchored at the bottom
-(`xMidYMax slice`), colored by the `--art-*` tokens of each theme; Minimal uses muted greys.
-The art is decorative only: `aria-hidden`,
-`pointer-events-none`, and never placed over content. The favicon,
+`AppShell` shows it as a fixed backdrop behind the content column on every page (the sidebar
+stays plain): the art whole at the bottom, its sky stretched to the top as a gradient
+(`--art-sky` to `--art-horizon`), with `starrySky()` stars at night. `PixelLandscape.tsx` draws
+both as inline SVG with `crispEdges`, colored by the `--art-*` tokens of each theme; Minimal
+uses muted greys. The art is decorative only: `aria-hidden`, `pointer-events-none`, and always
+behind content. Cards over it use `bg-card-glass`: see-through by the theme's
+`--surface-alpha`, which `tests/web/themes.test.ts` holds to 4.5:1 for text over any art color.
+Text outside a card is not covered by that test; keep page headings near the top, where the
+sky is plain. The favicon,
 `web/public/favicon.svg`, is a 16x16 pixel-art padlock with a sunset.
 
 ## Build order (as built)
