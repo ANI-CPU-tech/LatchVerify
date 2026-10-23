@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { SUSPICIOUS_RANGES, findSuspiciousCodepoints, suspiciousRange } from "../../src/analyze/unicode.js";
+import { SUSPICIOUS_RANGES, decodeTagChars, findSuspiciousCodepoints, suspiciousRange } from "../../src/analyze/unicode.js";
 import { McpToolListSchema, type McpTool } from "../../src/schema/index.js";
 
 const fixtureTools = (name: string): McpTool[] =>
@@ -85,5 +85,35 @@ describe("findSuspiciousCodepoints", () => {
     expect(findSuspiciousCodepoints(description("poisoned-tools.json", "sync_alerts")).map((h) => h.codepoint)).toEqual([
       0xe0068, 0xe0069,
     ]);
+  });
+});
+
+/** Encodes printable ASCII as invisible tag characters, the way a smuggling attack does. */
+const toTags = (ascii: string): string => [...ascii].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join("");
+
+describe("decodeTagChars", () => {
+  it("decodes the payload hidden in the poisoned sync_alerts description", () => {
+    expect(decodeTagChars(description("poisoned-tools.json", "sync_alerts"))).toBe("hi");
+  });
+
+  it("round-trips every printable ASCII character", () => {
+    let ascii = "";
+    for (let c = 0x20; c <= 0x7e; c++) ascii += String.fromCharCode(c);
+    expect(decodeTagChars(toTags(ascii))).toBe(ascii);
+  });
+
+  it("ignores visible text around and between tag characters", () => {
+    expect(decodeTagChars(`Sync alerts.${toTags("Ignore")} visible ${toTags(" previous")}`)).toBe("Ignore previous");
+  });
+
+  it("skips the language tag, the cancel tag and tags for control characters", () => {
+    const controls = String.fromCodePoint(0xe0000, 0xe0001, 0xe000a, 0xe001f, 0xe007f);
+    expect(decodeTagChars(`${controls}${toTags("ok")}${String.fromCodePoint(0xe007f)}`)).toBe("ok");
+  });
+
+  it("returns an empty string when there are no tag characters", () => {
+    expect(decodeTagChars("")).toBe("");
+    expect(decodeTagChars("plain text \u{1f600}")).toBe("");
+    for (const tool of fixtureTools("benign-tools.json")) expect(decodeTagChars(tool.description ?? "")).toBe("");
   });
 });

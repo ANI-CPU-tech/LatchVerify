@@ -78,12 +78,24 @@ export function findSuspiciousCodepoints(text: string): UnicodeHit[] {
   return hits;
 }
 
+/** Tag characters that mirror printable ASCII: U+E0020 (space) through U+E007E (tilde). */
+const TAG_ASCII_FIRST = 0xe0020;
+const TAG_ASCII_LAST = 0xe007e;
+const TAG_OFFSET = 0xe0000;
+
 /**
- * TODO: decode U+E0000 tag characters back to the ASCII they smuggle (tag char - 0xE0000).
- * Returns the hidden string, or "" when there are none.
+ * Decodes Unicode tag characters back to the ASCII they smuggle (tag codepoint - 0xE0000).
+ * Tags render as nothing, but models read them, so "\u{e0068}\u{e0069}" is an invisible "hi".
+ * Other text, the language tag U+E0001, the cancel tag U+E007F and tags that map to ASCII
+ * control characters are skipped. Returns the hidden string, or "" when there is none.
  */
 export function decodeTagChars(text: string): string {
-  throw new Error("not implemented");
+  let decoded = "";
+  for (const char of text) {
+    const codepoint = char.codePointAt(0)!;
+    if (codepoint >= TAG_ASCII_FIRST && codepoint <= TAG_ASCII_LAST) decoded += String.fromCharCode(codepoint - TAG_OFFSET);
+  }
+  return decoded;
 }
 
 /**
