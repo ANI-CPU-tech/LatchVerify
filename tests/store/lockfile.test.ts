@@ -4,13 +4,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   LockfileError,
+  applyApproval,
   emptyLockfile,
   findRecord,
   readLockfile,
   serializeLockfile,
   writeLockfile,
 } from "../../src/store/lockfile.js";
-import { LOCKFILE_VERSION, LockFileSchema, type LockFile } from "../../src/schema/index.js";
+import { LOCKFILE_VERSION, LockFileSchema, type LockFile, type PendingChange, type ToolRecord } from "../../src/schema/index.js";
 
 const EXAMPLE_PATH = new URL("../../latch.lock.example", import.meta.url);
 
@@ -234,5 +235,102 @@ describe("findRecord", () => {
     const lock = await loadExample();
     expect(findRecord(lock, "weather", "GET_FORECAST")).toBeUndefined();
     expect(findRecord(lock, "weather", "get_forecast ")).toBeUndefined();
+  });
+});
+
+/** Freezes recursively so any mutation throws. */
+const deepFreeze = <T>(value: T): T => {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+};
+
+const NOW = new Date("2026-10-23T09:30:00.000Z");
+const HASH = "c".repeat(64);
+
+/** A pending change whose new record is `after` (defaults: a changed get_forecast). */
+const changeFor = (after: ToolRecord, overrides: Partial<PendingChange> = {}): PendingChange => ({
+  id: "chg_test",
+  serverId: after.serverId,
+  toolName: after.name,
+  tier: 2,
+  detectedAt: "2026-10-23T09:00:00.000Z",
+  before: null,
+  after,
+  capabilityDelta: { gained: ["filesystem.read"], lost: [], loosened: ["filesystem.scope"] },
+  findings: [],
+  ...overrides,
+});
+
+describe("applyApproval", () => {
+  const changedForecast = async (): Promise<ToolRecord> => {
+    const record = structuredClone(findRecord(await loadExample(), "weather", "get_forecast")!);
+    record.hashes = { ...record.hashes, description: HASH, composite: HASH };
+    record.approvedBy = "proxy@pending";
+    return record;
+  };
+
+  it("replaces the pinned record, stamps the approval and bumps generatedAt", async () => {
+    const lock = await loadExample();
+    const result = applyApproval(lock, changeFor(await changedForecast()), "  alice@example.com ", NOW);
+    expect(result.generatedAt).toBe(NOW.toISOString());
+    const record = findRecord(result, "weather", "get_forecast")!;
+    expect(record.hashes.composite).toBe(HASH);
+    expect(record.approvedBy).toBe("alice@example.com");
+    expect(record.approvedAt).toBe(NOW.toISOString());
+    expect(findRecord(result, "weather", "get_alerts")).toEqual(findRecord(lock, "weather", "get_alerts"));
+    expect(result.servers.weather!.tools).toHaveLength(2);
+  });
+
+  it("adds a newly approved tool and keeps tools sorted by name", async () => {
+    const added = { ...(await changedForecast()), name: "a_new_tool" };
+    const result = applyApproval(await loadExample(), changeFor(added), "alice@example.com", NOW);
+    expect(result.servers.weather!.tools.map((t) => t.name)).toEqual(["a_new_tool", "get_alerts", "get_forecast"]);
+  });
+
+  it("does not mutate the lockfile or the change", async () => {
+    const lock = deepFreeze(await loadExample());
+    const change = deepFreeze(changeFor(await changedForecast()));
+    const lockBefore = structuredClone(lock);
+    const changeBefore = structuredClone(change);
+    const result = applyApproval(lock, change, "alice@example.com", NOW);
+    expect(lock).toEqual(lockBefore);
+    expect(change).toEqual(changeBefore);
+    expect(result.servers.weather!.tools[1]).not.toBe(change.after);
+  });
+
+  it("is deterministic and produces a lockfile that writes and reads back identically", async () => {
+    const lock = await loadExample();
+    const change = changeFor(await changedForecast());
+    const result = applyApproval(lock, change, "alice@example.com", NOW);
+    expect(applyApproval(lock, change, "alice@example.com", NOW)).toEqual(result);
+    const out = join(dir, "latch.lock");
+    await writeLockfile(out, result);
+    expect(await readLockfile(out)).toEqual(result);
+  });
+
+  it("rejects a blank approver or an invalid date", async () => {
+    const change = changeFor(await changedForecast());
+    expect(() => applyApproval(emptyLockfile(), change, "   ", NOW)).toThrow(TypeError);
+    expect(() => applyApproval(emptyLockfile(), change, "alice", new Date("not a date"))).toThrow(RangeError);
+  });
+
+  it("rejects a change whose record describes a different tool or server", async () => {
+    const lock = await loadExample();
+    const after = await changedForecast();
+    expect(() => applyApproval(lock, changeFor(after, { toolName: "get_alerts" }), "alice", NOW)).toThrow(/describes weather\/get_forecast/);
+    expect(() => applyApproval(lock, changeFor({ ...after, serverId: "mail" }, { serverId: "weather" }), "alice", NOW)).toThrow(
+      /describes mail\/get_forecast/,
+    );
+  });
+
+  it("rejects a server the lockfile does not list, including prototype names", async () => {
+    const lock = await loadExample();
+    const after = { ...(await changedForecast()), serverId: "mail" };
+    expect(() => applyApproval(lock, changeFor(after), "alice", NOW)).toThrow(/server "mail" is not in the lockfile/);
+    const proto = { ...(await changedForecast()), serverId: "constructor" };
+    expect(() => applyApproval(lock, changeFor(proto), "alice", NOW)).toThrow(/is not in the lockfile/);
   });
 });

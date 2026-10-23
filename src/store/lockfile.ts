@@ -138,10 +138,37 @@ export function findRecord(lock: LockFile, serverId: string, toolName: string): 
 }
 
 /**
- * Approve a pending change.
- * TODO: return a new LockFile with change.after (approvedBy/approvedAt set) replacing or adding
- * the record, and generatedAt bumped. Pure: does not touch disk.
+ * Approves a pending change: returns a new lockfile in which `change.after` replaces (or adds)
+ * the tool's record, stamped with the approver and approval time, with tools kept sorted and
+ * generatedAt set to `now`. Pure: neither argument is modified and nothing touches disk; persist
+ * the result with writeLockfile, then commit latch.lock for review.
+ *
+ * Throws when the approval cannot be recorded faithfully: a blank approver, an invalid date, a
+ * change whose record describes a different tool, a server the lockfile does not list (a pending
+ * change carries no launch command; `latch init` adds servers), or a result that fails validation.
  */
 export function applyApproval(lock: LockFile, change: PendingChange, approvedBy: string, now: Date): LockFile {
-  throw new Error("not implemented");
+  const approver = approvedBy.trim();
+  if (approver.length === 0) throw new TypeError("applyApproval: approvedBy must not be empty");
+  if (Number.isNaN(now.getTime())) throw new RangeError("applyApproval: now is not a valid date");
+  const { after } = change;
+  if (after.serverId !== change.serverId || after.name !== change.toolName) {
+    throw new Error(
+      `applyApproval: change ${change.id} is for ${change.serverId}/${change.toolName} but its record describes ${after.serverId}/${after.name}`,
+    );
+  }
+  if (!Object.hasOwn(lock.servers, change.serverId)) {
+    throw new Error(`applyApproval: server "${change.serverId}" is not in the lockfile; add it with \`latch init\` first`);
+  }
+
+  const approvedAt = now.toISOString();
+  const next = structuredClone(lock);
+  const server = next.servers[change.serverId]!;
+  const record: ToolRecord = { ...structuredClone(after), approvedBy: approver, approvedAt };
+  server.tools = [...server.tools.filter((tool) => tool.name !== record.name), record].sort((a, b) => byCodeUnit(a.name, b.name));
+  next.generatedAt = approvedAt;
+
+  const result = LockFileSchema.safeParse(next);
+  if (!result.success) throw new Error(`applyApproval: the approved lockfile would be invalid\n${z.prettifyError(result.error)}`);
+  return result.data;
 }
