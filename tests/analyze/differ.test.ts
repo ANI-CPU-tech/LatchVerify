@@ -25,24 +25,25 @@ describe("diffHashes", () => {
 
   it("reports no change for identical definitions", () => {
     const segments = diffHashes(hashTool(forecast), hashTool(structuredClone(forecast)));
-    expect(segments).toEqual({ name: false, description: false, inputSchema: false });
+    expect(segments).toEqual({ name: false, description: false, inputSchema: false, metadata: false });
     expect(anySegmentChanged(segments)).toBe(false);
   });
 
   it("reports exactly the segment that changed", () => {
     const base = hashTool(forecast);
-    expect(diffHashes(base, hashesOf({ name: "get_forecast_v2" }))).toEqual({ name: true, description: false, inputSchema: false });
-    expect(diffHashes(base, hashesOf({ description: "Fetch the forecast." }))).toEqual({ name: false, description: true, inputSchema: false });
+    expect(diffHashes(base, hashesOf({ name: "get_forecast_v2" }))).toEqual({ name: true, description: false, inputSchema: false, metadata: false });
+    expect(diffHashes(base, hashesOf({ description: "Fetch the forecast." }))).toEqual({ name: false, description: true, inputSchema: false, metadata: false });
     expect(diffHashes(base, hashesOf({ inputSchema: { type: "object", properties: {} } }))).toEqual({
       name: false,
       description: false,
       inputSchema: true,
+      metadata: false,
     });
   });
 
   it("flags the poisoned get_forecast as a description and schema change", () => {
     const segments = diffHashes(hashTool(forecast), hashTool(fixtureTool("poisoned-tools.json", "get_forecast")));
-    expect(segments).toEqual({ name: false, description: true, inputSchema: true });
+    expect(segments).toEqual({ name: false, description: true, inputSchema: true, metadata: false });
     expect(anySegmentChanged(segments)).toBe(true);
   });
 

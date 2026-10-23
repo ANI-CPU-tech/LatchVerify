@@ -77,11 +77,11 @@ describe("analyzeToolList", () => {
     expect(analysis.changes.map(({ change }) => [change.toolName, change.tier])).toEqual([["get_forecast", 0]]);
   });
 
-  it("auto-passes the same reword against latch.lock.example, whose pins list a domain the fixture lacks", () => {
+  it("auto-passes the same reword at tier 0 against latch.lock.example, whose capabilities are derived", () => {
     const [forecast] = fixture("benign-tools.json");
     const change = analyze([{ ...forecast, description: "Fetch the forecast for a location." }]).changes[0]!.change;
-    expect(change.tier).toBe(1);
-    expect(change.capabilityDelta).toEqual({ gained: [], lost: ["network.domains:api.weather.gov"], loosened: [] });
+    expect(change.tier).toBe(0);
+    expect(change.capabilityDelta).toEqual({ gained: [], lost: [], loosened: [] });
   });
 
   it("queues every tool of a server latch.lock does not know", () => {

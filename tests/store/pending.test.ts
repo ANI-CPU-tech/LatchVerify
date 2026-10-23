@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LockFileSchema, PendingChangeSchema, type PendingChange, type Tier } from "../../src/schema/index.js";
-import { PENDING_FILE, dequeue, enqueue, readPending, writePending } from "../../src/store/pending.js";
+import { PENDING_FILE, STALE_LOCK_MS, dequeue, enqueue, readPending, updatePending, writePending } from "../../src/store/pending.js";
 
 const exampleRecord = (toolName: string) =>
   LockFileSchema.parse(JSON.parse(readFileSync(new URL("../../latch.lock.example", import.meta.url), "utf8"))).servers.weather!.tools.find(
@@ -219,5 +219,33 @@ describe("dequeue", () => {
     await writePending(dir, queue);
     await writePending(dir, dequeue(await readPending(dir), "chg_1"));
     expect(await readPending(dir)).toEqual([change("chg_2", { toolName: "get_alerts" })]);
+  });
+});
+
+describe("updatePending", () => {
+  it("loses no update when many writers race (one proxy per server, review, the UI)", async () => {
+    const ids = Array.from({ length: 20 }, (_, i) => `chg_${i}`);
+    await Promise.all(ids.map((id, i) => updatePending(dir, (queue) => enqueue(queue, change(id, { toolName: `tool_${i}` })))));
+    expect((await readPending(dir)).map((entry) => entry.id).sort()).toEqual([...ids].sort());
+    expect(await readdir(dir)).toEqual([PENDING_FILE]);
+  });
+
+  it("skips the write when the update returns the same queue, and returns the queue as written", async () => {
+    expect(await updatePending(dir, (queue) => queue)).toEqual([]);
+    expect(await readdir(dir)).toEqual([]);
+    expect(await updatePending(dir, (queue) => enqueue(queue, change("chg_a")))).toMatchObject([{ id: "chg_a" }]);
+  });
+
+  it("releases the lock when the update throws", async () => {
+    await expect(updatePending(dir, () => Promise.reject(new Error("boom")))).rejects.toThrow("boom");
+    expect(await updatePending(dir, (queue) => enqueue(queue, change("chg_a")))).toHaveLength(1);
+  });
+
+  it("takes over a lock left behind by a crashed process", async () => {
+    const lock = join(dir, `${PENDING_FILE}.lock`);
+    await writeFile(lock, "");
+    const old = (Date.now() - STALE_LOCK_MS - 1_000) / 1000;
+    await utimes(lock, old, old);
+    expect(await updatePending(dir, (queue) => enqueue(queue, change("chg_a")))).toHaveLength(1);
   });
 });

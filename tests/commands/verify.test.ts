@@ -1,9 +1,11 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VERIFY_EXIT, VERIFY_REPORT_VERSION, runVerify, type VerifyReport } from "../../src/commands/verify.js";
 import { LockFileSchema, type LockFile, type ServerEntry } from "../../src/schema/index.js";
@@ -117,11 +119,11 @@ describe("runVerify", () => {
     expect(text).toMatch(/✖ get_forecast\s+tier 2/);
   });
 
-  it("exits 0 for a tier-1 change and for a removed tool, but reports both", async () => {
+  it("exits 0 for a tier-0 change and for a removed tool, but reports both", async () => {
     const [forecast] = benignTools;
     const { code, text } = await verify(await lockfile(listing([{ ...forecast, description: "Fetch the forecast for a location." }])));
     expect(code).toBe(VERIFY_EXIT.ok);
-    expect(text).toMatch(/~ get_forecast\s+tier 1 {2}Narrowed: network\.domains:api\.weather\.gov/);
+    expect(text).toMatch(/~ get_forecast\s+tier 0 {2}Text changed \(description\); capabilities unchanged/);
     expect(text).toMatch(/- get_alerts\s+removed from the server/);
   });
 
@@ -208,8 +210,7 @@ describe("runVerify --json", () => {
     ]);
     const forecast = tools[0]!;
     expect(forecast.reason).toMatch(/^Critical pattern finding/);
-    // latch.lock.example pins a domain the fixture cannot derive (PERSON1_HANDOFF.md, follow-up 4).
-    expect(forecast.capabilityDelta).toEqual({ gained: [], lost: ["network.domains:api.weather.gov"], loosened: [] });
+    expect(forecast.capabilityDelta).toEqual({ gained: [], lost: [], loosened: [] });
     expect(forecast.findings!.some((f) => f.severity === "critical" && f.evidence.includes("~/.ssh/id_rsa"))).toBe(true);
   });
 
@@ -234,5 +235,18 @@ describe("runVerify --json", () => {
     const { report, text } = await verifyJson(await lockfile(listing([...benignTools, hostile])));
     expect(text).not.toContain("\u001b");
     expect(report.servers[0]!.tools[0]!.name).toBe("evil\u001b[2Jtool");
+  });
+});
+
+describe("latch verify (CLI)", () => {
+  it("exits 3, not the drift code, when the command fails unexpectedly", () => {
+    const tsx = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
+    const result = spawnSync(process.execPath, ["--import", tsx, join(root, "src/cli.ts"), "verify"], {
+      cwd: root,
+      env: { ...process.env, LATCH_UI_PORT: "not-a-port" },
+      encoding: "utf8",
+    });
+    expect(result.stderr).toContain("LATCH_UI_PORT must be a port number");
+    expect(result.status).toBe(VERIFY_EXIT.error);
   });
 });

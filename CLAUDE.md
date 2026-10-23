@@ -11,10 +11,15 @@ capabilities without review. Read `README.md` and `docs/ARCHITECTURE.md` first.
 
 ## Current phase: implemented
 
-Every module in the build order below is implemented and tested. Change behaviour
-deliberately, with tests. `src/schema/` is still the keystone: every module,
-`tests/schema.test.ts`, `web/src/lib/mock.ts` and `latch.lock.example` depend on its
-shape.
+Every module is implemented and tested; the scaffold phase is over. Fix bugs with
+a regression test first.
+
+- **`src/schema/` is the shared contract.** Change it deliberately: every module,
+  `tests/schema.test.ts`, `web/src/lib/mock.ts` and `latch.lock.example` depend
+  on its shape.
+- `latch.lock.example` holds real hashes and capabilities; tests check both.
+- The review UI reads the hono API and falls back to `web/src/lib/mock.ts` when the
+  API is unreachable.
 
 ## Stack (fixed, do not substitute)
 
@@ -29,7 +34,7 @@ shape.
 | Diff | `diff` (jsdiff) |
 | Tests | `vitest` |
 | Package manager | `pnpm` (single package, no workspaces; `pnpm-workspace.yaml` only holds pnpm 11 settings) |
-| Optional LLM pass | `@anthropic-ai/sdk` |
+| Optional LLM pass | any OpenAI-compatible chat-completions API via `fetch` (Groq, OpenRouter); no SDK |
 
 ## Hard rules
 
@@ -117,7 +122,7 @@ shows the last `tools_listed` event instead.
 - The preference ("system" or a theme id) is stored in `localStorage` under
   `latch.theme`, with every access wrapped in try/catch.
 
-## Build order
+## Build order (as built)
 
 1. `analyze/hash.ts` (canonical JSON, segment hashes) and `store/lockfile.ts`
    (read, write with stable sorting, approve). Test the round trip against
@@ -139,8 +144,7 @@ shows the last `tools_listed` event instead.
 ```sh
 pnpm typecheck   # must stay at zero errors
 pnpm test
-pnpm build      # CLI only
-pnpm exec vite build --config web/vite.config.ts   # web UI into dist/web (latch review --ui)
+pnpm build      # CLI into dist/, web UI into dist/web (latch review --ui)
 pnpm ui         # API on 7777 + Vite on 5173; set LATCH_LOCKFILE_PATH / LATCH_STATE_DIR
 ```
 

@@ -68,6 +68,13 @@ describe("GET /api/pending", () => {
     expect(ids).toEqual(["c_t3_early", "c_t3_late", "c_t2", "c_t0"]);
   });
 
+  it("keeps queue order for ties, the same order `latch review` walks", async () => {
+    const at = "2026-10-23T09:00:00.000Z";
+    await writePending(deps.stateDir, [await pendingChange("c_b", "get_forecast", 3, at), await pendingChange("c_a", "get_alerts", 3, at)]);
+    const ids = ((await json(await request("/api/pending"))) as PendingChange[]).map((c) => c.id);
+    expect(ids).toEqual(["c_b", "c_a"]);
+  });
+
   it("reports a damaged queue as a 500 instead of an empty list", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     await mkdir(deps.stateDir, { recursive: true });

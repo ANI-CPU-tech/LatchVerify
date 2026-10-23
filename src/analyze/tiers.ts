@@ -67,7 +67,7 @@ export function classifyTier(segments: SegmentChanges, delta: CapabilityDelta, f
 
   if (delta.lost.length > 0) return { tier: 1, reason: `Narrowed: ${listKeys(delta.lost)}` };
 
-  const changed = (["name", "description", "inputSchema"] as const).filter((segment) => segments[segment]);
+  const changed = (["name", "description", "inputSchema", "metadata"] as const).filter((segment) => segments[segment]);
   return { tier: 0, reason: `Text changed (${changed.join(", ")}); capabilities unchanged` };
 }
 

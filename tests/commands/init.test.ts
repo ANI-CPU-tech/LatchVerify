@@ -291,6 +291,13 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
     ]);
   });
 
+  it("writes an explicit state directory into the wrapped entry", async () => {
+    const config = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry } });
+    const stateDir = join(home, "state");
+    expect((await init({ client: "claude-desktop", stateDir })).code).toBe(0);
+    expect(JSON.parse(await readFile(config, "utf8")).mcpServers.weather.env).toEqual({ LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: stateDir });
+  });
+
   it("changes nothing when run a second time (task Verify)", async () => {
     const config = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry }, other: 1 });
     await init();

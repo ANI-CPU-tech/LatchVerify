@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { LlmError } from "../../src/analyze/llm.js";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
 import { MAX_OWN_PAGES, routeFrame, type InterceptorContext } from "../../src/proxy/interceptor.js";
 import { parseLine, type Direction, type JsonRpcRequest } from "../../src/proxy/transport.js";
@@ -211,12 +212,23 @@ describe("onToolsList", () => {
     expect(logs).toEqual([expect.stringMatching(/^weather\/get_forecast: tier 0 change auto-passed: Text changed/)]);
   });
 
+  it("does not log a new low-tier tool as auto-passed: it stays blocked until approved", async () => {
+    const { listTools, fromClient, ctx, kinds, logs } = await setup();
+    await listTools([...benign, { name: "ping", description: "Check the server is up.", inputSchema: { type: "object" } }]);
+    const [change] = ctx.pending;
+    expect(change).toMatchObject({ toolName: "ping", before: null });
+    expect(change!.tier).toBeLessThan(2);
+    expect(await kinds()).toEqual(["tools_listed", "change_detected"]);
+    expect(logs).toEqual([expect.stringMatching(/^weather\/ping: new tool blocked until approved: /)]);
+    expect(await fromClient(call(4, "ping"))).toMatchObject({ message: { error: { data: { reason: { kind: "unpinned" } } } } });
+  });
+
   it("re-reads the lockfile and queue before analyzing", async () => {
     const order: string[] = [];
     const { listTools, ctx } = await setup({
       refresh: async () => {
         order.push("refresh");
-        ctx.lockfile = { ...ctx.lockfile, servers: {} };
+        ctx.lockfile = { ...ctx.lockfile, servers: { weather: { ...ctx.lockfile.servers.weather!, tools: [] } } };
       },
     });
     await listTools(benign);
@@ -244,6 +256,69 @@ describe("onToolsList", () => {
     expect(ctx.pending).toHaveLength(4);
     expect(logs.some((line) => line.startsWith("could not write the pending queue:"))).toBe(true);
     expect(logs.some((line) => line.startsWith("could not write the event log:"))).toBe(true);
+  });
+
+  it("stores the LLM advisory on the queued change without changing its tier", async () => {
+    const advise = vi.fn(async (tool: McpTool) => ({
+      contentHash: "a".repeat(64),
+      model: "test-model",
+      findings: [{ type: "pattern" as const, severity: "warn" as const, message: `LLM advisory: ${tool.name}`, evidence: "e" }],
+    }));
+    const { listTools, ctx, stateDir, logs } = await setup({ advise });
+    await listTools(poisoned);
+    expect(ctx.verified).toBe(true);
+    const tiers = ctx.pending.map((c) => [c.toolName, c.tier]);
+    await vi.waitFor(async () => expect((await readPending(stateDir)).every((c) => c.after.advisory !== undefined)).toBe(true));
+    const queue = await readPending(stateDir);
+    expect(queue.map((c) => [c.toolName, c.tier])).toEqual(tiers);
+    const forecast = queue.find((c) => c.toolName === "get_forecast")!;
+    expect(forecast.after.advisory).toMatchObject({ model: "test-model" });
+    expect(forecast.findings.at(-1)).toMatchObject({ message: "LLM advisory: get_forecast" });
+    const pinned = exampleLock().servers.weather!.tools.find((t) => t.name === "get_forecast")!;
+    expect(advise).toHaveBeenCalledWith(expect.objectContaining({ name: "get_forecast" }), pinned.advisory);
+    expect(logs).toContain("weather/get_forecast: LLM advisory added 1 finding(s) for review");
+  });
+
+  it("logs and ignores a failed LLM advisory, which never blocks", async () => {
+    const advise = vi.fn(async () => {
+      throw new LlmError("could not reach the LLM API at https://x/chat/completions");
+    });
+    const { listTools, fromClient, ctx, stateDir, logs } = await setup({ advise });
+    await listTools(benign);
+    expect(advise).not.toHaveBeenCalled();
+    await listTools([benign[0], { ...benign[1]!, description: `${benign[1]!.description} Now faster.` }]);
+    await vi.waitFor(() => expect(logs).toContain("weather/get_alerts: LLM advisory skipped: could not reach the LLM API at https://x/chat/completions"));
+    const [queued, ...rest] = await readPending(stateDir);
+    expect(rest).toEqual([]);
+    expect(queued).toMatchObject({ toolName: "get_alerts", tier: ctx.pending[0]!.tier });
+    expect(queued!.after.advisory).toBeUndefined();
+    expect(ctx.verified).toBe(true);
+    expect(await fromClient(call(9, "get_alerts", { state: "CA" }))).toEqual(FORWARD);
+  });
+
+  it("queues nothing for a server latch.lock does not have, blocks its calls as unpinned and points to latch init", async () => {
+    const { listTools, fromClient, ctx, logs, stateDir, kinds } = await setup({ serverId: "stranger" });
+    await listTools(poisoned);
+    expect(ctx.pending).toEqual([]);
+    expect(ctx.observed.size).toBe(0);
+    expect(ctx.verified).toBe(true);
+    expect(logs).toEqual(["stranger: not in latch.lock, so its tools are blocked as unpinned; run `latch init` to pin them"]);
+    await expect(readFile(join(stateDir, "pending.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await fromClient(call(5, "get_forecast"))).toMatchObject({ message: { error: { data: { reason: { kind: "unpinned" } } } } });
+    expect(await kinds()).toEqual(["tools_listed", "call_blocked"]);
+  });
+
+  it("merges into the queue another server's proxy wrote, instead of overwriting it", async () => {
+    const first = await setup();
+    const lockfile = exampleLock();
+    lockfile.servers["weather-mirror"] = { ...lockfile.servers.weather!, tools: [] };
+    const second = await setup({ serverId: "weather-mirror", stateDir: first.stateDir, lockfile });
+    await first.listTools(poisoned);
+    await second.listTools([poisoned[1]]);
+    const onDisk = await readPending(first.stateDir);
+    expect(onDisk.filter((c) => c.serverId === "weather")).toHaveLength(4);
+    expect(onDisk.filter((c) => c.serverId === "weather-mirror").map((c) => c.toolName)).toEqual(["read_config"]);
+    expect(second.ctx.pending).toEqual(onDisk);
   });
 });
 
@@ -396,7 +471,7 @@ describe("onToolsListChanged", () => {
     expect(await fromServer(listChanged)).toEqual(FORWARD);
     expect(ctx.verified).toBe(false);
     expect(sent).toEqual([{ jsonrpc: "2.0", id: expect.stringMatching(/^latchverify-[0-9a-f-]{36}$/), method: "tools/list" }]);
-    expect([...ctx.ownRequests]).toEqual([[sent[0]!.id, 1]]);
+    expect([...ctx.ownRequests]).toEqual([[sent[0]!.id, { page: 1, tools: [], stale: false }]]);
     expect(await fromClient(call(6, "get_alerts"))).toMatchObject({ message: { error: { data: { reason: { kind: "unverified" } } } } });
     expect(await kinds()).toEqual(["tools_listed", "list_changed", "call_blocked"]);
   });
@@ -419,9 +494,57 @@ describe("onToolsListChanged", () => {
     await fromServer(listChanged);
     await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: [benign[0]], nextCursor: "p2" } });
     expect(sent[1]).toEqual({ jsonrpc: "2.0", id: expect.stringMatching(/^latchverify-/), method: "tools/list", params: { cursor: "p2" } });
-    expect(ctx.ownRequests.get(sent[1]!.id)).toBe(2);
+    expect(ctx.ownRequests.get(sent[1]!.id)).toMatchObject({ page: 2, tools: [benign[0]] });
     await fromServer({ jsonrpc: "2.0", id: sent[1]!.id, result: { tools: [poisoned[1]] } });
     expect(sent).toHaveLength(2);
+    expect(ctx.pending.map((c) => c.toolName)).toEqual(["read_config"]);
+  });
+
+  it("keeps calls blocked until the last page is analyzed, so a drifted tool on page 2 is never callable", async () => {
+    const { fromServer, fromClient, listTools, ctx, sent, kinds } = await setup();
+    await listTools(benign);
+    await fromServer(listChanged);
+    await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: [benign[1]], nextCursor: "p2" } });
+    expect(ctx.verified).toBe(false);
+    expect(ctx.pending).toEqual([]);
+    expect(await fromClient(call(6, "get_forecast"))).toMatchObject({ message: { error: { data: { reason: { kind: "unverified" } } } } });
+    await fromServer({ jsonrpc: "2.0", id: sent[1]!.id, result: { tools: [poisoned[0]] } });
+    expect(ctx.verified).toBe(true);
+    expect(ctx.pending.map((c) => [c.toolName, c.tier])).toEqual([["get_forecast", 3]]);
+    expect(await fromClient(call(7, "get_forecast"))).toMatchObject({ message: { error: { data: { reason: { kind: "hard_block" } } } } });
+    expect(await fromClient(call(8, "get_alerts"))).toEqual(FORWARD);
+    expect((await kinds()).filter((kind) => kind === "tools_listed")).toHaveLength(2);
+  });
+
+  it("treats an empty nextCursor as the last page", async () => {
+    const { fromServer, ctx, sent } = await setup();
+    await fromServer(listChanged);
+    await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: benign, nextCursor: "" } });
+    expect(sent).toHaveLength(1);
+    expect(ctx.verified).toBe(true);
+  });
+
+  it("drops a listing that was in progress when the server announced another change", async () => {
+    const { fromServer, ctx, sent } = await setup();
+    await fromServer(listChanged);
+    await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: [benign[0]], nextCursor: "p2" } });
+    await fromServer(listChanged);
+    expect(await fromServer({ jsonrpc: "2.0", id: sent[1]!.id, result: { tools: [benign[1]] } })).toEqual({ action: "drop" });
+    expect(ctx.verified).toBe(false);
+    expect(sent).toHaveLength(3);
+    await fromServer({ jsonrpc: "2.0", id: sent[2]!.id, result: { tools: benign } });
+    expect(ctx.verified).toBe(true);
+  });
+
+  it("does not verify on a page of the client's own paged list", async () => {
+    const { fromServer, fromClient, ctx } = await setup();
+    await fromServer(listChanged);
+    await fromClient({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    expect(await fromServer({ jsonrpc: "2.0", id: 2, result: { tools: [benign[0]], nextCursor: "p2" } })).toEqual(FORWARD);
+    expect(ctx.verified).toBe(false);
+    await fromClient({ jsonrpc: "2.0", id: 3, method: "tools/list", params: { cursor: "p2" } });
+    expect(await fromServer({ jsonrpc: "2.0", id: 3, result: { tools: [poisoned[1]] } })).toEqual(FORWARD);
+    expect(ctx.verified).toBe(false);
     expect(ctx.pending.map((c) => c.toolName)).toEqual(["read_config"]);
   });
 

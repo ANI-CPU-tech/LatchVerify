@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -169,13 +169,38 @@ describe("latch proxy paths from the environment", () => {
     expect(await readFile(join(dir, "events.jsonl"), "utf8")).toContain('"tools_listed"');
   }, 30_000);
 
+  it("reads the paths from ./.env, and refuses a malformed environment", async () => {
+    const state = join(dir, "from-dotenv");
+    await writeFile(join(dir, ".env"), `LATCH_LOCKFILE_PATH=${join(root, "latch.lock.example")}\nLATCH_STATE_DIR=${state}\n`);
+    const { code, stdout } = await latch(["proxy", "--server", "weather", "--", ...weather], lines, [1, 2], { cwd: dir });
+    expect(code).toBe(0);
+    expect(blockedId2(stdout)).toBe(false);
+    expect(await readFile(join(state, "events.jsonl"), "utf8")).toContain('"tools_listed"');
+
+    await writeFile(join(dir, ".env"), "LATCH_LLM_ENABLED=true\n");
+    const bad = await latch(["proxy", "--server", "weather", "--", ...weather], [], [], { cwd: dir });
+    expect(bad.code).toBe(1);
+    expect(bad.stdout).toBe("");
+    expect(bad.stderr).toContain("LATCH_LLM_ENABLED is true but LATCH_LLM_API_KEY is not set");
+  }, 30_000);
+
+  it("keeps state next to the lockfile when no state directory is given", async () => {
+    await mkdir(join(dir, "repo"));
+    await writeFile(join(dir, "repo", "latch.lock"), await readFile(join(root, "latch.lock.example"), "utf8"));
+    const { code } = await latch(["--lockfile", "repo/latch.lock", "proxy", "--server", "weather", "--", ...weather], lines, [1, 2], {
+      cwd: dir,
+    });
+    expect(code).toBe(0);
+    expect(await readFile(join(dir, "repo", ".latch", "events.jsonl"), "utf8")).toContain('"tools_listed"');
+  }, 30_000);
+
   it("falls back to ./latch.lock when the variables are blank", async () => {
     const { stdout } = await latch(["proxy", "--server", "weather", "--", ...weather], lines, [1, 2], {
       cwd: dir,
       env: { LATCH_LOCKFILE_PATH: "  ", LATCH_STATE_DIR: "" },
     });
-    // No latch.lock in the working directory: every tool is new and queued, so the call is blocked.
+    // No latch.lock in the working directory: the server is unpinned, so the call is blocked.
     expect(blockedId2(stdout)).toBe(true);
-    expect(await readFile(join(dir, ".latch", "events.jsonl"), "utf8")).toMatch(/"toolName":"get_alerts","reason":"pending_review chg_/);
+    expect(await readFile(join(dir, ".latch", "events.jsonl"), "utf8")).toContain('"toolName":"get_alerts","reason":"unpinned"');
   }, 30_000);
 });

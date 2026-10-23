@@ -9,7 +9,7 @@ import { diffHashes } from "../analyze/differ.js";
 import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
-import { dequeue, readPending, writePending } from "../store/pending.js";
+import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
 import { defaultReviewer, startUiServer } from "../ui/server.js";
 import { plural, printable } from "./text.js";
 
@@ -37,14 +37,6 @@ export interface ReviewOptions {
 
 /** Where `vite build` puts the review UI, seen from dist/commands/ and from src/commands/. */
 const BUILT_UI_DIRS = [new URL("../web/", import.meta.url), new URL("../../dist/web/", import.meta.url)];
-
-/**
- * Review order: highest tier first, then oldest first. Use with a stable sort: changes detected
- * together keep their queue order, which is the order the server listed the tools.
- */
-export function reviewOrder(a: PendingChange, b: PendingChange): number {
-  return b.tier - a.tier || Date.parse(a.detectedAt) - Date.parse(b.detectedAt);
-}
 
 /**
  * `latch review`: walk the pending queue in review order. Each change is shown with its tier,
@@ -170,14 +162,15 @@ async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: s
   const staticDir = options.staticDir ?? BUILT_UI_DIRS.map((url) => fileURLToPath(url)).find((dir) => existsSync(join(dir, "index.html")));
   if (staticDir === undefined || !existsSync(join(staticDir, "index.html"))) {
     throw new Error(
-      "latch review --ui: the review UI is not built; run `pnpm exec vite build --config web/vite.config.ts` in the latchverify checkout, or `pnpm ui` to work on it",
+      "latch review --ui: the review UI is not built; run `pnpm build` in the latchverify checkout, or `pnpm ui` to work on it",
     );
   }
   // Read both files first: a malformed one is reported here rather than on the first page load.
   await readLockfile(lockfilePath);
   await readPending(stateDir);
 
-  const reviewer = defaultReviewer();
+  const reviewer = (options.reviewer ?? defaultReviewer()).trim();
+  if (reviewer === "") throw new Error("latch review: no reviewer name; set LATCH_REVIEWER or git config user.email");
   let handle;
   try {
     handle = await startUiServer({ port: options.port, lockfilePath, stateDir, reviewer, staticDir });
@@ -223,12 +216,17 @@ function openInBrowser(url: string, say: (line?: string) => void): void {
 
 /** Approve change `id` as it is in the queue now; "gone" when it is no longer there. */
 async function approve(lockfilePath: string, stateDir: string, id: string, reviewer: string): Promise<"done" | "gone"> {
-  const queue = await readPending(stateDir);
-  const change = queue.find((entry) => entry.id === id);
-  if (change === undefined) return "gone";
   const now = new Date();
-  await writeLockfile(lockfilePath, applyApproval(await readLockfile(lockfilePath), change, reviewer, now));
-  await writePending(stateDir, dequeue(queue, id));
+  const found: { change?: PendingChange } = {};
+  await updatePending(stateDir, async (queue) => {
+    found.change = queue.find((entry) => entry.id === id);
+    if (found.change === undefined) return queue;
+    // latch.lock first: a crash in between leaves the change queued, and approving again is idempotent.
+    await writeLockfile(lockfilePath, applyApproval(await readLockfile(lockfilePath), found.change, reviewer, now));
+    return dequeue(queue, id);
+  });
+  const { change } = found;
+  if (change === undefined) return "gone";
   await logEvent(stateDir, {
     kind: "approved",
     at: now.toISOString(),
@@ -242,10 +240,13 @@ async function approve(lockfilePath: string, stateDir: string, id: string, revie
 
 /** Reject change `id`; "gone" when it is no longer in the queue. */
 async function reject(stateDir: string, id: string): Promise<"done" | "gone"> {
-  const queue = await readPending(stateDir);
-  const change = queue.find((entry) => entry.id === id);
+  const found: { change?: PendingChange } = {};
+  await updatePending(stateDir, (queue) => {
+    found.change = queue.find((entry) => entry.id === id);
+    return found.change === undefined ? queue : dequeue(queue, id);
+  });
+  const { change } = found;
   if (change === undefined) return "gone";
-  await writePending(stateDir, dequeue(queue, id));
   await logEvent(stateDir, { kind: "rejected", at: new Date().toISOString(), serverId: change.serverId, toolName: change.toolName, changeId: id });
   return "done";
 }

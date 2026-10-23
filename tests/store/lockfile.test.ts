@@ -284,6 +284,12 @@ describe("applyApproval", () => {
     expect(result.servers.weather!.tools).toHaveLength(2);
   });
 
+  it("keeps the change's LLM advisory in the pinned record", async () => {
+    const advisory = { contentHash: HASH, model: "m", findings: [{ type: "pattern" as const, severity: "warn" as const, message: "LLM advisory: x", evidence: "y" }] };
+    const result = applyApproval(await loadExample(), changeFor({ ...(await changedForecast()), advisory }), "alice@example.com", NOW);
+    expect(findRecord(result, "weather", "get_forecast")!.advisory).toEqual(advisory);
+  });
+
   it("adds a newly approved tool and keeps tools sorted by name", async () => {
     const added = { ...(await changedForecast()), name: "a_new_tool" };
     const result = applyApproval(await loadExample(), changeFor(added), "alice@example.com", NOW);

@@ -30,6 +30,8 @@ export interface InitOptions {
   /** Print the planned config rewrites without writing anything. */
   dryRun: boolean;
   lockfilePath: string;
+  /** State directory written into each wrapped entry's env. Defaults to .latch next to the lockfile. */
+  stateDir?: string;
   /** Who the pins are recorded as. Defaults to defaultReviewer(): LATCH_REVIEWER, git user.email, OS user. */
   reviewer?: string;
   /** Deadline for capturing each server's tools. Defaults to DEFAULT_CAPTURE_TIMEOUT_MS. */
@@ -205,7 +207,8 @@ function stringEnv(env: unknown): Record<string, string> {
  *    changes to it go through `latch review`, never through a re-run of init.
  * 3. Writes latch.lock, then rewrites each client entry to run `latch proxy`, with
  *    LATCH_LOCKFILE_PATH and LATCH_STATE_DIR in its env so the proxy finds this lockfile and
- *    <lockfile dir>/.latch whatever directory the client starts it in. Each rewritten config
+ *    state directory (`stateDir`, by default <lockfile dir>/.latch) whatever directory the client
+ *    starts it in. Each rewritten config
  *    keeps a timestamped .bak copy. The lockfile goes first: a config is only ever wrapped
  *    around pins that exist.
  *
@@ -222,7 +225,7 @@ export async function runInit(options: InitOptions): Promise<number> {
   const out = options.output ?? process.stdout;
   const say = (line = "") => void out.write(`${line}\n`);
   const lockfilePath = resolve(options.lockfilePath);
-  const stateDir = join(dirname(lockfilePath), ".latch");
+  const stateDir = resolve(options.stateDir ?? join(dirname(lockfilePath), ".latch"));
   const verb = (done: string, planned: string) => (options.dryRun ? planned : done);
 
   const lock = await readLockfile(lockfilePath);

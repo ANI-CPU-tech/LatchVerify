@@ -7,23 +7,26 @@ export interface SegmentChanges {
   name: boolean;
   description: boolean;
   inputSchema: boolean;
+  /** Title and annotations. */
+  metadata: boolean;
 }
 
 /**
- * Which hash segments differ between two records. All false means the three hashed segments
- * (name, description, canonical inputSchema) are identical.
+ * Which hash segments differ between two records. All false means the four hashed segments
+ * (name, description, canonical inputSchema, title and annotations) are identical.
  */
 export function diffHashes(before: ToolHashes, after: ToolHashes): SegmentChanges {
   return {
     name: before.name !== after.name,
     description: before.description !== after.description,
     inputSchema: before.inputSchema !== after.inputSchema,
+    metadata: before.metadata !== after.metadata,
   };
 }
 
 /** True when any segment changed. */
 export function anySegmentChanged(segments: SegmentChanges): boolean {
-  return segments.name || segments.description || segments.inputSchema;
+  return segments.name || segments.description || segments.inputSchema || segments.metadata;
 }
 
 /** Boolean capabilities, by delta key. True in one set and not the other is a gain or a loss. */
