@@ -1,3 +1,9 @@
+/**
+ * After an arrow key, focus moves at once but the section opens only once the keys have paused
+ * this long, so tapping or holding a key does not restart the page fade on every press.
+ */
+export const NAV_OPEN_DELAY_MS = 250;
+
 /** Keys that move through the section links: the list's own axis, plus Home and End. */
 const KEYS = {
   sidebar: { previous: "ArrowUp", next: "ArrowDown" },
