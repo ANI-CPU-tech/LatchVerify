@@ -104,7 +104,8 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
   summaries). Keep logic there, not in components, so `tests/web/` can test it in node.
 - `lib/simulation.ts` holds the Simulation page's scenario (`RUG_PULL`, built from
   `tests/fixtures`) and turns the API's result into steps; `components/SimFlow.tsx` animates
-  each step's messages between agent, proxy and server. Every verdict, tier, finding and error
+  each step's messages between agent, proxy and server: a label above, and on the dotted line
+  marching dashes and a stream of dots in the message's outcome color. Every verdict, tier, finding and error
   on that page comes from `POST /api/simulate`; without the API the page shows an error, never
   sample data.
 - The nav (`components/AppShell.tsx`) is animated, all `motion-safe`: one highlight slides to
