@@ -1,0 +1,77 @@
+#!/usr/bin/env node
+import { Command, Option } from "commander";
+import pc from "picocolors";
+import { SUPPORTED_CLIENTS } from "./config/clients.js";
+import { runInit } from "./commands/init.js";
+import { runInspect } from "./commands/inspect.js";
+import { runProxy } from "./commands/proxy.js";
+import { runReview } from "./commands/review.js";
+import { runVerify } from "./commands/verify.js";
+
+/** Run a command and turn its result (or thrown error) into the process exit code. */
+async function run(command: () => Promise<number>): Promise<void> {
+  try {
+    process.exitCode = await command();
+  } catch (error) {
+    console.error(pc.red(error instanceof Error ? error.message : String(error)));
+    process.exitCode = 1;
+  }
+}
+
+const program = new Command()
+  .name("latch")
+  .description("Pin MCP tool capabilities in latch.lock and block unreviewed drift.")
+  .version("0.0.0")
+  .enablePositionalOptions()
+  .option("--lockfile <path>", "path to latch.lock", "./latch.lock")
+  .option("--state-dir <path>", "local state directory", "./.latch");
+
+const globals = () => program.opts<{ lockfile: string; stateDir: string }>();
+
+program
+  .command("init")
+  .description("wrap MCP servers in your client configs with the latch proxy and pin their tools")
+  .addOption(new Option("--client <id>", "only configure this client").choices(SUPPORTED_CLIENTS))
+  .option("--dry-run", "show planned changes without writing", false)
+  .action((opts: { client?: (typeof SUPPORTED_CLIENTS)[number]; dryRun: boolean }) =>
+    run(() => runInit({ ...opts, lockfilePath: globals().lockfile })),
+  );
+
+program
+  .command("review")
+  .description("approve or reject pending tool changes")
+  .option("--ui", "open the web review UI", false)
+  .option("--port <port>", "web UI port", (v) => Number.parseInt(v, 10), 7777)
+  .action((opts: { ui: boolean; port: number }) =>
+    run(() => runReview({ ...opts, lockfilePath: globals().lockfile, stateDir: globals().stateDir })),
+  );
+
+program
+  .command("verify")
+  .description("CI check: exit non-zero if any server drifted from latch.lock")
+  .option("--json", "machine-readable output", false)
+  .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: globals().lockfile })));
+
+program
+  .command("inspect")
+  .description("show derived capabilities and findings for a server's tools without pinning")
+  .option("--file <path>", "read a tools/list result from a JSON file")
+  .argument("[server...]", "server command to spawn and query")
+  .option("--json", "machine-readable output", false)
+  .action((server: string[], opts: { file?: string; json: boolean }) =>
+    run(() => runInspect({ ...opts, server: server.length > 0 ? server : undefined })),
+  );
+
+// Internal: what `latch init` writes into client configs. Hidden from --help.
+program
+  .command("proxy", { hidden: true })
+  .requiredOption("--server <id>", "server id in latch.lock")
+  .argument("<command...>", "real server command, after --")
+  .passThroughOptions()
+  .action((command: string[], opts: { server: string }) =>
+    run(() =>
+      runProxy({ serverId: opts.server, command, lockfilePath: globals().lockfile, stateDir: globals().stateDir }),
+    ),
+  );
+
+await program.parseAsync();
