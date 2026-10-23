@@ -104,20 +104,16 @@ export function AppShell({ current, children }: { current: Page; children: React
 
       <div className="flex flex-1">
         <aside className="hidden w-56 shrink-0 border-r bg-sidebar md:block">
-          <div className="sticky top-14 flex h-[calc(100vh-3.5rem)] flex-col">
-            <nav aria-label="Sections" className="p-3">
-              <NavLinks current={current} layout="sidebar" />
-            </nav>
-            {/* Below the nav, never over it; dropped on short windows. */}
-            <div className="mt-auto px-3 pb-3 [@media(max-height:620px)]:hidden">
-              <PixelLandscape variant="tall" className="w-full" />
-            </div>
-          </div>
+          <nav aria-label="Sections" className="sticky top-14 p-3">
+            <NavLinks current={current} layout="sidebar" />
+          </nav>
         </aside>
         <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-6xl space-y-6">{children}</div>
         </main>
       </div>
+      {/* Full-width footer art below the content, never over it; its sky is transparent. */}
+      <PixelLandscape className="mt-8 block h-40 w-full sm:h-56 lg:h-64 2xl:h-80" />
     </div>
   );
 }
