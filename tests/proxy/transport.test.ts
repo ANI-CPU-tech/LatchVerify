@@ -1,5 +1,7 @@
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { once } from "node:events";
 import { PassThrough, Writable } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isNotification,
   isRequest,
@@ -7,6 +9,7 @@ import {
   parseLine,
   readFrames,
   serialize,
+  spawnUpstream,
   writeLine,
   type Frame,
   type JsonRpcMessage,
@@ -354,5 +357,85 @@ describe("readFrames", () => {
     await Promise.all(writes);
     expect(writes).toHaveLength(lines.length);
     expect(text()).toBe(lines.map((line) => `${line}\n`).join(""));
+  });
+});
+
+/** Run a node script as the upstream server and collect its stdout lines and exit code. */
+async function runNode(script: string, args: string[] = [], env?: NodeJS.ProcessEnv) {
+  const child = spawnUpstream(process.execPath, ["-e", script, ...args], env);
+  const raws: string[] = [];
+  readFrames(child.stdout, (frame) => raws.push(frame.raw));
+  const [code] = (await once(child, "close")) as [number | null];
+  return { child, raws, code };
+}
+
+describe("spawnUpstream", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("carries JSON-RPC lines both ways over the child's stdio", async () => {
+    const echo =
+      'require("readline").createInterface({ input: process.stdin }).on("line", (l) => process.stdout.write(l + "\\n"));';
+    const child: ChildProcessWithoutNullStreams = spawnUpstream(process.execPath, ["-e", echo]);
+    const frames: Frame[] = [];
+    readFrames(child.stdout, (frame) => frames.push(frame));
+    const lines = ['{"jsonrpc":"2.0","id":1,"method":"initialize","x-extra":1}', "not json"];
+    for (const line of lines) await writeLine(child.stdin, line);
+    child.stdin.end();
+    const [code] = (await once(child, "close")) as [number | null];
+    expect(code).toBe(0);
+    expect(frames.map((f) => f.raw)).toEqual(lines);
+    expect(frames[0]!.message).toMatchObject({ method: "initialize", "x-extra": 1 });
+  });
+
+  it("copies the child's stderr to ours and keeps it off stdout", async () => {
+    const written: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      written.push(Buffer.from(chunk).toString("utf8"));
+      return true;
+    });
+    const { raws, code } = await runNode('process.stderr.write("diag: caf\u00e9\\n"); console.log("{}")');
+    expect(code).toBe(0);
+    expect(written.join("")).toBe("diag: caf\u00e9\n");
+    expect(raws).toEqual(["{}"]);
+  });
+
+  it("passes arguments literally, without a shell", async () => {
+    const hostile = "$(echo pwned); `id` | cat > /dev/null && echo 'x' \"y\" *";
+    const { raws } = await runNode("console.log(JSON.stringify(process.argv.slice(1)))", [hostile, ""]);
+    expect(JSON.parse(raws[0]!)).toEqual([hostile, ""]);
+  });
+
+  it("inherits our environment when env is omitted", async () => {
+    vi.stubEnv("LATCH_TEST_INHERITED", "yes");
+    const { raws } = await runNode("console.log(process.env.LATCH_TEST_INHERITED)");
+    expect(raws).toEqual(["yes"]);
+  });
+
+  it("merges env over our environment, and undefined removes a variable", async () => {
+    vi.stubEnv("LATCH_TEST_INHERITED", "yes");
+    vi.stubEnv("LATCH_TEST_REMOVED", "yes");
+    const { raws } = await runNode(
+      "const e = process.env; console.log(JSON.stringify([e.LATCH_TEST_INHERITED, e.LATCH_TEST_ADDED, e.LATCH_TEST_REMOVED ?? null]))",
+      [],
+      { LATCH_TEST_ADDED: "1", LATCH_TEST_REMOVED: undefined },
+    );
+    expect(JSON.parse(raws[0]!)).toEqual(["yes", "1", null]);
+  });
+
+  it("reports a missing command as an error event instead of throwing", async () => {
+    let child: ChildProcessWithoutNullStreams | undefined;
+    expect(() => {
+      child = spawnUpstream("latch-no-such-binary-for-test", []);
+    }).not.toThrow();
+    const [error] = (await once(child!, "error")) as [NodeJS.ErrnoException];
+    expect(error.code).toBe("ENOENT");
+  });
+
+  it("reports the child's exit code", async () => {
+    const { code } = await runNode("process.exit(3)");
+    expect(code).toBe(3);
   });
 });

@@ -1,4 +1,4 @@
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
@@ -130,15 +130,31 @@ export async function writeLine(output: Writable, line: string): Promise<void> {
 }
 
 /**
- * TODO: child_process.spawn the real server with piped stdio, passing stderr through to our
- * stderr untouched. Returns the child; the caller wires its stdout/stdin to readFrames/writeLine.
+ * Spawn the real server with piped stdio. Its stderr is copied to our stderr untouched (and our
+ * stderr stays open when it exits); stdout is the protocol channel, so the caller wires the
+ * child's stdout and stdin to readFrames and writeLine.
+ *
+ * No shell is involved: `command` is resolved on PATH and `args` reach the server literally.
+ * `env` is merged over process.env, as MCP clients do with a server's `env` block; a key set to
+ * undefined removes that variable.
+ *
+ * Never throws for a bad command: spawn failures (ENOENT, EACCES) arrive as the child's "error"
+ * event, which the caller must handle.
  */
+// shortcut: Windows cannot spawn .cmd shims (npx, pnpm) without a shell; use node plus the
+// script path there, or add cross-spawn if Windows support is needed.
 export function spawnUpstream(
   command: string,
   args: string[],
   env?: NodeJS.ProcessEnv,
 ): ChildProcessWithoutNullStreams {
-  throw new Error("not implemented");
+  const child = spawn(command, args, {
+    stdio: "pipe",
+    env: env === undefined ? process.env : { ...process.env, ...env },
+    windowsHide: true,
+  });
+  child.stderr.pipe(process.stderr, { end: false });
+  return child;
 }
 
 // The guards check field types at runtime: parseLine only checks the version tag, so a peer can
