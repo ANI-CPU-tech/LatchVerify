@@ -102,11 +102,22 @@ export function sha256Hex(input: string): Sha256Hex {
 }
 
 /**
- * Segment hashes for one tool.
- * TODO: name = sha256(name), description = sha256(description ?? ""), inputSchema =
- * sha256(canonicalJson(inputSchema)), composite = sha256 of the three hex digests joined by
- * ":". Text is hashed as-is (no normalization) so Unicode tricks still change the hash.
+ * Segment hashes for one tool, as pinned in latch.lock (format: docs/LOCKFILE.md).
+ *
+ * - name:        sha256(name)
+ * - description: sha256(description ?? "")
+ * - inputSchema: sha256(canonicalJson(inputSchema))
+ * - composite:   sha256 of the three hex digests joined by ":"
+ *
+ * Text is hashed as-is, without Unicode normalization, so zero-width or confusable characters
+ * still change the hash. Only these three segments are hashed: annotations are tracked as
+ * claims in the capability set, and other fields (title, vendor extensions) are not pinned.
+ *
+ * @throws as canonicalJson does, if inputSchema holds values JSON cannot represent.
  */
 export function hashTool(tool: McpTool): ToolHashes {
-  throw new Error("not implemented");
+  const name = sha256Hex(tool.name);
+  const description = sha256Hex(tool.description ?? "");
+  const inputSchema = sha256Hex(canonicalJson(tool.inputSchema));
+  return { name, description, inputSchema, composite: sha256Hex(`${name}:${description}:${inputSchema}`) };
 }
