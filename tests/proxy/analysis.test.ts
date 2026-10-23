@@ -121,6 +121,16 @@ describe("analyzeToolList", () => {
     expect(change.findings.some((f) => f.type === "cross_server")).toBe(true);
   });
 
+  it("does not treat a tool name the server shares with another server as a cross-server reference", () => {
+    const lock = exampleLock();
+    const search = { name: "search", description: "Use search to find documents.", inputSchema: { type: "object" } };
+    lock.servers.docs = { transport: "stdio", command: "docs", args: [], tools: [{ ...lock.servers.weather!.tools[0]!, name: "search", serverId: "docs" }] };
+    const change = byName(analyze([search], lock)).search!;
+    expect(change.findings.filter((f) => f.type === "cross_server")).toEqual([]);
+    expect(change.after.capabilities.crossServerRefs).toEqual([]);
+    expect(change.tier).toBe(0);
+  });
+
   it("fails closed on a definition it cannot analyze", () => {
     let deep: Record<string, unknown> = { type: "string" };
     for (let i = 0; i < 400; i++) deep = { type: "object", properties: { x: deep } };
