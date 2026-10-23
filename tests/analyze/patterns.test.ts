@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { IMPERATIVE_PHRASES, SENSITIVE_PATHS, findImperatives, findPathMentions } from "../../src/analyze/patterns.js";
+import {
+  IMPERATIVE_PHRASES,
+  SENSITIVE_PATHS,
+  findEnvVarMentions,
+  findImperatives,
+  findPathMentions,
+} from "../../src/analyze/patterns.js";
 import { FindingSchema, McpToolListSchema, type Finding, type McpTool } from "../../src/schema/index.js";
 
 const fixtureTools = (name: string): McpTool[] =>
@@ -144,6 +150,69 @@ describe("findImperatives", () => {
   it("finds nothing in the benign fixture", () => {
     for (const tool of fixtureTools("benign-tools.json")) {
       for (const text of strings(tool)) expect(findImperatives(text)).toEqual([]);
+    }
+  });
+});
+
+describe("findEnvVarMentions", () => {
+  const names = (text: string) => summary(findEnvVarMentions(text));
+
+  it("flags OPENAI_API_KEY in the poisoned sync_alerts description as critical", () => {
+    expect(findEnvVarMentions(description("poisoned-tools.json", "sync_alerts"))).toEqual([
+      { type: "pattern", severity: "critical", message: "Text names an environment variable that holds a secret", evidence: '"OPENAI_API_KEY"' },
+    ]);
+  });
+
+  it("treats names whose last word marks a secret as critical", () => {
+    expect(names("GITHUB_TOKEN, DB_PASSWORD, AWS_SECRET_ACCESS_KEY, JWT_SECRET, GPG_PASSPHRASE, GOOGLE_APPLICATION_CREDENTIALS")).toEqual([
+      'critical "GITHUB_TOKEN"',
+      'critical "DB_PASSWORD"',
+      'critical "AWS_SECRET_ACCESS_KEY"',
+      'critical "JWT_SECRET"',
+      'critical "GPG_PASSPHRASE"',
+      'critical "GOOGLE_APPLICATION_CREDENTIALS"',
+    ]);
+  });
+
+  it("treats other environment variables as warn", () => {
+    expect(names("NODE_ENV, LOG_LEVEL, HTTP_PROXY")).toEqual(['warn "NODE_ENV"', 'warn "LOG_LEVEL"', 'warn "HTTP_PROXY"']);
+  });
+
+  it("does not treat data-structure keys or pagination tokens as secrets", () => {
+    expect(names("PRIMARY_KEY, SORT_KEY, PARTITION_KEY, PUBLIC_KEY, NEXT_TOKEN, PAGE_TOKEN").every((n) => n.startsWith("warn"))).toBe(true);
+    expect(names("PRIVATE_KEY, SECRET_KEY")).toEqual(['critical "PRIVATE_KEY"', 'critical "SECRET_KEY"']);
+  });
+
+  it("recognises shell, Windows and code spellings, including lower- and camel-case names", () => {
+    expect(names("reads $HOME and ${SLACK_TOKEN}")).toEqual(['warn "HOME"', 'critical "SLACK_TOKEN"']);
+    expect(names("%APPDATA% and %UserProfile%")).toEqual(['warn "APPDATA"', 'warn "UserProfile"']);
+    expect(names('process.env.githubToken, process.env["api_key"]')).toEqual(['critical "githubToken"', 'critical "api_key"']);
+    expect(names("os.environ['STRIPE_KEY'], os.environ.get(\"LANG\"), getenv('PATH')")).toEqual([
+      'critical "STRIPE_KEY"',
+      'warn "LANG"',
+      'warn "PATH"',
+    ]);
+  });
+
+  it("finds names after a dot, as in config.OPENAI_API_KEY", () => {
+    expect(names("config.OPENAI_API_KEY")).toEqual(['critical "OPENAI_API_KEY"']);
+  });
+
+  it("ignores template placeholders, prices, percentages and short capitals", () => {
+    expect(findEnvVarMentions("use ${city} and $5, 50% to 60%, US state code e.g. CA, a URL or an API")).toEqual([]);
+  });
+
+  it("reports each name once, ordered by first appearance", () => {
+    expect(names("LOG_LEVEL then ${GITHUB_TOKEN} then LOG_LEVEL and $GITHUB_TOKEN")).toEqual(['warn "LOG_LEVEL"', 'critical "GITHUB_TOKEN"']);
+  });
+
+  it("sees through zero-width splitting", () => {
+    expect(names("OPENAI_API_\u{200b}KEY")).toEqual(['critical "OPENAI_API_KEY"']);
+  });
+
+  it("finds nothing in the benign fixture", () => {
+    for (const tool of fixtureTools("benign-tools.json")) {
+      for (const text of strings(tool)) expect(findEnvVarMentions(text)).toEqual([]);
     }
   });
 });

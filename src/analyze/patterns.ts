@@ -198,6 +198,54 @@ function excerpt(text: string, span: Span): string {
   return escapeForEvidence(`${from > 0 ? "..." : ""}${body}${to < text.length ? "..." : ""}`);
 }
 
+/** Last name segments that make an environment variable look like a secret. */
+const SECRET_SUFFIXES: ReadonlySet<string> = new Set([
+  "KEY", "KEYS", "APIKEY", "TOKEN", "TOKENS", "SECRET", "SECRETS", "PASSWORD", "PASSWORDS", "PASSWD",
+  "PASSPHRASE", "CREDENTIAL", "CREDENTIALS",
+]);
+
+const ENV_NAME = String.raw`[A-Za-z_][A-Za-z0-9_]*`;
+
+/**
+ * Environment variables written the way code or shells read them. Each alternative captures
+ * the name in its own group. $NAME forms require an upper-case name, so "${city}"-style
+ * template placeholders are not taken for env vars.
+ */
+const EXPLICIT_ENV = new RegExp(
+  [
+    String.raw`\$\{([A-Z][A-Z0-9_]*)\}`,
+    String.raw`\$([A-Z][A-Z0-9_]*)(?![\p{L}\p{N}_])`,
+    String.raw`%(${ENV_NAME})%`,
+    String.raw`process\.env\.(${ENV_NAME})`,
+    String.raw`process\.env\[\s*["'](${ENV_NAME})["']\s*\]`,
+    String.raw`os\.environ(?:\.get\(\s*|\[\s*)["'](${ENV_NAME})["']`,
+    String.raw`getenv\(\s*["'](${ENV_NAME})["']`,
+  ].join("|"),
+  "gu",
+);
+
+/** Bare SCREAMING_SNAKE names with at least one underscore, such as OPENAI_API_KEY. */
+const BARE_ENV = /(?<![\p{L}\p{N}_$%])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![\p{L}\p{N}_])/gu;
+
+/**
+ * Words that, before KEY or TOKEN, name a data-structure key or a pagination cursor rather than
+ * a secret: PRIMARY_KEY, SORT_KEY, PUBLIC_KEY, NEXT_TOKEN.
+ */
+const NON_SECRET_QUALIFIERS: ReadonlySet<string> = new Set([
+  "PRIMARY", "FOREIGN", "UNIQUE", "COMPOSITE", "SORT", "PARTITION", "HASH", "RANGE", "SHARD", "ROW",
+  "CACHE", "LOOKUP", "MAP", "IDEMPOTENCY", "DEDUP", "PUBLIC", "PAGE", "NEXT", "CONTINUATION", "CURSOR",
+]);
+
+/** True when the name's last word (camelCase or snake_case) marks it as a secret. */
+function isSecretName(name: string): boolean {
+  const words = name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase().split(/_+/).filter(Boolean);
+  const last = words.at(-1);
+  if (last === undefined || !SECRET_SUFFIXES.has(last)) return false;
+  const qualifier = words.at(-2);
+  const keyLike = last.startsWith("KEY") || last.startsWith("TOKEN");
+  return !(keyLike && qualifier !== undefined && NON_SECRET_QUALIFIERS.has(qualifier));
+}
+
 /** One finding per distinct mention text, keeping the first occurrence. */
 function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {
   const seen = new Set<string>();
@@ -277,9 +325,28 @@ export function findPathMentions(text: string): Finding[] {
   return uniqueBy(findings, (f) => f.evidence);
 }
 
-/** TODO: return "pattern" findings for SCREAMING_SNAKE env var names, critical when they look like secrets (*_KEY, *_TOKEN, *_SECRET). */
+/**
+ * Environment variable names mentioned in `text`, one "pattern" finding per distinct name in
+ * text order. Covers $NAME, ${NAME}, %NAME%, process.env.NAME, os.environ["NAME"],
+ * getenv("NAME") and bare SCREAMING_SNAKE names with an underscore. Critical when the name's
+ * last word marks a secret (OPENAI_API_KEY, GITHUB_TOKEN, DB_PASSWORD), warn otherwise.
+ */
 export function findEnvVarMentions(text: string): Finding[] {
-  throw new Error("not implemented");
+  const folded = foldText(text);
+  const mentions: Array<{ name: string; index: number }> = [];
+  for (const match of folded.matchAll(EXPLICIT_ENV)) {
+    mentions.push({ name: match.slice(1).find((group) => group !== undefined)!, index: match.index });
+  }
+  for (const match of folded.matchAll(BARE_ENV)) mentions.push({ name: match[0], index: match.index });
+
+  const findings = mentions
+    .sort((a, b) => a.index - b.index)
+    .map(({ name }): Finding =>
+      isSecretName(name)
+        ? { type: "pattern", severity: "critical", message: "Text names an environment variable that holds a secret", evidence: escapeForEvidence(name) }
+        : { type: "pattern", severity: "warn", message: "Text names an environment variable", evidence: escapeForEvidence(name) },
+    );
+  return uniqueBy(findings, (f) => f.evidence);
 }
 
 /** TODO: return "cross_server" findings (critical) for each ctx.otherServerTools name mentioned in `text`. */
