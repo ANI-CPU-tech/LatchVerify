@@ -1,10 +1,12 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { LockFile, PendingChange } from "../schema/index.js";
+import { SimulationRequestSchema, type LockFile, type PendingChange } from "../schema/index.js";
 import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
 import { lockfileGitStatus } from "./git.js";
+import { SimulationInputError, simulateRugPull } from "./simulation.js";
 
 /** Filesystem locations the review API reads and writes. */
 export interface RouteDeps {
@@ -15,6 +17,9 @@ export interface RouteDeps {
   /** Clock for approval and event timestamps. Defaults to the system clock. */
   now?: () => Date;
 }
+
+/** Largest POST /api/simulate body: two tool lists, far more than any real server serves. */
+export const MAX_SIMULATION_BYTES = 1024 * 1024;
 
 /** Events returned by GET /api/events when no limit is given, and the most it will return. */
 export const DEFAULT_EVENT_LIMIT = 100;
@@ -171,6 +176,29 @@ export function createRoutes(deps: RouteDeps): Hono {
 
   // Whether latch.lock is committed: tracked, modified, last commit. Read-only. Returns LockfileGitStatus.
   app.get("/api/lockfile/git", async (c) => c.json(await lockfileGitStatus(deps.lockfilePath)));
+
+  // Rehearse a rug pull in memory with the proxy's own pipeline (src/ui/simulation.ts). Reads and
+  // writes nothing, but is a POST, so it passes the same write guard. Returns SimulationResult.
+  app.post(
+    "/api/simulate",
+    bodyLimit({ maxSize: MAX_SIMULATION_BYTES, onError: (c) => c.json({ error: `the simulation body is over ${MAX_SIMULATION_BYTES} bytes` }, 413) }),
+    async (c) => {
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        throw new ApiError(400, "the simulation body must be JSON");
+      }
+      const request = SimulationRequestSchema.safeParse(body);
+      if (!request.success) throw new ApiError(400, `invalid simulation: ${request.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ")}`);
+      try {
+        return c.json(simulateRugPull(request.data, now()));
+      } catch (error) {
+        if (error instanceof SimulationInputError) throw new ApiError(400, error.message);
+        throw error;
+      }
+    },
+  );
 
   app.notFound((c) => c.json({ error: `no route for ${c.req.method} ${c.req.path}` }, 404));
 
