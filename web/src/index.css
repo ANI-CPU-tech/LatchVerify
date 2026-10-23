@@ -353,3 +353,118 @@
 .art-birds-b {
   opacity: 0;
 }
+
+/* Motion, only for viewers who have not asked for less. Lengths are art pixels. */
+@media (prefers-reduced-motion: no-preference) {
+  .art-clouds {
+    animation: art-drift 90s ease-in-out infinite alternate;
+  }
+  .art-birds-far {
+    animation: art-drift 70s linear infinite alternate;
+  }
+  /* The flock crosses the sky, flapping by showing its two poses in turn. It starts mid-flight. */
+  .art-birds-a,
+  .art-birds-b {
+    animation:
+      art-fly 48s linear -18s infinite,
+      art-swap 0.7s steps(1) infinite;
+  }
+  .art-birds-b {
+    animation-delay: -18s, -0.35s;
+  }
+  .art-glint-a,
+  .art-glint-b {
+    animation: art-swap 1.6s steps(1) infinite;
+  }
+  .art-glint-b {
+    animation-delay: -0.8s;
+  }
+  /* Two copies of the smoke, half a cycle apart, so one takes over as the other fades. */
+  .art-smoke-a,
+  .art-smoke-b {
+    animation: art-rise 7s linear infinite;
+  }
+  .art-smoke-b {
+    animation-delay: -3.5s;
+  }
+  .art-stars-a {
+    animation: art-twinkle 3s ease-in-out infinite;
+  }
+  .art-stars-b {
+    animation: art-twinkle 4.6s ease-in-out -1.2s infinite;
+  }
+  .art-stars-c {
+    animation: art-twinkle 6.2s ease-in-out -2.9s infinite;
+  }
+  .art-canoe {
+    animation: art-bob 3.2s steps(1) infinite;
+  }
+  .art-window {
+    animation: art-flicker 5s linear infinite;
+  }
+
+  @keyframes art-drift {
+    to {
+      transform: translateX(28px);
+    }
+  }
+  @keyframes art-fly {
+    from {
+      transform: translateX(-240px);
+    }
+    to {
+      transform: translateX(360px);
+    }
+  }
+  @keyframes art-swap {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
+    }
+  }
+  @keyframes art-rise {
+    0% {
+      opacity: 0;
+      transform: translate(0, 0);
+    }
+    15% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-5px, -8px);
+    }
+  }
+  @keyframes art-twinkle {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @keyframes art-bob {
+    50% {
+      transform: translateY(1px);
+    }
+  }
+  @keyframes art-flicker {
+    0%,
+    38%,
+    42%,
+    68%,
+    72%,
+    100% {
+      opacity: 1;
+    }
+    40% {
+      opacity: 0.8;
+    }
+    70% {
+      opacity: 0.88;
+    }
+  }
+}
