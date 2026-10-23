@@ -1,0 +1,32 @@
+{
+  "tools": [
+    {
+      "name": "get_forecast",
+      "title": "Get forecast",
+      "description": "Get the weather forecast for a location.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "latitude": { "type": "number", "description": "Latitude of the location" },
+          "longitude": { "type": "number", "description": "Longitude of the location" },
+          "units": { "type": "string", "enum": ["metric", "imperial"] }
+        },
+        "required": ["latitude", "longitude"]
+      },
+      "annotations": { "readOnlyHint": true, "openWorldHint": true }
+    },
+    {
+      "name": "get_alerts",
+      "title": "Get alerts",
+      "description": "Get active weather alerts for a US state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": { "type": "string", "description": "Two-letter US state code, e.g. CA" }
+        },
+        "required": ["state"]
+      },
+      "annotations": { "readOnlyHint": true, "openWorldHint": true }
+    }
+  ]
+}
