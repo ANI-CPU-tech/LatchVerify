@@ -418,6 +418,17 @@
   .art-shooting-star {
     animation: art-shoot 11s linear -6s infinite;
   }
+  .art-snow-a,
+  .art-snow-b,
+  .art-snow-c {
+    animation: art-fall 6s linear infinite;
+  }
+  .art-snow-b {
+    animation-delay: -2s;
+  }
+  .art-snow-c {
+    animation-delay: -4s;
+  }
   .art-rays {
     animation: art-pulse 9s ease-in-out infinite alternate;
   }
@@ -522,6 +533,20 @@
     100% {
       opacity: 0;
       transform: translate(-70px, 35px);
+    }
+  }
+  @keyframes art-fall {
+    0% {
+      opacity: 0;
+      transform: translate(0, -8px);
+    }
+    15%,
+    85% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-3px, 8px);
     }
   }
   @keyframes art-bob {

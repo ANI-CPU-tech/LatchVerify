@@ -31,7 +31,7 @@ export type ArtColor = (typeof ART_COLORS)[number];
 export type ArtTime = "day" | "night";
 
 /** Each theme's special touch, drawn on top of the shared scene. */
-export const ART_EXTRAS = ["balloon", "sailboat", "geese", "fireflies"] as const;
+export const ART_EXTRAS = ["balloon", "sailboat", "geese", "fireflies", "snowfall"] as const;
 export type ArtExtra = (typeof ART_EXTRAS)[number];
 
 /** Layers in paint order. A layer that is empty in a scene is left out of it. */
@@ -57,6 +57,9 @@ export const ART_LAYERS = [
   "smoke-b",
   "fireflies-a",
   "fireflies-b",
+  "snow-a",
+  "snow-b",
+  "snow-c",
   "birds-far",
   "birds-a",
   "birds-b",
@@ -533,7 +536,18 @@ function fireflies(on: Painter) {
   }
 }
 
-const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon, sailboat, geese, fireflies };
+/** Snow falling over the whole scene, in three sets that fall a third of a cycle apart. */
+function snowfall(on: Painter) {
+  for (let i = 0; i < 180; i++) {
+    const set = on((["snow-a", "snow-b", "snow-c"] as const)[i % 3]!);
+    const [x, y] = [Math.floor(hash(i, 400) * WIDTH), 2 + Math.floor(hash(i, 401) * (HEIGHT - 3))];
+    set(x, y, "snow");
+    // A few larger flakes, closer to the viewer.
+    if (hash(i, 402) > 0.85) for (const [dx, dy] of [[1, 0], [0, 1], [1, 1]] as const) set(x + dx, y + dy, "snow");
+  }
+}
+
+const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon, sailboat, geese, fireflies, snowfall };
 
 /** A grid of pixels as horizontal runs of one color. */
 function toLayer(name: ArtLayer, grid: Grid, width: number, height: number): PixelLayer {

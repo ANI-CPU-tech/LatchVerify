@@ -9,7 +9,7 @@ export const THEMES = [
   { id: "warm", label: "Warm Retro", description: "Ivory, muted orange, brown", dark: false, art: "sailboat" },
   { id: "sunset", label: "Sunset", description: "Apricot, burnt orange", dark: false, art: "geese" },
   { id: "terminal", label: "Terminal Dark", description: "Charcoal, cream text, orange", dark: true, art: "fireflies" },
-  { id: "minimal", label: "Minimal", description: "Neutral, muted artwork", dark: false, art: null },
+  { id: "minimal", label: "Minimal", description: "Neutral, muted artwork", dark: false, art: "snowfall" },
   { id: "forest", label: "Forest Green", description: "Ivory, forest green, olive", dark: false, art: null },
 ] as const satisfies ReadonlyArray<{ id: string; label: string; description: string; dark: boolean; art: ArtExtra | null }>;
 
