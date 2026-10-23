@@ -1,5 +1,5 @@
 import type { Finding } from "../schema/index.js";
-import { foldText } from "./capabilities.js";
+import { findToolMentions, foldText } from "./capabilities.js";
 import { escapeForEvidence } from "./unicode.js";
 
 /**
@@ -349,12 +349,28 @@ export function findEnvVarMentions(text: string): Finding[] {
   return uniqueBy(findings, (f) => f.evidence);
 }
 
-/** TODO: return "cross_server" findings (critical) for each ctx.otherServerTools name mentioned in `text`. */
+/**
+ * Tools from other servers named in `text`, one critical "cross_server" finding per tool,
+ * sorted by name. A description that steers the model toward another server's tools ("then
+ * call send_email") is how a poisoned tool exfiltrates through a trusted one. Names match as
+ * whole words, case-sensitively, after folding (see findToolMentions).
+ */
 export function findCrossServerRefs(text: string, ctx: PatternContext): Finding[] {
-  throw new Error("not implemented");
+  return findToolMentions(foldText(text), ctx.otherServerTools).map((name) => ({
+    type: "cross_server",
+    severity: "critical",
+    message: "Text references a tool on another server",
+    evidence: escapeForEvidence(name),
+  }));
 }
 
-/** TODO: run every pattern check above over one tool field and concatenate the findings. */
+/**
+ * Runs every pattern check over one tool field: imperatives, paths, environment variables,
+ * then cross-server references. Each message names `field`, e.g. "description" or
+ * "inputSchema.properties.path.description".
+ */
 export function detectPatterns(text: string, field: string, ctx: PatternContext): Finding[] {
-  throw new Error("not implemented");
+  return [...findImperatives(text), ...findPathMentions(text), ...findEnvVarMentions(text), ...findCrossServerRefs(text, ctx)].map(
+    (finding) => ({ ...finding, message: `${finding.message} (${field})` }),
+  );
 }
