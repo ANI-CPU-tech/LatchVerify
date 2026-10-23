@@ -257,6 +257,71 @@ function runEvidence(run: HitRun, text: string): string {
   return base;
 }
 
+/** Pictographs that a zero-width joiner legitimately fuses into one emoji. */
+const PICTOGRAPH = /^\p{Extended_Pictographic}$/u;
+
+/** Characters that attach to an emoji before a joiner: presentation selectors and skin tones. */
+const EMOJI_ATTACHMENT = /^[\p{Emoji_Modifier}\u{fe0e}\u{fe0f}]$/u;
+
+/** Combining marks, such as the Indic virama a joiner often follows. */
+const MARK = /^\p{M}$/u;
+
+/** Scripts whose spelling uses zero-width (non-)joiners between letters: Persian, Indic, Sinhala. */
+const JOINING_SCRIPTS: ReadonlySet<string> = new Set([
+  "Arabic", "Syriac", "Mongolian", "Devanagari", "Bengali", "Gurmukhi", "Gujarati", "Oriya", "Tamil",
+  "Telugu", "Kannada", "Malayalam", "Sinhala", "Tibetan", "Myanmar", "Khmer",
+]);
+
+/** The whole codepoint ending just before UTF-16 offset `index`, or undefined at the start. */
+function charBefore(text: string, index: number): string | undefined {
+  if (index <= 0) return undefined;
+  const low = text.charCodeAt(index - 1);
+  const high = index >= 2 ? text.charCodeAt(index - 2) : 0;
+  const pair = low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff;
+  return pair ? text.slice(index - 2, index) : text[index - 1];
+}
+
+/** The whole codepoint starting at UTF-16 offset `index`, or undefined at the end. */
+function charAt(text: string, index: number): string | undefined {
+  return index < text.length ? String.fromCodePoint(text.codePointAt(index)!) : undefined;
+}
+
+/** The nearest character before `index` that is not matched by `skip`. */
+function baseBefore(text: string, index: number, skip: RegExp): string | undefined {
+  let char = charBefore(text, index);
+  while (char !== undefined && skip.test(char)) {
+    index -= char.length;
+    char = charBefore(text, index);
+  }
+  return char;
+}
+
+const scriptOf = (char: string | undefined): string | undefined => (char === undefined ? undefined : scriptsOf(char)[0]);
+
+/**
+ * True for a single invisible character doing its normal job, which is not worth a finding:
+ * - one variation selector right after a visible character ("\u{2764}\u{fe0f}", keycaps, Han
+ *   ideographic variants); two or more in a row are still reported, since that encodes data;
+ * - a zero-width joiner fusing two pictographs into one emoji ("\u{1f469}\u{1f3fd}\u{200d}\u{1f4bb}");
+ * - a zero-width (non-)joiner between letters of a script whose spelling uses it (Persian, Indic).
+ */
+function isLegitimateUse(run: HitRun, text: string): boolean {
+  if (run.hits.length !== 1) return false;
+  const { codepoint } = run.hits[0]!;
+  if (VARIATION_LABELS.has(run.label)) {
+    const base = charBefore(text, run.start);
+    return base !== undefined && !/^\s$/u.test(base) && suspiciousRange(base.codePointAt(0)!) === undefined;
+  }
+  if (codepoint !== 0x200c && codepoint !== 0x200d) return false;
+  const after = charAt(text, run.end);
+  if (codepoint === 0x200d) {
+    const emoji = baseBefore(text, run.start, EMOJI_ATTACHMENT);
+    if (emoji !== undefined && after !== undefined && PICTOGRAPH.test(emoji) && PICTOGRAPH.test(after)) return true;
+  }
+  const script = scriptOf(baseBefore(text, run.start, MARK));
+  return script !== undefined && JOINING_SCRIPTS.has(script) && scriptOf(after) === script;
+}
+
 /**
  * Runs every Unicode check over one tool field and returns "unicode" findings: one per run of
  * suspicious codepoints, in text order, then one per confusable word.
@@ -268,11 +333,15 @@ function runEvidence(run: HitRun, text: string): string {
  * - warn: zero-width and other invisible characters, control characters, bidi marks and stray
  *   closers, a single variation selector, and confusable words.
  *
+ * A single invisible character doing its normal job (emoji presentation selector, emoji or
+ * Persian/Indic joiner) is not reported; see isLegitimateUse.
+ *
  * `field` names the source in messages, e.g. "description" or
  * "inputSchema.properties.path.description". Evidence is printable ASCII only.
  */
 export function detectUnicode(text: string, field: string): Finding[] {
-  const findings: Finding[] = groupRuns(findSuspiciousCodepoints(text)).map((run) => ({
+  const runs = groupRuns(findSuspiciousCodepoints(text)).filter((run) => !isLegitimateUse(run, text));
+  const findings: Finding[] = runs.map((run) => ({
     type: "unicode",
     ...classifyRun(run, field),
     evidence: runEvidence(run, text),

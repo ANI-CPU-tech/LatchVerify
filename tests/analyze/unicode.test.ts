@@ -276,3 +276,46 @@ describe("detectUnicode", () => {
     }
   });
 });
+
+describe("detectUnicode: legitimate uses stay quiet", () => {
+  const quiet = (text: string) => expect(detectUnicode(text, "description")).toEqual([]);
+  const severities = (text: string) => detectUnicode(text, "description").map((f) => f.severity);
+
+  it("does not report emoji presentation selectors, keycaps or text-style selectors", () => {
+    quiet("I \u{2764}\u{fe0f} forecasts");
+    quiet("Press \u{31}\u{fe0f}\u{20e3} to continue");
+    quiet("Swap \u{2194}\u{fe0e} units");
+  });
+
+  it("does not report zero-width joiners inside emoji sequences", () => {
+    quiet("\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467} family");
+    quiet("\u{1f469}\u{1f3fd}\u{200d}\u{1f4bb} developer");
+    quiet("\u{2764}\u{fe0f}\u{200d}\u{1f525} hot");
+  });
+
+  it("does not report ideographic variation selectors after Han characters", () => {
+    quiet("\u{845b}\u{e0100}\u{98fe}\u{533a}");
+  });
+
+  it("does not report joiners where Persian and Indic spelling uses them", () => {
+    quiet("\u{645}\u{6cc}\u{200c}\u{62e}\u{648}\u{627}\u{647}\u{645}"); // Persian, ZWNJ
+    quiet("\u{915}\u{94d}\u{200d}\u{937}"); // Devanagari, ZWJ after virama
+  });
+
+  it("still reports joiners and selectors outside those uses", () => {
+    expect(severities("pa\u{200d}th")).toEqual(["warn"]); // joiner inside a Latin word
+    expect(severities("\u{1f600}\u{200b}\u{1f600}")).toEqual(["warn"]); // zero-width space is never a joiner
+    expect(severities("\u{1f600}\u{200d}x")).toEqual(["warn"]); // joiner not between pictographs
+    expect(severities("\u{645}\u{200c}a")).toEqual(["warn"]); // joiner across scripts
+    expect(severities("\u{645}\u{200c}\u{200c}\u{62e}")).toEqual(["warn"]); // more than one joiner
+    expect(severities("\u{fe0f}abc")).toEqual(["warn"]); // selector with nothing before it
+    expect(severities("a \u{fe0f}")).toEqual(["warn"]); // selector after whitespace
+    expect(severities("\u{200b}\u{fe0f}")).toEqual(["warn", "warn"]); // selector after another invisible
+  });
+
+  it("still treats repeated selectors and tag payloads after emoji as smuggling", () => {
+    expect(severities("\u{1f600}\u{fe00}\u{fe01}\u{fe02}")).toEqual(["critical"]);
+    const flagLookalike = `\u{1f3f4}${[..."ignore"].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join("")}\u{e007f}`;
+    expect(severities(flagLookalike)).toEqual(["critical"]);
+  });
+});
