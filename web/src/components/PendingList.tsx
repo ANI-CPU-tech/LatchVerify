@@ -4,9 +4,10 @@ import { TierBadge } from "./TierBadge";
 interface Props {
   items: ReviewItem[];
   selectedId: string;
+  onSelect: (id: string) => void;
 }
 
-export function PendingList({ items, selectedId }: Props) {
+export function PendingList({ items, selectedId, onSelect }: Props) {
   return (
     <nav aria-label="Pending changes">
       <ul className="space-y-2">
@@ -14,9 +15,9 @@ export function PendingList({ items, selectedId }: Props) {
           const selected = change.id === selectedId;
           return (
             <li key={change.id}>
-              {/* TODO: select this change on click once App holds selection state. */}
               <button
                 type="button"
+                onClick={() => onSelect(change.id)}
                 aria-current={selected ? "true" : undefined}
                 className={`w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
                   selected ? "border-primary/50 bg-muted/60" : "bg-card"
