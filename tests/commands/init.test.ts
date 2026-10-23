@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { createRequire } from "node:module";
@@ -11,7 +11,7 @@ import { collectServers, pinServer, runInit, type InitOptions, type InitServer }
 import { CaptureError } from "../../src/proxy/capture.js";
 import { LockFileSchema, type LockFile, type McpTool } from "../../src/schema/index.js";
 import { LockfileError, emptyLockfile } from "../../src/store/lockfile.js";
-import { clientConfigPath, wrapWithProxy, type ClientConfig, type ClientId, type ClientServerEntry } from "../../src/config/clients.js";
+import { INSTALL_LAUNCH, clientConfigPath, wrapWithProxy, type ClientConfig, type ClientId, type ClientServerEntry } from "../../src/config/clients.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 // Absolute, so children started outside the repo still find tsx.
@@ -249,7 +249,7 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
   const files = async (path: string) => (await readdir(dirname(path))).sort();
   const lockOnDisk = async () => LockFileSchema.parse(JSON.parse(await readFile(lockfilePath, "utf8")));
   const expectedEntry = (entry: ClientServerEntry, serverId = "weather") => ({
-    ...wrapWithProxy(serverId, entry),
+    ...wrapWithProxy(serverId, entry, INSTALL_LAUNCH),
     env: { ...entry.env, LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: join(home, "repo", ".latch") },
   });
 
@@ -262,7 +262,7 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
     expect(text).toContain("✔ weather: would pin 2 tools: get_forecast, get_alerts");
     expect(text).toContain(`would write ${lockfilePath} with 1 server`);
     expect(text).toContain(`would rewrite ${config}, keeping a .bak copy:`);
-    expect(text).toContain("  weather: latch proxy --server weather -- ");
+    expect(text).toContain(`  weather: ${[INSTALL_LAUNCH.command, ...INSTALL_LAUNCH.args].join(" ")} proxy --server weather -- `);
     expect(await readFile(config, "utf8")).toBe(before);
     expect(await files(config)).toEqual(["claude_desktop_config.json"]);
     await expect(readdir(join(home, "repo"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -327,7 +327,7 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
     const cursor = await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
     const cursorBefore = await readFile(cursor, "utf8");
     await init({ client: "claude-desktop" });
-    expect(JSON.parse(await readFile(desktop, "utf8")).mcpServers.weather.command).toBe("latch");
+    expect(JSON.parse(await readFile(desktop, "utf8")).mcpServers.weather).toEqual(expectedEntry(weatherEntry));
     expect(await readFile(cursor, "utf8")).toBe(cursorBefore);
   });
 
@@ -362,7 +362,7 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
     expect(text).toContain("not pinned or wrapped");
     const written = JSON.parse(await readFile(config, "utf8")).mcpServers;
     expect(written.broken).toEqual(broken);
-    expect(written.weather.command).toBe("latch");
+    expect(written.weather).toEqual(expectedEntry(weatherEntry));
     expect(Object.keys((await lockOnDisk()).servers)).toEqual(["weather"]);
   });
 
@@ -409,16 +409,31 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
     expect(conflict.text).toContain("! skipping weather (cursor, vscode): cursor and vscode launch it with different commands");
   });
 
-  it("warns when latch is not on PATH, and not when it is", async () => {
-    const bin = join(home, "bin");
-    await mkdir(bin);
-    vi.stubEnv("PATH", bin);
-    await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
-    expect((await init()).text).toContain("! `latch` is not on PATH");
-    await writeFile(join(bin, "latch"), "#!/bin/sh\n");
-    await chmod(join(bin, "latch"), 0o755);
-    await writeConfig("vscode", { servers: { weather: weatherEntry } });
-    expect((await init()).text).not.toContain("is not on PATH");
+  it("launches the proxy by absolute path, so a client without latch on its PATH can start it", async () => {
+    // Regression: init wrote command "latch", which Claude Desktop could not spawn.
+    const config = await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
+    expect((await init()).code).toBe(0);
+    const entry = JSON.parse(await readFile(config, "utf8")).mcpServers.weather as ClientServerEntry;
+    expect(entry.command).toBe(process.execPath);
+    expect(entry.args!.slice(1, 5)).toEqual(["proxy", "--server", "weather", "--"]);
+    expect(entry.args![0]).toBe(INSTALL_LAUNCH.args[0]);
+  });
+
+  it("writes the launch it is given", async () => {
+    const config = await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
+    await init({ launch: { command: "latch", args: [] } });
+    expect(JSON.parse(await readFile(config, "utf8")).mcpServers.weather.command).toBe("latch");
+  });
+
+  it("does not wrap an entry that already runs <node> <path>/cli.js proxy a second time", async () => {
+    // Regression: weather, wrapped by hand this way, came out wrapped twice.
+    const byHand = { ...wrapWithProxy("weather", weatherEntry, { command: "/usr/bin/node", args: ["/opt/latch/dist/cli.js"] }) };
+    const config = await writeConfig("cursor", { mcpServers: { weather: byHand } });
+    expect((await init()).code).toBe(0);
+    expect(Object.keys((await lockOnDisk()).servers)).toEqual(["weather"]);
+    const entry = JSON.parse(await readFile(config, "utf8")).mcpServers.weather as ClientServerEntry;
+    // Its own launch is kept; only the lockfile and state directory are added.
+    expect(entry).toEqual({ ...byHand, env: { LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: join(home, "repo", ".latch") } });
   });
 });
 
@@ -465,7 +480,7 @@ describe.skipIf(process.platform === "win32")("runInit prompt", () => {
 
   const wrapped = async () =>
     Object.entries(JSON.parse(await readFile(clientConfigPath("cursor"), "utf8")).mcpServers as Record<string, ClientServerEntry>)
-      .filter(([, entry]) => entry.command === "latch")
+      .filter(([, entry]) => entry.args?.includes("proxy"))
       .map(([id]) => id);
 
   it("offers every server, pre-selected, and takes them all on enter", async () => {

@@ -4,6 +4,7 @@ import { Command, Option } from "commander";
 import pc from "picocolors";
 import { SUPPORTED_CLIENTS } from "./config/clients.js";
 import { loadDotEnv, loadEnv, statePaths, type LatchEnv } from "./config/env.js";
+import { runAdd } from "./commands/add.js";
 import { runInit } from "./commands/init.js";
 import { runInspect } from "./commands/inspect.js";
 import { runProxy } from "./commands/proxy.js";
@@ -45,6 +46,19 @@ program
   .option("--dry-run", "show planned changes without writing", false)
   .action((opts: { client?: (typeof SUPPORTED_CLIENTS)[number]; dryRun: boolean }) =>
     run(() => runInit({ ...opts, ...globals() })),
+  );
+
+program
+  .command("add")
+  .description("put one MCP server behind latch: pin its tools and add it to a client config")
+  .usage("[options] <name> -- <command> [args...]")
+  .argument("<name>", "server id, used in the client config and latch.lock")
+  .argument("<command...>", "the real server command and its arguments, after --")
+  .addOption(new Option("--client <id>", "client config to add it to").choices(SUPPORTED_CLIENTS).default("claude-desktop"))
+  .option("--env <KEY[=VALUE]>", "server environment variable; a bare KEY copies it from this shell (repeatable)", (value, previous: string[]) => [...previous, value], [])
+  .option("--dry-run", "show what would be pinned and added without writing", false)
+  .action((name: string, command: string[], opts: { client: (typeof SUPPORTED_CLIENTS)[number]; env: string[]; dryRun: boolean }) =>
+    run(() => runAdd({ ...opts, name, command, ...globals() })),
   );
 
 program

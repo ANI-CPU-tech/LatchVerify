@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, posix, win32, type PlatformPath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
 /** MCP clients whose config files `latch init` knows how to rewrite. */
@@ -131,13 +132,29 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Command a wrapped entry runs. `latch init` relies on `latch` being on the client's PATH. */
+/** Command a wrapped entry runs when it relies on `latch` being on the client's PATH. */
 export const PROXY_COMMAND = "latch";
+
+/** How a wrapped entry starts latch: the executable, then the arguments before "proxy". */
+export interface ProxyLaunch {
+  command: string;
+  args: string[];
+}
+
+/** `latch` looked up on the client's PATH. */
+export const PATH_LAUNCH: ProxyLaunch = { command: PROXY_COMMAND, args: [] };
+
+/**
+ * This install, by absolute path: the running node and this checkout's cli.js. Clients start
+ * servers without the user's shell setup (a shell function or alias named `latch` is invisible
+ * to them), so `latch init` and `latch add` write this launch.
+ */
+export const INSTALL_LAUNCH: ProxyLaunch = { command: process.execPath, args: [fileURLToPath(new URL("../cli.js", import.meta.url))] };
 
 /**
  * Rewrite one server entry so the client launches `latch proxy` instead of the real server:
- * command "latch", args ["proxy", "--server", serverId, "--", original.command, ...original.args].
- * env and unknown keys are kept, in their original order. Pure.
+ * command `launch.command`, args [...launch.args, "proxy", "--server", serverId, "--",
+ * original.command, ...original.args]. env and unknown keys are kept, in their original order. Pure.
  *
  * Idempotent: an entry that already runs `latch proxy` is returned unchanged (the same object),
  * so re-running `latch init` never nests proxies.
@@ -145,7 +162,7 @@ export const PROXY_COMMAND = "latch";
  * @throws TypeError when serverId is empty or starts with "-" (the proxy's option parser would
  * misread it), or the entry has no command to wrap.
  */
-export function wrapWithProxy(serverId: string, original: ClientServerEntry): ClientServerEntry {
+export function wrapWithProxy(serverId: string, original: ClientServerEntry, launch: ProxyLaunch = PATH_LAUNCH): ClientServerEntry {
   if (isProxyInvocation(original)) return original;
   if (serverId === "" || serverId.startsWith("-")) {
     throw new TypeError(`cannot wrap server ${JSON.stringify(serverId)}: the id must be non-empty and not start with "-"`);
@@ -153,7 +170,7 @@ export function wrapWithProxy(serverId: string, original: ClientServerEntry): Cl
   if (typeof original.command !== "string" || original.command === "") {
     throw new TypeError(`cannot wrap server ${JSON.stringify(serverId)}: it has no command`);
   }
-  return withCommand(original, PROXY_COMMAND, ["proxy", "--server", serverId, "--", original.command, ...(original.args ?? [])]);
+  return withCommand(original, launch.command, [...launch.args, "proxy", "--server", serverId, "--", original.command, ...(original.args ?? [])]);
 }
 
 /**
@@ -172,11 +189,21 @@ export function unwrapProxy(entry: ClientServerEntry): ClientServerEntry {
   return withCommand(entry, args[separator + 1]!, args.slice(separator + 2));
 }
 
-/** True for `latch proxy ...`, however the latch executable is spelled (path, .cmd, .exe). */
+/**
+ * True for `latch proxy ...`, however the latch executable is spelled (path, .cmd, .exe), and for
+ * INSTALL_LAUNCH's form, `<node> <path>/cli.js proxy --server ...`.
+ */
 function isProxyInvocation(entry: ClientServerEntry): boolean {
-  if (typeof entry.command !== "string" || !Array.isArray(entry.args) || entry.args[0] !== "proxy") return false;
-  const executable = entry.command.split(/[\\/]/).pop()!.toLowerCase();
+  if (typeof entry.command !== "string" || !Array.isArray(entry.args)) return false;
+  const [first, second, third] = entry.args;
+  if (typeof first === "string" && baseName(first) === "cli.js" && second === "proxy" && third === "--server") return true;
+  if (first !== "proxy") return false;
+  const executable = baseName(entry.command);
   return executable === PROXY_COMMAND || executable === `${PROXY_COMMAND}.cmd` || executable === `${PROXY_COMMAND}.exe`;
+}
+
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop()!.toLowerCase();
 }
 
 /**

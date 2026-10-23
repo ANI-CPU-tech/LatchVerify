@@ -58,8 +58,8 @@ is signal.
 
 ## How it works
 
-1. `latch init` rewrites your MCP client config so each server is launched through
-   `latch proxy`.
+1. `latch init` (every server) or `latch add` (one server) rewrites your MCP client
+   config so each server is launched through `latch proxy`.
 2. The proxy spawns the real server and pipes line-delimited JSON-RPC between it
    and the client. It intercepts `tools/list`, `tools/call` and
    `notifications/tools/list_changed`.
@@ -84,12 +84,18 @@ pnpm link --global   # puts `latch` on your PATH
 | Command | What it does |
 |---|---|
 | `latch init` | Detect MCP client configs (Claude Desktop, Claude Code, Cursor, VS Code), wrap the chosen servers with the proxy, and pin their current tools in `latch.lock`. |
+| `latch add` | Put one server behind latch: pin its tools and add it, wrapped, to one client config (Claude Desktop by default). `latch add github --env GITHUB_PERSONAL_ACCESS_TOKEN -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server` |
 | `latch review` | Walk the pending queue in the terminal, or with `--ui` open the web review screen. Approving rewrites `latch.lock` for you to commit. |
 | `latch verify` | CI check. Spawns every server in `latch.lock`, diffs live tools against pinned ones, and exits non-zero on tier 2+ drift. |
 | `latch inspect` | Print derived capabilities and findings for a server or a saved `tools/list` JSON, without touching the lockfile. |
 
 `latch proxy` also exists. It is hidden from `--help` because only the client configs
-written by `latch init` invoke it.
+written by `latch init` and `latch add` invoke it. Those entries start it by absolute path
+(this node and this checkout's `dist/cli.js`), so clients find it without `latch` on PATH.
+
+Adding a remote (HTTP) server: bridge it to stdio first, e.g.
+`latch add miro -- npx -y mcp-remote https://mcp.miro.com/`. A bare `--env KEY` copies the
+value from your shell, so tokens stay out of the command line.
 
 ## Development
 
