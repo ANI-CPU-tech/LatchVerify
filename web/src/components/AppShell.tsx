@@ -108,12 +108,14 @@ export function AppShell({ current, children }: { current: Page; children: React
             <NavLinks current={current} layout="sidebar" />
           </nav>
         </aside>
-        <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-6xl space-y-6">{children}</div>
-        </main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <main id="main" tabIndex={-1} className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-6xl space-y-6">{children}</div>
+          </main>
+          {/* Footer art spans the content column only, so the sidebar stays plain to the bottom. */}
+          <PixelLandscape className="mt-8 block h-40 w-full sm:h-56 lg:h-64 2xl:h-80" />
+        </div>
       </div>
-      {/* Full-width footer art below the content, never over it; its sky is transparent. */}
-      <PixelLandscape className="mt-8 block h-40 w-full sm:h-56 lg:h-64 2xl:h-80" />
     </div>
   );
 }
