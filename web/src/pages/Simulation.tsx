@@ -2,6 +2,7 @@ import type { SimulationResult } from "@schema/index.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CapabilityDiff } from "../components/CapabilityDiff";
 import { FindingList } from "../components/FindingList";
+import { SimFlow } from "../components/SimFlow";
 import { FlaskIcon, PauseIcon, PlayIcon, RefreshIcon, StepBackIcon, StepForwardIcon } from "../components/icons";
 import { TextDiff } from "../components/TextDiff";
 import { TierBadge } from "../components/TierBadge";
@@ -65,6 +66,7 @@ export function Simulation() {
   }, [playing, index, last, speed, steps.length]);
 
   const step = steps[index];
+  const swapAt = steps.findIndex((entry) => entry.id === "swap");
 
   return (
     <>
@@ -131,6 +133,10 @@ export function Simulation() {
           <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
             <div className="h-full bg-primary transition-[width] duration-500 motion-reduce:transition-none" style={{ width: `${((index + 1) / steps.length) * 100}%` }} />
           </div>
+
+          <Panel>
+            <SimFlow step={step} swapped={swapAt >= 0 && index >= swapAt} speed={speed} />
+          </Panel>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
             <Panel title="Timeline" icon={<FlaskIcon />} bodyClassName="p-2">

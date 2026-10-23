@@ -598,3 +598,18 @@
     transform: translateY(4px);
   }
 }
+
+/* Simulation flow: a message crosses from its sender (--from) to its receiver (--to). */
+@keyframes sim-travel {
+  from {
+    left: var(--from);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  to {
+    left: var(--to);
+    opacity: 1;
+  }
+}
