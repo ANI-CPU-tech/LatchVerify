@@ -1,0 +1,15 @@
+Package: latchverify
+Version: @DEB_VERSION@
+Section: devel
+Priority: optional
+Architecture: all
+Depends: nodejs (>= 22)
+Suggests: git
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: @PACKAGER@
+Homepage: @HOMEPAGE@
+Description: capability-diffing security proxy for MCP servers
+ LatchVerify pins Model Context Protocol tool definitions in a git-committed
+ latch.lock and blocks tools/call when a tool gains capabilities without
+ review. Includes the `latch` command and a desktop launcher for the local
+ review UI.

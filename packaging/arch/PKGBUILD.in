@@ -1,0 +1,24 @@
+# Maintainer: @PACKAGER@
+#
+# Packages the portable LatchVerify archive (scripts/package, target linux-tarball). The
+# archive holds pure JavaScript and its production dependencies, so the package is arch=any
+# and needs only Node.js 22 or newer at run time.
+pkgname=latchverify
+pkgver=@PKGVER@
+pkgrel=1
+pkgdesc="Capability-diffing security proxy for MCP servers"
+arch=('any')
+url="@HOMEPAGE@"
+license=('MIT')
+depends=('nodejs>=22')
+optdepends=('git: show whether latch.lock is committed in the review UI')
+options=('!strip' '!debug')
+source=("latchverify-@VERSION@-linux-portable.tar.gz")
+sha256sums=('@SHA256@')
+
+package() {
+  cd "latchverify-@VERSION@"
+  install -dm755 "$pkgdir/usr"
+  cp -a --no-preserve=ownership bin lib share "$pkgdir/usr/"
+  install -Dm644 lib/latchverify/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

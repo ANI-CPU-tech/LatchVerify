@@ -1,0 +1,45 @@
+#!/bin/sh
+# LatchVerify desktop launcher: opens the review UI (`latch review --ui`) for a project.
+#
+# The desktop entry starts this in a terminal from $HOME. When neither LATCH_LOCKFILE_PATH
+# nor ./latch.lock points at a project, it asks for the project directory. Startup otherwise
+# behaves exactly like running `latch review --ui` yourself.
+set -u
+
+pause() {
+  printf '%s\nPress Enter to close.' "$1"
+  read -r _ || true
+}
+
+if ! command -v node >/dev/null 2>&1; then
+  pause "LatchVerify needs Node.js 22 or newer on PATH."
+  exit 1
+fi
+if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'; then
+  pause "LatchVerify needs Node.js 22 or newer; found $(node --version)."
+  exit 1
+fi
+
+if [ -z "${LATCH_LOCKFILE_PATH:-}" ] && [ ! -f ./latch.lock ]; then
+  printf 'Project directory that contains latch.lock: '
+  read -r project || exit 1
+  case $project in
+    "~") project=$HOME ;;
+    "~/"*) project=$HOME/${project#"~/"} ;;
+  esac
+  if [ ! -f "$project/latch.lock" ]; then
+    pause "No latch.lock in $project. Run 'latch init' in the project first."
+    exit 1
+  fi
+  cd "$project" || exit 1
+fi
+
+# latch is installed next to this script; plain parameter expansion needs no external tools.
+case $0 in
+  */*) here=${0%/*} ;;
+  *) here=. ;;
+esac
+"$here/latch" review --ui
+status=$?
+[ "$status" -eq 0 ] || pause "latch exited with status $status."
+exit "$status"

@@ -1,0 +1,26 @@
+# Local Flatpak build of LatchVerify (scripts/package, target flatpak). Built from the portable
+# archive with --disable-download, so the build never fetches anything; the runtime, SDK and
+# Node.js SDK extension must already be installed. This is NOT the Flathub submission: Flathub
+# builds from source. See packaging/flatpak/FLATHUB.md.
+id: @APP_ID@
+runtime: org.freedesktop.Platform
+runtime-version: "@RUNTIME_VERSION@"
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.node22
+command: latchverify-review
+finish-args:
+  # The review UI listens on 127.0.0.1; the host browser must be able to reach it.
+  - --share=network
+  # Projects with latch.lock live under the home directory.
+  - --filesystem=home
+modules:
+  - name: latchverify
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 /usr/lib/sdk/node22/bin/node /app/bin/node
+      - cp -a bin lib share /app/
+    sources:
+      - type: archive
+        path: latchverify-@VERSION@-linux-portable.tar.gz
+        sha256: "@SHA256@"
