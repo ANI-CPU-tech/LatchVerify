@@ -3,6 +3,7 @@ import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent, type LatchEvent } from "../store/events.js";
 import { enqueue, writePending } from "../store/pending.js";
 import { analyzeToolList, type ListAnalysis } from "./analysis.js";
+import { buildBlockError, shouldBlock, type BlockReason, type BlockVerdict } from "./blocker.js";
 import {
   isRequest,
   isResponse,
@@ -64,8 +65,10 @@ const TRACKED_METHODS: ReadonlySet<string> = new Set(["initialize", "tools/list"
 /**
  * Entry point for every frame.
  *
- * Client to server: initialize and tools/list request ids are recorded in ctx.inflight (only
- * those, so requests the server never answers cannot grow the map without bound).
+ * Client to server: tools/call goes to onToolsCall. initialize and tools/list request ids are
+ * recorded in ctx.inflight (only those, so requests the server never answers cannot grow the
+ * map without bound). A JSON-RPC batch is refused: tools/call inside an array would slip past
+ * enforcement, and MCP 2025-06-18 removed batching.
  *
  * Server to client: the initialize response sets specVersion; a tools/list response matched via
  * ctx.inflight goes to onToolsList.
@@ -74,10 +77,18 @@ const TRACKED_METHODS: ReadonlySet<string> = new Set(["initialize", "tools/list"
  */
 export async function routeFrame(ctx: InterceptorContext, direction: Direction, frame: Frame): Promise<InterceptDecision> {
   const { message } = frame;
-  if (message === null) return FORWARD;
+  if (message === null) {
+    if (direction === "client->server" && isBatch(frame.raw)) {
+      ctx.log("refused a JSON-RPC batch from the client");
+      return respond(null, INVALID_REQUEST, "LatchVerify does not forward JSON-RPC batches; send one message per line");
+    }
+    return FORWARD;
+  }
 
   if (direction === "client->server") {
-    if (isRequest(message) && TRACKED_METHODS.has(message.method)) ctx.inflight.set(message.id, message.method);
+    if (!isRequest(message)) return FORWARD;
+    if (message.method === "tools/call") return onToolsCall(ctx, message);
+    if (TRACKED_METHODS.has(message.method)) ctx.inflight.set(message.id, message.method);
     return FORWARD;
   }
 
@@ -150,11 +161,42 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
 }
 
 /**
- * tools/call request from the client.
- * TODO: run shouldBlock(); when blocked return "respond" with buildBlockError(), else "forward".
+ * tools/call request from the client: "respond" with buildBlockError() when blocked, else
+ * "forward". A blocked call never reaches the server.
+ *
+ * Blocked when no tools/list has been analyzed since start or the last list_changed
+ * ("unverified": the server may be serving definitions nobody has checked), or when
+ * shouldBlock() objects given the queue and this session's observed changes. The observed
+ * changes keep a definition blocked after `latch review` rejects it, and after a failed state
+ * write. Every block is logged and recorded as a call_blocked event.
+ *
+ * A call without a string tool name cannot be checked, so it is answered with -32602 instead
+ * of forwarded.
  */
 export async function onToolsCall(ctx: InterceptorContext, request: JsonRpcRequest): Promise<InterceptDecision> {
-  throw new Error("not implemented");
+  const params = request.params;
+  if (!isPlainObject(params) || typeof params.name !== "string") {
+    ctx.log("refused a tools/call without a string tool name");
+    return respond(request.id, INVALID_PARAMS, "Invalid params: tools/call needs a string tool name");
+  }
+  const toolName = params.name;
+  await ctx.refresh();
+  const verdict: BlockVerdict = ctx.verified
+    ? shouldBlock(ctx.serverId, toolName, ctx.lockfile, [...ctx.pending, ...ctx.observed.values()])
+    : { blocked: true, reason: { kind: "unverified" } };
+  if (!verdict.blocked) return FORWARD;
+
+  const reason = describeReason(verdict.reason);
+  ctx.log(`blocked ${ctx.serverId}/${toolName}: ${reason}`);
+  await persist(ctx, "event log", () =>
+    appendEvent(ctx.stateDir, { kind: "call_blocked", at: new Date().toISOString(), serverId: ctx.serverId, toolName, reason }),
+  );
+  return { action: "respond", message: buildBlockError(request.id, toolName, verdict.reason) };
+}
+
+/** "hard_block chg_7f3a91", "unpinned": the event log's reason text. */
+function describeReason(reason: BlockReason): string {
+  return "changeId" in reason ? `${reason.kind} ${reason.changeId}` : reason.kind;
 }
 
 /**
@@ -164,6 +206,23 @@ export async function onToolsCall(ctx: InterceptorContext, request: JsonRpcReque
  */
 export async function onToolsListChanged(ctx: InterceptorContext, notification: JsonRpcNotification): Promise<InterceptDecision> {
   throw new Error("not implemented");
+}
+
+const INVALID_REQUEST = -32600;
+const INVALID_PARAMS = -32602;
+
+function respond(id: JsonRpcId, code: number, message: string): InterceptDecision {
+  return { action: "respond", message: { jsonrpc: "2.0", id, error: { code, message } } };
+}
+
+/** True when the line is a JSON array: a batch, or an empty or malformed one. */
+function isBatch(raw: string): boolean {
+  if (!raw.trimStart().startsWith("[")) return false;
+  try {
+    return Array.isArray(JSON.parse(raw));
+  } catch {
+    return false;
+  }
 }
 
 function captureSpecVersion(ctx: InterceptorContext, response: JsonRpcResponse): void {

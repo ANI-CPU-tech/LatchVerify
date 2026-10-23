@@ -8,7 +8,9 @@ export const BLOCK_ERROR_CODE = -32001;
 export type BlockReason =
   | { kind: "unpinned" }
   | { kind: "pending_review"; changeId: string; tier: Tier }
-  | { kind: "hard_block"; changeId: string };
+  | { kind: "hard_block"; changeId: string }
+  /** Set by the interceptor, not shouldBlock: no tools/list analyzed since start or list_changed. */
+  | { kind: "unverified" };
 
 export type BlockVerdict = { blocked: false } | { blocked: true; reason: BlockReason };
 
@@ -91,6 +93,8 @@ export function buildBlockError(id: JsonRpcId, toolName: string, reason: BlockRe
   const message =
     reason.kind === "unpinned"
       ? `LatchVerify blocked ${name}: the tool is not approved in latch.lock — run \`latch review\``
-      : `LatchVerify blocked ${name} pending review — run \`latch review\``;
+      : reason.kind === "unverified"
+        ? `LatchVerify blocked ${name}: this server's tools have not been verified yet — retry in a moment, or run \`latch review\` if it stays blocked`
+        : `LatchVerify blocked ${name} pending review — run \`latch review\``;
   return { jsonrpc: "2.0", id, error: { code: BLOCK_ERROR_CODE, message, data: { reason } } };
 }

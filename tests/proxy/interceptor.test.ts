@@ -246,3 +246,143 @@ describe("onToolsList", () => {
     expect(logs.some((line) => line.startsWith("could not write the event log:"))).toBe(true);
   });
 });
+
+const call = (id: number | string, name: unknown, args: unknown = {}) => ({
+  jsonrpc: "2.0",
+  id,
+  method: "tools/call",
+  params: { name, arguments: args },
+});
+
+/** The decision a blocked call gets. */
+const blocked = (id: number | string, message: string, reason: unknown) => ({
+  action: "respond",
+  message: { jsonrpc: "2.0", id, error: { code: -32001, message, data: { reason } } },
+});
+
+describe("onToolsCall", () => {
+  it("blocks every call until a tool list has been verified", async () => {
+    const { fromClient, kinds, logs } = await setup();
+    expect(await fromClient(call(5, "get_forecast"))).toEqual(
+      blocked(
+        5,
+        "LatchVerify blocked \"get_forecast\": this server's tools have not been verified yet — retry in a moment, or run `latch review` if it stays blocked",
+        { kind: "unverified" },
+      ),
+    );
+    expect(await kinds()).toEqual(["call_blocked"]);
+    expect(logs).toEqual(["blocked weather/get_forecast: unverified"]);
+  });
+
+  it("forwards calls to pinned, unchanged tools once the list is verified", async () => {
+    const { fromClient, listTools } = await setup();
+    await listTools(benign);
+    expect(await fromClient(call(3, "get_alerts", { state: "CA" }))).toEqual(FORWARD);
+    expect(await fromClient(call(4, "get_forecast", { latitude: 1, longitude: 2 }))).toEqual(FORWARD);
+  });
+
+  it("blocks a tool latch.lock does not pin", async () => {
+    const { fromClient, listTools } = await setup();
+    await listTools(benign);
+    expect(await fromClient(call(3, "delete_everything"))).toEqual(
+      blocked(3, 'LatchVerify blocked "delete_everything": the tool is not approved in latch.lock — run `latch review`', {
+        kind: "unpinned",
+      }),
+    );
+  });
+
+  it("hard-blocks the poisoned get_forecast and holds read_config for review (task Verify)", async () => {
+    const { fromClient, listTools, ctx, stateDir } = await setup();
+    await listTools(poisoned);
+    const changeId = (name: string) => ctx.pending.find((c) => c.toolName === name)!.id;
+    expect(await fromClient(call(6, "get_forecast", { latitude: 1, longitude: 2 }))).toEqual(
+      blocked(6, 'LatchVerify blocked "get_forecast" pending review — run `latch review`', {
+        kind: "hard_block",
+        changeId: changeId("get_forecast"),
+      }),
+    );
+    expect(await fromClient(call(7, "read_config", { path: "/etc/passwd" }))).toEqual(
+      blocked(7, 'LatchVerify blocked "read_config" pending review — run `latch review`', {
+        kind: "pending_review",
+        changeId: changeId("read_config"),
+        tier: 2,
+      }),
+    );
+    // get_alerts is pinned and the poisoned list did not change it.
+    expect(await fromClient(call(8, "get_alerts", { state: "CA" }))).toEqual(FORWARD);
+    expect(await readEvents(stateDir)).toContainEqual(
+      expect.objectContaining({ kind: "call_blocked", toolName: "get_forecast", reason: `hard_block ${changeId("get_forecast")}` }),
+    );
+  });
+
+  it("keeps a rejected definition blocked while the server still serves it", async () => {
+    const { fromClient, listTools, ctx } = await setup();
+    await listTools(poisoned);
+    const rejected = ctx.pending.find((c) => c.toolName === "get_forecast")!;
+    ctx.pending = ctx.pending.filter((c) => c !== rejected);
+    expect(await fromClient(call(6, "get_forecast"))).toMatchObject({
+      action: "respond",
+      message: { error: { data: { reason: { kind: "hard_block", changeId: rejected.id } } } },
+    });
+  });
+
+  it("lets a call through once latch review approves the change", async () => {
+    const { fromClient, listTools, ctx } = await setup();
+    await listTools(poisoned);
+    const change = ctx.pending.find((c) => c.toolName === "get_forecast")!;
+    // What a refresh after `latch review` approves the change would load.
+    ctx.lockfile = applyApproval(ctx.lockfile, change, "dev@example.com", new Date());
+    ctx.pending = ctx.pending.filter((c) => c !== change);
+    expect(await fromClient(call(6, "get_forecast"))).toEqual(FORWARD);
+  });
+
+  it("re-reads the lockfile and queue before deciding", async () => {
+    const refresh = vi.fn(async () => {});
+    const { fromClient, listTools } = await setup({ refresh });
+    await listTools(benign);
+    refresh.mockClear();
+    await fromClient(call(3, "get_alerts"));
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a call without a string tool name instead of forwarding it", async () => {
+    const { fromClient, listTools } = await setup();
+    await listTools(benign);
+    for (const params of [undefined, null, [], {}, { name: 5 }, { name: null }]) {
+      expect(await fromClient({ jsonrpc: "2.0", id: 9, method: "tools/call", params }), JSON.stringify(params)).toEqual({
+        action: "respond",
+        message: { jsonrpc: "2.0", id: 9, error: { code: -32602, message: "Invalid params: tools/call needs a string tool name" } },
+      });
+    }
+  });
+
+  it("forwards tools/call notifications and responses, which call nothing", async () => {
+    const { fromClient } = await setup();
+    expect(await fromClient({ jsonrpc: "2.0", method: "tools/call", params: { name: "get_forecast" } })).toEqual(FORWARD);
+    expect(await fromClient({ jsonrpc: "2.0", id: 1, result: {} })).toEqual(FORWARD);
+  });
+});
+
+describe("batches", () => {
+  it("refuses a client batch, which could hide a tools/call", async () => {
+    const { fromClient, listTools, logs } = await setup();
+    await listTools(benign);
+    for (const line of [JSON.stringify([call(1, "get_forecast")]), "[]", ' [{"jsonrpc":"2.0","method":"x"}]']) {
+      expect(await fromClient(line), line).toEqual({
+        action: "respond",
+        message: {
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32600, message: "LatchVerify does not forward JSON-RPC batches; send one message per line" },
+        },
+      });
+    }
+    expect(logs).toContain("refused a JSON-RPC batch from the client");
+  });
+
+  it("forwards arrays from the server and lines that only start with [", async () => {
+    const { fromClient, fromServer } = await setup();
+    expect(await fromServer(JSON.stringify([{ jsonrpc: "2.0", method: "x" }]))).toEqual(FORWARD);
+    expect(await fromClient("[not json")).toEqual(FORWARD);
+  });
+});

@@ -171,6 +171,7 @@ describe("buildBlockError", () => {
     { kind: "unpinned" },
     { kind: "pending_review", changeId: "chg_2", tier: 2 },
     { kind: "hard_block", changeId: "chg_7f3a91" },
+    { kind: "unverified" },
   ];
 
   it("matches the documented hard-block response exactly", () => {
@@ -203,6 +204,12 @@ describe("buildBlockError", () => {
     );
     expect(buildBlockError(1, "get_forecast", reasons[1]!).error?.message).toBe(
       "LatchVerify blocked \"get_forecast\" pending review — run `latch review`",
+    );
+  });
+
+  it("asks the model to retry a call made before the server's tools were verified", () => {
+    expect(buildBlockError(1, "get_forecast", { kind: "unverified" }).error?.message).toBe(
+      "LatchVerify blocked \"get_forecast\": this server's tools have not been verified yet — retry in a moment, or run `latch review` if it stays blocked",
     );
   });
 
