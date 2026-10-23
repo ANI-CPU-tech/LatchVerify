@@ -116,6 +116,12 @@ describe("LockFileSchema", () => {
     servers: { weather: { transport: "stdio", command: "node", args: ["weather.js"], tools } },
   });
 
+  it("parses latch.lock.example", () => {
+    const example = JSON.parse(readFileSync(new URL("../latch.lock.example", import.meta.url), "utf8"));
+    const parsed = LockFileSchema.parse(example);
+    expect(parsed.servers.weather?.tools.map((t) => t.name)).toEqual(["get_alerts", "get_forecast"]);
+  });
+
   it("accepts a valid lockfile", () => {
     const parsed = LockFileSchema.parse(lock([record(), record({ name: "get_alerts" })]));
     expect(parsed.servers.weather?.tools).toHaveLength(2);

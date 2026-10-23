@@ -1,0 +1,98 @@
+{
+  "version": "1",
+  "generatedAt": "2026-10-20T14:02:11.000Z",
+  "servers": {
+    "weather": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "tsx",
+        "demo/weather-server.ts"
+      ],
+      "tools": [
+        {
+          "name": "get_alerts",
+          "serverId": "weather",
+          "hashes": {
+            "name": "20cc0770fb993bd81a180376ca5276544482c8c4cedbe3929e4885d788699d73",
+            "description": "e41db1892853e17be8af18b183cfab1a7bc0a0d30f531f747994c026bb7234b4",
+            "inputSchema": "bf2e4a0b08fca3375b8d276596bc65b1a794dc0303958a4135b035d6f0fc550b",
+            "composite": "b444a323d762a62b7a789ce64249cd0676e64aa0f9020791c5c9591248da85c6"
+          },
+          "capabilities": {
+            "filesystem": {
+              "read": false,
+              "write": false,
+              "scope": "none",
+              "paths": []
+            },
+            "exec": {
+              "enabled": false,
+              "shell": false
+            },
+            "network": {
+              "egress": true,
+              "domains": [
+                "api.weather.gov"
+              ],
+              "unconstrained": false
+            },
+            "credentials": {
+              "readsEnv": false,
+              "readsSecrets": false
+            },
+            "crossServerRefs": [],
+            "declared": {
+              "readOnlyHint": true,
+              "openWorldHint": true
+            }
+          },
+          "approvedBy": "alice@example.com",
+          "approvedAt": "2026-10-20T14:02:11.000Z",
+          "specVersion": "2025-06-18"
+        },
+        {
+          "name": "get_forecast",
+          "serverId": "weather",
+          "hashes": {
+            "name": "1faab823216cca436bbac57c375152ea5725000023b5b109b5b006a4c5221b7f",
+            "description": "bbde70f96f651dd4161411667e968ffbbd660c3238fe6c8269a1bc76fd282a59",
+            "inputSchema": "bfa0f8af9bc056c35fd292c301656f821435b4b7a12734e14cedec1a631fa612",
+            "composite": "717a11b8e28f12c61ed48f4c8951d682bd16a0e21b5123b969303d8263275641"
+          },
+          "capabilities": {
+            "filesystem": {
+              "read": false,
+              "write": false,
+              "scope": "none",
+              "paths": []
+            },
+            "exec": {
+              "enabled": false,
+              "shell": false
+            },
+            "network": {
+              "egress": true,
+              "domains": [
+                "api.weather.gov"
+              ],
+              "unconstrained": false
+            },
+            "credentials": {
+              "readsEnv": false,
+              "readsSecrets": false
+            },
+            "crossServerRefs": [],
+            "declared": {
+              "readOnlyHint": true,
+              "openWorldHint": true
+            }
+          },
+          "approvedBy": "alice@example.com",
+          "approvedAt": "2026-10-20T14:02:11.000Z",
+          "specVersion": "2025-06-18"
+        }
+      ]
+    }
+  }
+}
