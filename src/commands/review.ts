@@ -9,7 +9,7 @@ import { diffHashes } from "../analyze/differ.js";
 import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
-import { dequeue, readPending, writePending } from "../store/pending.js";
+import { dequeue, readPending, updatePending } from "../store/pending.js";
 import { defaultReviewer, startUiServer } from "../ui/server.js";
 import { plural, printable } from "./text.js";
 
@@ -223,12 +223,17 @@ function openInBrowser(url: string, say: (line?: string) => void): void {
 
 /** Approve change `id` as it is in the queue now; "gone" when it is no longer there. */
 async function approve(lockfilePath: string, stateDir: string, id: string, reviewer: string): Promise<"done" | "gone"> {
-  const queue = await readPending(stateDir);
-  const change = queue.find((entry) => entry.id === id);
-  if (change === undefined) return "gone";
   const now = new Date();
-  await writeLockfile(lockfilePath, applyApproval(await readLockfile(lockfilePath), change, reviewer, now));
-  await writePending(stateDir, dequeue(queue, id));
+  const found: { change?: PendingChange } = {};
+  await updatePending(stateDir, async (queue) => {
+    found.change = queue.find((entry) => entry.id === id);
+    if (found.change === undefined) return queue;
+    // latch.lock first: a crash in between leaves the change queued, and approving again is idempotent.
+    await writeLockfile(lockfilePath, applyApproval(await readLockfile(lockfilePath), found.change, reviewer, now));
+    return dequeue(queue, id);
+  });
+  const { change } = found;
+  if (change === undefined) return "gone";
   await logEvent(stateDir, {
     kind: "approved",
     at: now.toISOString(),
@@ -242,10 +247,13 @@ async function approve(lockfilePath: string, stateDir: string, id: string, revie
 
 /** Reject change `id`; "gone" when it is no longer in the queue. */
 async function reject(stateDir: string, id: string): Promise<"done" | "gone"> {
-  const queue = await readPending(stateDir);
-  const change = queue.find((entry) => entry.id === id);
+  const found: { change?: PendingChange } = {};
+  await updatePending(stateDir, (queue) => {
+    found.change = queue.find((entry) => entry.id === id);
+    return found.change === undefined ? queue : dequeue(queue, id);
+  });
+  const { change } = found;
   if (change === undefined) return "gone";
-  await writePending(stateDir, dequeue(queue, id));
   await logEvent(stateDir, { kind: "rejected", at: new Date().toISOString(), serverId: change.serverId, toolName: change.toolName, changeId: id });
   return "done";
 }

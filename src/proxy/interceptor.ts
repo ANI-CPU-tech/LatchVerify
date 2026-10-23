@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { isAutoPass } from "../analyze/tiers.js";
 import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent, type LatchEvent } from "../store/events.js";
-import { enqueue, writePending } from "../store/pending.js";
+import { enqueue, updatePending } from "../store/pending.js";
 import { analyzeToolList, type ListAnalysis } from "./analysis.js";
 import { buildBlockError, shouldBlock, type BlockReason, type BlockVerdict } from "./blocker.js";
 import {
@@ -217,7 +217,7 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
   const events: LatchEvent[] = [{ kind: "tools_listed", at, serverId, toolCount: analysis.toolCount }];
   for (const name of analysis.unchanged) ctx.observed.delete(name);
 
-  let queueChanged = false;
+  const added: PendingChange[] = [];
   for (const { change, reason } of analysis.changes) {
     const { toolName, tier } = change;
     const composite = change.after.hashes.composite;
@@ -229,7 +229,7 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
     if (queued !== undefined) continue;
 
     ctx.pending = enqueue(ctx.pending, change);
-    queueChanged = true;
+    added.push(change);
     events.push({ kind: "change_detected", at, serverId, toolName, tier, changeId: change.id });
     if (isAutoPass(tier)) {
       events.push({ kind: "auto_passed", at, serverId, toolName, tier });
@@ -240,7 +240,12 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
   }
   if (complete) ctx.verified = true;
 
-  if (queueChanged) await persist(ctx, "pending queue", () => writePending(ctx.stateDir, ctx.pending));
+  if (added.length > 0) {
+    // Merge into the queue on disk: other servers' proxies and `latch review` write it too.
+    await persist(ctx, "pending queue", async () => {
+      ctx.pending = await updatePending(ctx.stateDir, (queue) => added.reduce(enqueue, queue));
+    });
+  }
   for (const event of events) await persist(ctx, "event log", () => appendEvent(ctx.stateDir, event));
 }
 

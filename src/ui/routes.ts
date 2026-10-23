@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { PendingChange } from "../schema/index.js";
+import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
-import { dequeue, readPending, writePending } from "../store/pending.js";
+import { dequeue, readPending, updatePending } from "../store/pending.js";
 
 /** Filesystem locations the review API reads and writes. */
 export interface RouteDeps {
@@ -65,21 +65,6 @@ function eventLimit(raw: string | undefined): number {
   return Number(raw);
 }
 
-/**
- * Runs mutations one at a time. Approve and reject each read, then rewrite, latch.lock and the
- * queue; two running at once would lose one of the writes.
- * shortcut: serializes this process only; the proxy also writes the queue, so cross-process
- * locking belongs in store/pending.ts if both ever run against the same state directory.
- */
-function createMutex(): <T>(task: () => Promise<T>) => Promise<T> {
-  let tail: Promise<unknown> = Promise.resolve();
-  return (task) => {
-    const run = tail.then(task, task);
-    tail = run.catch(() => undefined);
-    return run;
-  };
-}
-
 /** Records an event without failing the request: the decision is already saved to disk. */
 async function logEvent(stateDir: string, event: LatchEvent): Promise<void> {
   try {
@@ -98,7 +83,6 @@ export function createRoutes(deps: RouteDeps): Hono {
   const reviewer = deps.reviewer.trim();
   if (reviewer.length === 0) throw new TypeError("createRoutes: reviewer must not be empty; approvals record who made them");
   const now = deps.now ?? (() => new Date());
-  const exclusive = createMutex();
   const app = new Hono();
 
   // Request guard, ahead of every route:
@@ -118,28 +102,29 @@ export function createRoutes(deps: RouteDeps): Hono {
   });
 
   /** The pending change with this id, or a 404. */
-  const pendingById = async (id: string): Promise<{ queue: PendingChange[]; change: PendingChange }> => {
-    const queue = await readPending(deps.stateDir);
+  const pendingById = (queue: PendingChange[], id: string): PendingChange => {
     const change = queue.find((entry) => entry.id === id);
     if (!change) throw new ApiError(404, `no pending change "${id}"`);
-    return { queue, change };
+    return change;
   };
 
   // The review queue, highest tier first, oldest first within a tier. Returns PendingChange[].
   app.get("/api/pending", async (c) => c.json((await readPending(deps.stateDir)).sort(reviewOrder)));
 
   // One pending change by id, or 404.
-  app.get("/api/pending/:id", async (c) => c.json((await pendingById(c.req.param("id"))).change));
+  app.get("/api/pending/:id", async (c) => c.json(pendingById(await readPending(deps.stateDir), c.req.param("id"))));
 
   // Approve: pin the change's definition in latch.lock, drop it from the queue, log it. Returns the
   // new ToolRecord. The user still commits latch.lock and opens a pull request for review.
   // latch.lock is written before the queue: a crash in between leaves the change queued, and
-  // approving it again is idempotent. The reverse order could lose an approval.
-  app.post("/api/pending/:id/approve", (c) =>
-    exclusive(async () => {
-      const { queue, change } = await pendingById(c.req.param("id"));
+  // approving it again is idempotent. The reverse order could lose an approval. Both happen under
+  // the queue lock, so concurrent decisions and proxies never lose each other's writes.
+  app.post("/api/pending/:id/approve", async (c) => {
+    const at = now();
+    const done: { change?: PendingChange; approved?: LockFile } = {};
+    await updatePending(deps.stateDir, async (queue) => {
+      const change = pendingById(queue, c.req.param("id"));
       const lock = await readLockfile(deps.lockfilePath); // unreadable or invalid: 500
-      const at = now();
       let approved;
       try {
         approved = applyApproval(lock, change, reviewer, at);
@@ -148,35 +133,39 @@ export function createRoutes(deps: RouteDeps): Hono {
         throw new ApiError(409, error instanceof Error ? error.message : String(error));
       }
       await writeLockfile(deps.lockfilePath, approved);
-      await writePending(deps.stateDir, dequeue(queue, change.id));
-      await logEvent(deps.stateDir, {
-        kind: "approved",
-        at: at.toISOString(),
-        serverId: change.serverId,
-        toolName: change.toolName,
-        changeId: change.id,
-        approvedBy: reviewer,
-      });
-      return c.json(findRecord(approved, change.serverId, change.toolName));
-    }),
-  );
+      Object.assign(done, { change, approved });
+      return dequeue(queue, change.id);
+    });
+    const change = done.change!;
+    await logEvent(deps.stateDir, {
+      kind: "approved",
+      at: at.toISOString(),
+      serverId: change.serverId,
+      toolName: change.toolName,
+      changeId: change.id,
+      approvedBy: reviewer,
+    });
+    return c.json(findRecord(done.approved!, change.serverId, change.toolName));
+  });
 
   // Reject: drop the change from the queue and log it. latch.lock is untouched, so the tool stays
   // blocked until a definition is approved. Returns 204.
-  app.post("/api/pending/:id/reject", (c) =>
-    exclusive(async () => {
-      const { queue, change } = await pendingById(c.req.param("id"));
-      await writePending(deps.stateDir, dequeue(queue, change.id));
-      await logEvent(deps.stateDir, {
-        kind: "rejected",
-        at: now().toISOString(),
-        serverId: change.serverId,
-        toolName: change.toolName,
-        changeId: change.id,
-      });
-      return c.body(null, 204);
-    }),
-  );
+  app.post("/api/pending/:id/reject", async (c) => {
+    const done: { change?: PendingChange } = {};
+    await updatePending(deps.stateDir, (queue) => {
+      done.change = pendingById(queue, c.req.param("id"));
+      return dequeue(queue, done.change.id);
+    });
+    const change = done.change!;
+    await logEvent(deps.stateDir, {
+      kind: "rejected",
+      at: now().toISOString(),
+      serverId: change.serverId,
+      toolName: change.toolName,
+      changeId: change.id,
+    });
+    return c.body(null, 204);
+  });
 
   // The newest events, oldest first. ?limit= defaults to DEFAULT_EVENT_LIMIT. Returns LatchEvent[].
   app.get("/api/events", async (c) => c.json(await readEvents(deps.stateDir, eventLimit(c.req.query("limit")))));

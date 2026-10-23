@@ -245,6 +245,17 @@ describe("onToolsList", () => {
     expect(logs.some((line) => line.startsWith("could not write the pending queue:"))).toBe(true);
     expect(logs.some((line) => line.startsWith("could not write the event log:"))).toBe(true);
   });
+
+  it("merges into the queue another server's proxy wrote, instead of overwriting it", async () => {
+    const first = await setup();
+    const second = await setup({ serverId: "weather-mirror", stateDir: first.stateDir });
+    await first.listTools(poisoned);
+    await second.listTools([poisoned[1]]);
+    const onDisk = await readPending(first.stateDir);
+    expect(onDisk.filter((c) => c.serverId === "weather")).toHaveLength(4);
+    expect(onDisk.filter((c) => c.serverId === "weather-mirror").map((c) => c.toolName)).toEqual(["read_config"]);
+    expect(second.ctx.pending).toEqual(onDisk);
+  });
 });
 
 const call = (id: number | string, name: unknown, args: unknown = {}) => ({
