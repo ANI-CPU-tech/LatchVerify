@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { ChangeDetail } from "./components/ChangeDetail";
+import { ChangeDetail, type ChangeActions } from "./components/ChangeDetail";
 import { PendingList } from "./components/PendingList";
-import { ApiUnreachableError, fetchPending, type ReviewItem } from "./lib/api";
+import { ApiUnreachableError, approveChange, fetchPending, rejectChange, type ReviewItem } from "./lib/api";
 import { mockReviewItems } from "./lib/mock";
 
 type QueueState =
@@ -17,6 +17,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -47,6 +48,35 @@ export function App() {
   // The selection falls back to the first item, so it always points at something that exists.
   const selected = items.find((item) => item.change.id === selectedId) ?? items[0];
 
+  /**
+   * After a change is approved or rejected: drop it, select its neighbour, say what happened,
+   * then refetch so the list reflects the API (the proxy may have queued more meanwhile).
+   */
+  const settle = (id: string, message: string) => {
+    const index = items.findIndex((item) => item.change.id === id);
+    const next = items[index + 1] ?? items[index - 1];
+    setQueue((current) => (current.status === "ready" ? { ...current, items: current.items.filter((item) => item.change.id !== id) } : current));
+    setSelectedId(next?.change.id ?? null);
+    setAnnouncement(message);
+    reload();
+  };
+
+  const actions: ChangeActions | undefined =
+    queue.status === "ready" && queue.source === "api"
+      ? {
+          onApprove: async (id) => {
+            await approveChange(id);
+            const change = items.find((item) => item.change.id === id)?.change;
+            settle(id, `Approved ${change?.serverId}/${change?.toolName}. latch.lock was updated: commit it and open a pull request.`);
+          },
+          onReject: async (id) => {
+            await rejectChange(id);
+            const change = items.find((item) => item.change.id === id)?.change;
+            settle(id, `Rejected ${change?.serverId}/${change?.toolName}. The tool stays blocked; latch.lock was not changed.`);
+          },
+        }
+      : undefined;
+
   return (
     <div className="min-h-screen">
       <header className="border-b px-4 py-3 sm:px-6">
@@ -74,6 +104,9 @@ export function App() {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-4 px-4 py-6 sm:px-6">
+        <p aria-live="polite" className={announcement ? "rounded-md border border-success/40 bg-success/5 px-3 py-2 text-sm" : "sr-only"}>
+          {announcement}
+        </p>
         {queue.status === "ready" && queue.source === "mock" && (
           <div role="status" className="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm">
             <p className="font-medium text-warning">Showing sample data: the review API is not reachable.</p>
@@ -110,7 +143,7 @@ export function App() {
         {selected && (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_minmax(0,1fr)]">
             <PendingList items={items} selectedId={selected.change.id} onSelect={setSelectedId} />
-            <ChangeDetail item={selected} />
+            <ChangeDetail key={selected.change.id} item={selected} actions={actions} />
           </div>
         )}
       </main>
