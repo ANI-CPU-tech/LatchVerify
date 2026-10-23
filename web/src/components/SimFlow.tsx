@@ -48,8 +48,9 @@ function Node({ x, icon, label, sub, alert, scanning = false }: { x: number; ico
         {scanning && <span className="absolute inset-0 hidden rounded-full border-2 border-primary motion-safe:block motion-safe:animate-ping" />}
         {icon}
       </span>
-      <span className="mt-1 text-xs font-medium">{label}</span>
-      <span className={`text-[11px] ${alert ? "text-destructive" : "text-muted-foreground"}`}>{sub}</span>
+      {/* One line each: a wrapped status would make this node taller and lift its circle off the line. */}
+      <span className="mt-1 whitespace-nowrap text-xs font-medium">{label}</span>
+      <span className={`whitespace-nowrap text-[11px] ${alert ? "text-destructive" : "text-muted-foreground"}`}>{sub}</span>
     </div>
   );
 }
@@ -138,7 +139,7 @@ export function SimFlow({ step, swapped, speed }: { step: SimStep; swapped: bool
           alert={blocking}
           scanning={step.id === "analyze"}
         />
-        <Node x={X.server} icon={<ServerIcon />} label="MCP server" sub={swapped ? "definitions swapped" : "as pinned"} alert={swapped} />
+        <Node x={X.server} icon={<ServerIcon />} label="MCP server" sub={swapped ? "tools swapped" : "as pinned"} alert={swapped} />
       </div>
       <figcaption className="sr-only">
         {step.messages.length === 0 ? (
