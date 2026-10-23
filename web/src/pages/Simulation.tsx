@@ -14,6 +14,8 @@ import { RUG_PULL, descriptionDiff, simulationSteps, type SimStep } from "../lib
 /** Milliseconds a step stays on screen at 1x. */
 const STEP_MS = 2600;
 const SPEEDS = [0.5, 1, 2] as const;
+/** Half speed by default, so each step can be read as it plays. */
+const DEFAULT_SPEED: (typeof SPEEDS)[number] = 0.5;
 
 const TONE_RING: Record<Tone, string> = {
   neutral: "border-border",
@@ -33,7 +35,7 @@ export function Simulation() {
   const [index, setIndex] = useState(0);
   // Autoplay, unless the viewer asked for less motion; they can still press Play.
   const [playing, setPlaying] = useState(() => !prefersReducedMotion());
-  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
+  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(DEFAULT_SPEED);
 
   const start = useCallback((signal?: AbortSignal) => {
     setRun({ status: "loading" });
