@@ -6,12 +6,12 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderChange, reviewOrder, runReview, type ReviewOptions } from "../../src/commands/review.js";
+import { renderChange, runReview, type ReviewOptions } from "../../src/commands/review.js";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
 import { LockFileSchema, type LockFile, type McpTool, type PendingChange } from "../../src/schema/index.js";
 import { readEvents } from "../../src/store/events.js";
 import { applyApproval, findRecord, readLockfile } from "../../src/store/lockfile.js";
-import { readPending, writePending } from "../../src/store/pending.js";
+import { readPending, reviewOrder, writePending } from "../../src/store/pending.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const example = (): LockFile => LockFileSchema.parse(JSON.parse(readFileSync(join(root, "latch.lock.example"), "utf8")));

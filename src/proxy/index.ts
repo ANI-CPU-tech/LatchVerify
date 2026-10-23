@@ -5,7 +5,7 @@ import type { Readable, Writable } from "node:stream";
 import { runAdvisory, type LlmOptions } from "../analyze/llm.js";
 import { readLockfile } from "../store/lockfile.js";
 import { PENDING_FILE, readPending } from "../store/pending.js";
-import { BLOCK_ERROR_CODE } from "./blocker.js";
+import { buildBlockError } from "./blocker.js";
 import { routeFrame, type InterceptDecision, type InterceptorContext } from "./interceptor.js";
 import {
   isRequest,
@@ -260,18 +260,8 @@ function failClosed(ctx: InterceptorContext, direction: Direction, frame: Frame)
   ctx.verified = false;
   const { message } = frame;
   if (direction === "client->server" && message !== null && isRequest(message) && message.method === "tools/call") {
-    return {
-      action: "respond",
-      message: {
-        jsonrpc: "2.0",
-        id: message.id,
-        error: {
-          code: BLOCK_ERROR_CODE,
-          message: "LatchVerify could not check this tool call because of an internal error; see the proxy's stderr",
-          data: { reason: { kind: "internal_error" } },
-        },
-      },
-    };
+    const name = (message.params as { name?: unknown } | null | undefined)?.name;
+    return { action: "respond", message: buildBlockError(message.id, typeof name === "string" ? name : "(unnamed)", { kind: "internal_error" }) };
   }
   return { action: "forward" };
 }

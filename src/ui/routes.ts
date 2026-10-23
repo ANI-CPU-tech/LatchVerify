@@ -3,7 +3,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
-import { dequeue, readPending, updatePending } from "../store/pending.js";
+import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
 
 /** Filesystem locations the review API reads and writes. */
 export interface RouteDeps {
@@ -50,11 +50,6 @@ function isLoopbackUrl(url: string): boolean {
 
 /** Methods that only read. Everything else changes state and must prove it comes from the UI. */
 const SAFE_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
-
-/** Highest tier first, then oldest first, then by id so the order is fully determined. */
-function reviewOrder(a: PendingChange, b: PendingChange): number {
-  return b.tier - a.tier || Date.parse(a.detectedAt) - Date.parse(b.detectedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-}
 
 /** Parses ?limit= for the event log: a whole number from 0 to MAX_EVENT_LIMIT. */
 function eventLimit(raw: string | undefined): number {

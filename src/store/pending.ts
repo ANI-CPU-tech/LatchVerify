@@ -124,6 +124,14 @@ export function enqueue(queue: readonly PendingChange[], change: PendingChange):
   return [...kept, change];
 }
 
+/**
+ * Review order: highest tier first, then oldest first. Use with a stable sort: changes detected
+ * together keep their queue order, which is the order the server listed the tools.
+ */
+export function reviewOrder(a: PendingChange, b: PendingChange): number {
+  return b.tier - a.tier || Date.parse(a.detectedAt) - Date.parse(b.detectedAt);
+}
+
 /** The queue without the change whose id matches; unchanged contents when none does. Pure. */
 export function dequeue(queue: readonly PendingChange[], id: string): PendingChange[] {
   return queue.filter((entry) => entry.id !== id);

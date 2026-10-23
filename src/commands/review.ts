@@ -9,7 +9,7 @@ import { diffHashes } from "../analyze/differ.js";
 import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
-import { dequeue, readPending, updatePending } from "../store/pending.js";
+import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
 import { defaultReviewer, startUiServer } from "../ui/server.js";
 import { plural, printable } from "./text.js";
 
@@ -37,14 +37,6 @@ export interface ReviewOptions {
 
 /** Where `vite build` puts the review UI, seen from dist/commands/ and from src/commands/. */
 const BUILT_UI_DIRS = [new URL("../web/", import.meta.url), new URL("../../dist/web/", import.meta.url)];
-
-/**
- * Review order: highest tier first, then oldest first. Use with a stable sort: changes detected
- * together keep their queue order, which is the order the server listed the tools.
- */
-export function reviewOrder(a: PendingChange, b: PendingChange): number {
-  return b.tier - a.tier || Date.parse(a.detectedAt) - Date.parse(b.detectedAt);
-}
 
 /**
  * `latch review`: walk the pending queue in review order. Each change is shown with its tier,

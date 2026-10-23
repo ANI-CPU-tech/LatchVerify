@@ -174,6 +174,18 @@ describe("buildBlockError", () => {
     { kind: "unverified" },
   ];
 
+  it("explains an internal error without sending the model to latch review", () => {
+    expect(buildBlockError(3, "get_forecast", { kind: "internal_error" })).toEqual({
+      jsonrpc: "2.0",
+      id: 3,
+      error: {
+        code: -32001,
+        message: "LatchVerify could not check \"get_forecast\" because of an internal error; see the proxy's stderr",
+        data: { reason: { kind: "internal_error" } },
+      },
+    });
+  });
+
   it("matches the documented hard-block response exactly", () => {
     // docs/ARCHITECTURE.md, "Blocking".
     expect(buildBlockError(7, "get_forecast", { kind: "hard_block", changeId: "chg_7f3a91" })).toEqual({
