@@ -613,3 +613,16 @@
     opacity: 1;
   }
 }
+
+/* Nav: the active section's icon pops in (used through motion-safe: only). */
+@keyframes nav-pop {
+  0% {
+    transform: scale(0.6) rotate(-12deg);
+  }
+  60% {
+    transform: scale(1.15) rotate(4deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}

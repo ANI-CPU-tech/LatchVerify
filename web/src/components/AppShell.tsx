@@ -86,11 +86,19 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
               <a
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors duration-300 ${
+                className={`group relative flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-[color,background-color,transform] duration-300 motion-safe:active:scale-[0.97] ${
                   active ? `text-primary-foreground ${box ? "" : "bg-primary"}` : "text-sidebar-foreground hover:bg-muted"
                 }`}
               >
-                <span className={`text-base transition-colors duration-300 ${active ? "" : "text-muted-foreground"}`}>{item.icon}</span>
+                {/* Keyed on active, so the icon pops when its section opens; it nudges on hover. */}
+                <span
+                  key={active ? "active" : "idle"}
+                  className={`text-base transition-[color,transform] duration-200 ${
+                    active ? "motion-safe:animate-[nav-pop_0.4s_ease-out]" : "text-muted-foreground motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:scale-110 group-hover:text-foreground"
+                  }`}
+                >
+                  {item.icon}
+                </span>
                 {item.label}
                 {item.page === "review" && <QueueCount />}
               </a>
