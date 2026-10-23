@@ -9,11 +9,21 @@ export interface ProxyCommandOptions {
   stateDir: string;
 }
 
+/** What src/cli.ts passes for --lockfile and --state-dir when they are not given. */
+const CLI_DEFAULT_LOCKFILE = "./latch.lock";
+const CLI_DEFAULT_STATE_DIR = "./.latch";
+
 /**
  * `latch proxy --server <id> -- <cmd> [args...]` (internal; written into client configs by init)
  *
  * Checks that a server id and a command were given, resolves the lockfile and state paths to
  * absolute ones, and delegates to startProxy(). Resolves with the real server's exit code.
+ *
+ * Clients launch servers from a working directory of their choosing (Claude Desktop uses "/"),
+ * and a wrapped entry has nowhere to put global flags, so LATCH_LOCKFILE_PATH and LATCH_STATE_DIR
+ * from the entry's `env` apply when --lockfile or --state-dir was not given. An explicit flag
+ * wins. As in loadEnv(), values are trimmed, blank means unset, and relative paths resolve
+ * against the working directory.
  *
  * stdout carries nothing but JSON-RPC: problems are thrown for the CLI to print on stderr, and
  * the proxy logs to stderr and .latch/events.jsonl.
@@ -33,7 +43,13 @@ export async function runProxy(options: ProxyCommandOptions): Promise<number> {
     serverId: options.serverId,
     command,
     args,
-    lockfilePath: resolve(options.lockfilePath),
-    stateDir: resolve(options.stateDir),
+    lockfilePath: pathOption(options.lockfilePath, CLI_DEFAULT_LOCKFILE, process.env.LATCH_LOCKFILE_PATH),
+    stateDir: pathOption(options.stateDir, CLI_DEFAULT_STATE_DIR, process.env.LATCH_STATE_DIR),
   });
+}
+
+/** The flag's value, or the environment's when the flag was left at the CLI default; absolute. */
+function pathOption(given: string, cliDefault: string, fromEnv: string | undefined): string {
+  const env = fromEnv?.trim();
+  return resolve(given === cliDefault && env !== undefined && env !== "" ? env : given);
 }

@@ -142,3 +142,40 @@ describe("latch proxy (CLI)", () => {
     expect(malformed.stderr).toContain(bad);
   });
 });
+
+describe("latch proxy paths from the environment", () => {
+  const lines = [request(1, "tools/list"), request(2, "tools/call", { name: "get_alerts", arguments: { state: "CA" } })];
+  const blockedId2 = (stdout: string) => stdout.includes('"id":2,"error"');
+
+  it("uses LATCH_LOCKFILE_PATH and LATCH_STATE_DIR when the flags are not given", async () => {
+    const state = join(dir, "state");
+    const { code, stdout } = await latch(["proxy", "--server", "weather", "--", ...weather], lines, [1, 2], {
+      cwd: dir,
+      env: { LATCH_LOCKFILE_PATH: ` ${join(root, "latch.lock.example")} `, LATCH_STATE_DIR: state },
+    });
+    expect(code).toBe(0);
+    expect(blockedId2(stdout)).toBe(false);
+    expect(await readFile(join(state, "events.jsonl"), "utf8")).toContain('"tools_listed"');
+  }, 30_000);
+
+  it("lets explicit flags win over the environment", async () => {
+    const { stdout } = await latch(
+      ["--lockfile", join(root, "latch.lock.example"), "--state-dir", dir, "proxy", "--server", "weather", "--", ...weather],
+      lines,
+      [1, 2],
+      { cwd: dir, env: { LATCH_LOCKFILE_PATH: join(dir, "missing.lock"), LATCH_STATE_DIR: join(dir, "elsewhere") } },
+    );
+    expect(blockedId2(stdout)).toBe(false);
+    expect(await readFile(join(dir, "events.jsonl"), "utf8")).toContain('"tools_listed"');
+  }, 30_000);
+
+  it("falls back to ./latch.lock when the variables are blank", async () => {
+    const { stdout } = await latch(["proxy", "--server", "weather", "--", ...weather], lines, [1, 2], {
+      cwd: dir,
+      env: { LATCH_LOCKFILE_PATH: "  ", LATCH_STATE_DIR: "" },
+    });
+    // No latch.lock in the working directory: every tool is new and queued, so the call is blocked.
+    expect(blockedId2(stdout)).toBe(true);
+    expect(await readFile(join(dir, ".latch", "events.jsonl"), "utf8")).toMatch(/"toolName":"get_alerts","reason":"pending_review chg_/);
+  }, 30_000);
+});
