@@ -199,8 +199,8 @@ describe("latch proxy paths from the environment", () => {
       cwd: dir,
       env: { LATCH_LOCKFILE_PATH: "  ", LATCH_STATE_DIR: "" },
     });
-    // No latch.lock in the working directory: every tool is new and queued, so the call is blocked.
+    // No latch.lock in the working directory: the server is unpinned, so the call is blocked.
     expect(blockedId2(stdout)).toBe(true);
-    expect(await readFile(join(dir, ".latch", "events.jsonl"), "utf8")).toMatch(/"toolName":"get_alerts","reason":"pending_review chg_/);
+    expect(await readFile(join(dir, ".latch", "events.jsonl"), "utf8")).toContain('"toolName":"get_alerts","reason":"unpinned"');
   }, 30_000);
 });

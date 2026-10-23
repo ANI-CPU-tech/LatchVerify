@@ -188,7 +188,8 @@ async function onOwnToolList(ctx: InterceptorContext, response: JsonRpcResponse,
 /**
  * tools/list response from the server.
  *
- * Runs analyzeToolList over the result and records the outcome: every new or changed tool is
+ * Runs analyzeToolList over the result and records the outcome. For a server latch.lock does
+ * not have, nothing is queued and a `latch init` hint is logged. Otherwise every new or changed tool is
  * queued (tier 0 and 1 too, so `latch review` can fold them into the lockfile; the blocker lets
  * them through), logged as change_detected, and tier 0/1 also as auto_passed. A definition
  * already queued or already seen this session is not queued again, so repeated lists do not
@@ -222,8 +223,14 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
   const events: LatchEvent[] = [{ kind: "tools_listed", at, serverId, toolCount: analysis.toolCount }];
   for (const name of analysis.unchanged) ctx.observed.delete(name);
 
+  // A server latch.lock does not know cannot have changes approved (applyApproval refuses them),
+  // so nothing is queued: every call is blocked as unpinned until `latch init` pins the server.
+  const pinnedServer = Object.hasOwn(ctx.lockfile.servers, serverId);
+  if (!pinnedServer && analysis.changes.length > 0) {
+    ctx.log(`${serverId}: not in latch.lock, so its tools are blocked as unpinned; run \`latch init\` to pin them`);
+  }
   const added: DetectedChange[] = [];
-  for (const detected of analysis.changes) {
+  for (const detected of pinnedServer ? analysis.changes : []) {
     const { change, reason } = detected;
     const { toolName, tier } = change;
     const composite = change.after.hashes.composite;

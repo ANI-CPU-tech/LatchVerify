@@ -217,7 +217,7 @@ describe("onToolsList", () => {
     const { listTools, ctx } = await setup({
       refresh: async () => {
         order.push("refresh");
-        ctx.lockfile = { ...ctx.lockfile, servers: {} };
+        ctx.lockfile = { ...ctx.lockfile, servers: { weather: { ...ctx.lockfile.servers.weather!, tools: [] } } };
       },
     });
     await listTools(benign);
@@ -285,9 +285,23 @@ describe("onToolsList", () => {
     expect(await fromClient(call(9, "get_alerts", { state: "CA" }))).toEqual(FORWARD);
   });
 
+  it("queues nothing for a server latch.lock does not have, blocks its calls as unpinned and points to latch init", async () => {
+    const { listTools, fromClient, ctx, logs, stateDir, kinds } = await setup({ serverId: "stranger" });
+    await listTools(poisoned);
+    expect(ctx.pending).toEqual([]);
+    expect(ctx.observed.size).toBe(0);
+    expect(ctx.verified).toBe(true);
+    expect(logs).toEqual(["stranger: not in latch.lock, so its tools are blocked as unpinned; run `latch init` to pin them"]);
+    await expect(readFile(join(stateDir, "pending.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await fromClient(call(5, "get_forecast"))).toMatchObject({ message: { error: { data: { reason: { kind: "unpinned" } } } } });
+    expect(await kinds()).toEqual(["tools_listed", "call_blocked"]);
+  });
+
   it("merges into the queue another server's proxy wrote, instead of overwriting it", async () => {
     const first = await setup();
-    const second = await setup({ serverId: "weather-mirror", stateDir: first.stateDir });
+    const lockfile = exampleLock();
+    lockfile.servers["weather-mirror"] = { ...lockfile.servers.weather!, tools: [] };
+    const second = await setup({ serverId: "weather-mirror", stateDir: first.stateDir, lockfile });
     await first.listTools(poisoned);
     await second.listTools([poisoned[1]]);
     const onDisk = await readPending(first.stateDir);
