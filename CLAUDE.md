@@ -123,11 +123,13 @@ shows the last `tools_listed` event instead.
 - The preference ("system" or a theme id) is stored in `localStorage` under
   `latch.theme`, with every access wrapped in try/catch.
 
-**Artwork.** `web/src/art/landscape.ts` generates an original pixel-art landscape: sun,
-two mountain ranges with snow, pines and birds. It comes in two scenes, `wide` for the
-Overview header and `tall` for the bottom of the sidebar, which hides on short windows.
-`PixelLandscape.tsx` draws it as inline SVG with `crispEdges`, colored by the `--art-*` tokens
-of each theme; Minimal uses muted greys. The art is decorative only: `aria-hidden`,
+**Artwork.** `web/src/art/landscape.ts` generates an original pixel-art landscape from
+seeded noise: a setting sun with dithered afterglow, clouds, a snowy far range and forested
+mid range (each with sunlit and shadowed faces), a lake that mirrors them with the sun's
+glitter path, pine shores and birds. `AppShell` shows it as a full-width footer below every
+page. `PixelLandscape.tsx` draws it as inline SVG with `crispEdges`, anchored at the bottom
+(`xMidYMax slice`), colored by the `--art-*` tokens of each theme; Minimal uses muted greys.
+The art is decorative only: `aria-hidden`,
 `pointer-events-none`, and never placed over content. The favicon,
 `web/public/favicon.svg`, is a 16x16 pixel-art padlock with a sunset.
 
