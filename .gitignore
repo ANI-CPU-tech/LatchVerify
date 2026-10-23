@@ -1,0 +1,19 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Local secrets
+.env
+
+# LatchVerify local state: pending review queue + event log.
+.latch/
+
+# NOTE: latch.lock is intentionally NOT ignored. It is committed to git, and
+# that is the entire approval workflow: approving a tool change is a pull
+# request against latch.lock, and `latch verify` in CI fails on unreviewed
+# drift. Only .latch/ (pending queue + event log) is ignored.
+
+# OS / editor noise
+.DS_Store
+*.log
