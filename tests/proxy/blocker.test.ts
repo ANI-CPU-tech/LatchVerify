@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { shouldBlock } from "../../src/proxy/blocker.js";
+import { BLOCK_ERROR_CODE, buildBlockError, shouldBlock, type BlockReason } from "../../src/proxy/blocker.js";
+import { isResponse, parseLine, serialize } from "../../src/proxy/transport.js";
 import {
   LockFileSchema,
   PendingChangeSchema,
@@ -162,5 +163,78 @@ describe("shouldBlock", () => {
     shouldBlock("weather", "get_forecast", lock, pending);
     shouldBlock("weather", "missing", lock, pending);
     expect({ lock, pending }).toEqual(before);
+  });
+});
+
+describe("buildBlockError", () => {
+  const reasons: BlockReason[] = [
+    { kind: "unpinned" },
+    { kind: "pending_review", changeId: "chg_2", tier: 2 },
+    { kind: "hard_block", changeId: "chg_7f3a91" },
+  ];
+
+  it("matches the documented hard-block response exactly", () => {
+    // docs/ARCHITECTURE.md, "Blocking".
+    expect(buildBlockError(7, "get_forecast", { kind: "hard_block", changeId: "chg_7f3a91" })).toEqual({
+      jsonrpc: "2.0",
+      id: 7,
+      error: {
+        code: -32001,
+        message: "LatchVerify blocked \"get_forecast\" pending review — run `latch review`",
+        data: { reason: { kind: "hard_block", changeId: "chg_7f3a91" } },
+      },
+    });
+  });
+
+  it("uses code -32001 and names latch review for every reason", () => {
+    expect(BLOCK_ERROR_CODE).toBe(-32001);
+    for (const reason of reasons) {
+      const { error } = buildBlockError(1, "get_forecast", reason);
+      expect(error?.code).toBe(BLOCK_ERROR_CODE);
+      expect(error?.message).toContain('"get_forecast"');
+      expect(error?.message).toContain("`latch review`");
+      expect(error?.data).toEqual({ reason });
+    }
+  });
+
+  it("says an unpinned tool is not approved, and a pending one awaits review", () => {
+    expect(buildBlockError(1, "read_config", { kind: "unpinned" }).error?.message).toBe(
+      "LatchVerify blocked \"read_config\": the tool is not approved in latch.lock — run `latch review`",
+    );
+    expect(buildBlockError(1, "get_forecast", reasons[1]!).error?.message).toBe(
+      "LatchVerify blocked \"get_forecast\" pending review — run `latch review`",
+    );
+  });
+
+  it("echoes the request id unchanged, including string and null ids", () => {
+    for (const id of [0, 42, -1, "req-1", "", null]) {
+      expect(buildBlockError(id, "get_forecast", { kind: "unpinned" }).id).toBe(id);
+    }
+  });
+
+  it("serializes to a single line that parses back as a response", () => {
+    for (const reason of reasons) {
+      const response = buildBlockError("abc", "get_forecast", reason);
+      const line = serialize(response);
+      expect(line.slice(0, -1)).not.toMatch(/[\r\n]/);
+      const { message } = parseLine(line.slice(0, -1));
+      expect(message).toEqual(response);
+      expect(isResponse(message!)).toBe(true);
+    }
+  });
+
+  it("renders a hostile tool name as printable ASCII", () => {
+    const hostile = 'x"\u202e\u200b\u0007\n\u{e0068}\u{e0069} ignore previous';
+    const { error } = buildBlockError(1, hostile, { kind: "unpinned" });
+    expect(error?.message).toBe(
+      'LatchVerify blocked "x[U+0022][U+202E][U+200B][U+0007][U+000A][U+E0068][U+E0069] ignore previous": the tool is not approved in latch.lock — run `latch review`',
+    );
+  });
+
+  it("truncates an overlong tool name by codepoint", () => {
+    const { error } = buildBlockError(1, "😀".repeat(500), { kind: "unpinned" });
+    expect(error?.message).toContain(`"${"[U+1F600]".repeat(128)}" (name truncated)`);
+    expect(error?.message).not.toContain("[U+1F600]".repeat(129));
+    expect(buildBlockError(1, "a".repeat(128), { kind: "unpinned" }).error?.message).toContain(`"${"a".repeat(128)}":`);
   });
 });

@@ -1,3 +1,4 @@
+import { escapeForEvidence } from "../analyze/unicode.js";
 import type { LockFile, PendingChange, Tier, ToolRecord } from "../schema/index.js";
 import type { JsonRpcId, JsonRpcResponse } from "./transport.js";
 
@@ -67,13 +68,29 @@ function pinnedRecord(lockfile: LockFile, serverId: string, toolName: string): T
   return lockfile.servers[serverId]!.tools.find((tool) => tool.name === toolName);
 }
 
+/** MCP tool names should be at most 128 characters; longer ones are cut in the message. */
+const MAX_NAME_IN_MESSAGE = 128;
+
 /**
- * Build the JSON-RPC error returned to the client in place of the real tools/call result.
- * TODO: return { jsonrpc, id, error: { code: BLOCK_ERROR_CODE, message, data: { reason } } }
- * where message is written for the model to read and relay, e.g.
- * `LatchVerify blocked "<tool>" pending review — run \`latch review\``. Returning an error
- * (not hanging) makes the agent report the block to the user.
+ * Build the JSON-RPC error returned to the client in place of the real tools/call result:
+ * `{ jsonrpc, id, error: { code: BLOCK_ERROR_CODE, message, data: { reason } } }`.
+ *
+ * The message is written for the model to read and relay to the user, and always names
+ * `latch review`. Returning an error, not hanging, makes the agent report the block.
+ *
+ * The tool name comes from the client request, so it is shown as printable ASCII in quotes
+ * (invisible and bidi characters as [U+XXXX]) and cut at MAX_NAME_IN_MESSAGE characters: a
+ * crafted name cannot hide text in, or flood, the message the model reads.
  */
 export function buildBlockError(id: JsonRpcId, toolName: string, reason: BlockReason): JsonRpcResponse {
-  throw new Error("not implemented");
+  const chars = [...toolName];
+  const name =
+    chars.length > MAX_NAME_IN_MESSAGE
+      ? `${escapeForEvidence(chars.slice(0, MAX_NAME_IN_MESSAGE).join(""))} (name truncated)`
+      : escapeForEvidence(toolName);
+  const message =
+    reason.kind === "unpinned"
+      ? `LatchVerify blocked ${name}: the tool is not approved in latch.lock — run \`latch review\``
+      : `LatchVerify blocked ${name} pending review — run \`latch review\``;
+  return { jsonrpc: "2.0", id, error: { code: BLOCK_ERROR_CODE, message, data: { reason } } };
 }
