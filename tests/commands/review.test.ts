@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderChange, reviewOrder, runReview, type ReviewOptions } from "../../src/commands/review.js";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
 import { LockFileSchema, type LockFile, type McpTool, type PendingChange } from "../../src/schema/index.js";
-import { applyApproval } from "../../src/store/lockfile.js";
-import { writePending } from "../../src/store/pending.js";
+import { readEvents } from "../../src/store/events.js";
+import { applyApproval, findRecord, readLockfile } from "../../src/store/lockfile.js";
+import { readPending, writePending } from "../../src/store/pending.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const example = (): LockFile => LockFileSchema.parse(JSON.parse(readFileSync(join(root, "latch.lock.example"), "utf8")));
@@ -119,5 +120,163 @@ describe("runReview without a terminal", () => {
     await expect(review()).rejects.toThrow("pending.json is not valid JSON");
     await writeFile(lockfilePath, "{ nope");
     await expect(review()).rejects.toThrow();
+  });
+});
+
+const UP = "\x1b[A";
+const DOWN = "\x1b[B";
+
+describe("runReview in a terminal", () => {
+  /** One prompt to answer: wait for `when` in the output, run `before`, then type `keys`. */
+  interface Step {
+    when: string;
+    keys: string;
+    before?: () => Promise<void>;
+  }
+
+  async function decide(steps: Step[], options: Partial<ReviewOptions> = {}) {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let text = "";
+    let searchFrom = 0;
+    let next = 0;
+    output.setEncoding("utf8").on("data", (chunk: string) => {
+      text += chunk;
+      const step = steps[next];
+      if (step === undefined) return;
+      const at = text.indexOf(step.when, searchFrom);
+      if (at === -1) return;
+      searchFrom = at + step.when.length;
+      next++;
+      // After the render returns: the prompt starts listening only once it has drawn itself.
+      setImmediate(() => void (step.before?.() ?? Promise.resolve()).then(() => input.write(step.keys)));
+    });
+    const code = await runReview({
+      ui: false,
+      port: 7777,
+      lockfilePath,
+      stateDir: dir,
+      interactive: true,
+      reviewer: "dev@example.com",
+      input,
+      output,
+      ...options,
+    });
+    expect(next, "every prompt was reached").toBe(steps.length);
+    return { code, text: strip(text) };
+  }
+
+  const ask = (tool: string) => `◆  Decide on weather/${tool}`;
+  const SURE = "◆  This is a hard block";
+  const quit = (tool: string): Step => ({ when: ask(tool), keys: `${DOWN}\r` });
+  const queueIds = async () => (await readPending(dir)).map((c) => c.toolName);
+
+  beforeEach(async () => {
+    await writePending(dir, rugPull());
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("approves the tier-3 get_forecast after confirming, pinning its new hashes (task Verify)", async () => {
+    const forecast = rugPull()[0]!;
+    const queued = (await readPending(dir))[0]!;
+    const { code, text } = await decide([
+      { when: ask("get_forecast"), keys: `${UP}${UP}\r` },
+      { when: SURE, keys: "y" },
+      quit("run_diagnostics"),
+    ]);
+    expect(code).toBe(0);
+    expect(text).toContain("approvals are recorded as dev@example.com");
+    expect(text).toContain("✔ approved: latch.lock now pins this definition");
+    expect(text).toContain("approved 1, rejected 0, skipped 3");
+    expect(text).toContain(`next: commit ${lockfilePath} and open a pull request`);
+
+    const record = findRecord(await readLockfile(lockfilePath), "weather", "get_forecast")!;
+    expect(record.hashes).toEqual(forecast.after.hashes);
+    expect(record.capabilities).toEqual(forecast.after.capabilities);
+    expect(record.approvedBy).toBe("dev@example.com");
+    expect(await queueIds()).toEqual(["read_config", "run_diagnostics", "sync_alerts"]);
+    expect((await readEvents(dir)).map((e) => e.kind === "approved" && e.changeId)).toEqual([queued.id]);
+  });
+
+  it("rejects without touching latch.lock", async () => {
+    const lockBefore = readFileSync(lockfilePath, "utf8");
+    const { code, text } = await decide([{ when: ask("get_forecast"), keys: `${UP}\r` }, quit("run_diagnostics")]);
+    expect(code).toBe(0);
+    expect(text).toContain("✔ rejected: the tool stays blocked");
+    expect(readFileSync(lockfilePath, "utf8")).toBe(lockBefore);
+    expect(await queueIds()).toEqual(["read_config", "run_diagnostics", "sync_alerts"]);
+    expect((await readEvents(dir)).map((e) => e.kind)).toEqual(["rejected"]);
+  });
+
+  it("does not approve a hard block when the confirmation is declined", async () => {
+    const lockBefore = readFileSync(lockfilePath, "utf8");
+    const { text } = await decide([
+      { when: ask("get_forecast"), keys: `${UP}${UP}\r` },
+      { when: SURE, keys: "\r" },
+      quit("run_diagnostics"),
+    ]);
+    expect(text).toContain("not approved; left in the queue");
+    expect(readFileSync(lockfilePath, "utf8")).toBe(lockBefore);
+    expect(await queueIds()).toHaveLength(4);
+  });
+
+  it("skips every blocked change when Enter is held down", async () => {
+    const lockBefore = readFileSync(lockfilePath, "utf8");
+    const { code, text } = await decide(["get_forecast", "run_diagnostics", "sync_alerts", "read_config"].map((tool) => ({ when: ask(tool), keys: "\r" })));
+    expect(code).toBe(0);
+    expect(text).toContain("approved 0, rejected 0, skipped 4");
+    expect(readFileSync(lockfilePath, "utf8")).toBe(lockBefore);
+    expect(await queueIds()).toHaveLength(4);
+  });
+
+  it("approves a tier-1 change on Enter, without a confirmation", async () => {
+    const readConfig = { ...rugPull()[1]!, tier: 1 as const };
+    await writePending(dir, [readConfig]);
+    const { code } = await decide([{ when: ask("read_config"), keys: "\r" }]);
+    expect(code).toBe(0);
+    expect(findRecord(await readLockfile(lockfilePath), "weather", "read_config")?.hashes).toEqual(readConfig.after.hashes);
+    expect(await queueIds()).toEqual([]);
+  });
+
+  it("stops on Ctrl+C, keeping earlier decisions", async () => {
+    const { code, text } = await decide([{ when: ask("get_forecast"), keys: `${UP}\r` }, { when: ask("run_diagnostics"), keys: "\x03" }]);
+    expect(code).toBe(0);
+    expect(text).toContain("approved 0, rejected 1, skipped 3");
+    expect(await queueIds()).toEqual(["read_config", "run_diagnostics", "sync_alerts"]);
+  });
+
+  it("does not approve a change that left the queue while it was on screen", async () => {
+    const lockBefore = readFileSync(lockfilePath, "utf8");
+    const { text } = await decide([
+      {
+        when: ask("get_forecast"),
+        keys: `${UP}${UP}\r`,
+        // A running proxy replaces the change with a newer definition meanwhile.
+        before: async () => writePending(dir, (await readPending(dir)).map((c) => (c.toolName === "get_forecast" ? { ...c, id: "chg_newer" } : c))),
+      },
+      { when: SURE, keys: "y" },
+      quit("run_diagnostics"),
+    ]);
+    expect(text).toContain("no longer in the queue");
+    expect(readFileSync(lockfilePath, "utf8")).toBe(lockBefore);
+    expect((await readPending(dir)).some((c) => c.id === "chg_newer")).toBe(true);
+  });
+
+  it("exits 1 when an approval cannot be recorded, leaving the change queued", async () => {
+    const foreign = { ...rugPull()[1]!, serverId: "unknown", after: { ...rugPull()[1]!.after, serverId: "unknown" } };
+    await writePending(dir, [foreign]);
+    const { code, text } = await decide([{ when: "◆  Decide on unknown/read_config", keys: `${UP}${UP}\r` }]);
+    expect(code).toBe(1);
+    expect(text).toContain('✖ could not record the decision: applyApproval: server "unknown" is not in the lockfile');
+    expect(text).toContain("failed 1");
+    expect(await readPending(dir)).toEqual([foreign]);
+  });
+
+  it("refuses to record approvals without a reviewer", async () => {
+    await expect(decide([], { reviewer: "  " })).rejects.toThrow("no reviewer name");
   });
 });
