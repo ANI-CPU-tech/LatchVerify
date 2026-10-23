@@ -1,5 +1,8 @@
-import { resolve } from "node:path";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { confirm, isCancel, select } from "@clack/prompts";
 import pc from "picocolors";
 import { diffHashes } from "../analyze/differ.js";
@@ -7,7 +10,7 @@ import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, writePending } from "../store/pending.js";
-import { defaultReviewer } from "../ui/server.js";
+import { defaultReviewer, startUiServer } from "../ui/server.js";
 import { plural, printable } from "./text.js";
 
 export interface ReviewOptions {
@@ -24,7 +27,16 @@ export interface ReviewOptions {
   output?: Writable;
   /** Who approvals are recorded as. Defaults to defaultReviewer(): LATCH_REVIEWER, git user.email, OS user. */
   reviewer?: string;
+  /** --ui: the built review UI to serve. Defaults to dist/web of this latchverify install. */
+  staticDir?: string;
+  /** --ui: opens the review UI's URL. Defaults to the platform's browser opener. */
+  openBrowser?: (url: string) => void;
+  /** --ui: resolves when the server should stop. Defaults to the first SIGINT or SIGTERM. */
+  until?: Promise<void>;
 }
+
+/** Where `vite build` puts the review UI, seen from dist/commands/ and from src/commands/. */
+const BUILT_UI_DIRS = [new URL("../web/", import.meta.url), new URL("../../dist/web/", import.meta.url)];
 
 /**
  * Review order: highest tier first, then oldest first. Use with a stable sort: changes detected
@@ -52,6 +64,10 @@ export function reviewOrder(a: PendingChange, b: PendingChange): number {
  *
  * Without a terminal (or with `interactive: false`) the queue is only listed.
  *
+ * With `ui`, the review API and the built web UI are served on 127.0.0.1:`port` instead and the
+ * browser is opened on them; they run until Ctrl+C. Approvals there are recorded as the same
+ * reviewer.
+ *
  * Resolves with 0, or 1 when an approval could not be recorded.
  *
  * @throws when latch.lock or the pending queue is malformed.
@@ -61,6 +77,7 @@ export async function runReview(options: ReviewOptions): Promise<number> {
   const say = (line = "") => void out.write(`${line}\n`);
   const lockfilePath = resolve(options.lockfilePath);
   const stateDir = resolve(options.stateDir);
+  if (options.ui) return serveUi(options, lockfilePath, stateDir, say);
   let lock = await readLockfile(lockfilePath);
   const queue = (await readPending(stateDir)).sort(reviewOrder);
   if (queue.length === 0) {
@@ -143,6 +160,65 @@ export async function runReview(options: ReviewOptions): Promise<number> {
   say(`approved ${tally.approved}, rejected ${tally.rejected}, skipped ${tally.skipped}${tally.failed > 0 ? pc.red(`, failed ${tally.failed}`) : ""}`);
   if (tally.approved > 0) say(`next: commit ${printable(lockfilePath)} and open a pull request, so the approval is reviewed`);
   return tally.failed > 0 ? 1 : 0;
+}
+
+/** `latch review --ui`: serve the review API and built UI until stopped, opening the browser on it. */
+async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: string, say: (line?: string) => void): Promise<number> {
+  if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65_535) {
+    throw new Error(`latch review: --port must be a whole number from 0 to 65535, got ${String(options.port)}`);
+  }
+  const staticDir = options.staticDir ?? BUILT_UI_DIRS.map((url) => fileURLToPath(url)).find((dir) => existsSync(join(dir, "index.html")));
+  if (staticDir === undefined || !existsSync(join(staticDir, "index.html"))) {
+    throw new Error(
+      "latch review --ui: the review UI is not built; run `pnpm exec vite build --config web/vite.config.ts` in the latchverify checkout, or `pnpm ui` to work on it",
+    );
+  }
+  // Read both files first: a malformed one is reported here rather than on the first page load.
+  await readLockfile(lockfilePath);
+  await readPending(stateDir);
+
+  const reviewer = defaultReviewer();
+  let handle;
+  try {
+    handle = await startUiServer({ port: options.port, lockfilePath, stateDir, reviewer, staticDir });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+      throw new Error(`latch review: port ${options.port} is in use; choose another with --port`, { cause: error });
+    }
+    throw error;
+  }
+  say(`review UI on ${handle.url} (approvals are recorded as ${printable(reviewer)}); press Ctrl+C to stop`);
+  (options.openBrowser ?? ((url: string) => openInBrowser(url, say)))(handle.url);
+
+  try {
+    await (options.until ?? untilSignal());
+  } finally {
+    await handle.close();
+  }
+  say("review UI stopped");
+  return 0;
+}
+
+/** Resolves on the first SIGINT or SIGTERM. */
+function untilSignal(): Promise<void> {
+  return new Promise((resolveStop) => {
+    const stop = () => {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+      resolveStop();
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+}
+
+/** Opens `url` with the platform's opener, saying where to go if that fails. */
+function openInBrowser(url: string, say: (line?: string) => void): void {
+  const [command, args] =
+    process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
+  const child = spawn(command, args, { stdio: "ignore", detached: true, windowsHide: true });
+  child.on("error", () => say(`could not open a browser; open ${url} yourself`));
+  child.unref();
 }
 
 /** Approve change `id` as it is in the queue now; "gone" when it is no longer there. */

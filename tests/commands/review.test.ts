@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -278,5 +279,105 @@ describe("runReview in a terminal", () => {
 
   it("refuses to record approvals without a reviewer", async () => {
     await expect(decide([], { reviewer: "  " })).rejects.toThrow("no reviewer name");
+  });
+});
+
+describe("runReview --ui", () => {
+  let staticDir: string;
+
+  beforeEach(async () => {
+    staticDir = join(dir, "web");
+    await mkdir(staticDir);
+    await writeFile(join(staticDir, "index.html"), "<!doctype html><title>latch review</title>");
+    await writePending(dir, rugPull());
+    vi.stubEnv("LATCH_REVIEWER", "ui@example.com");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** Start review --ui on a free port, run `use` against its URL, then stop it. */
+  async function withUi(use: (url: string) => Promise<void>, options: Partial<ReviewOptions> = {}) {
+    let stop!: () => void;
+    const until = new Promise<void>((resolve) => (stop = resolve));
+    let opened: string | undefined;
+    let failure: unknown;
+    const result = review({
+      ui: true,
+      port: 0,
+      staticDir,
+      until,
+      openBrowser: (url) => {
+        opened = url;
+        use(url).catch((error: unknown) => (failure = error)).finally(stop);
+      },
+      ...options,
+    });
+    const outcome = await result;
+    if (failure !== undefined) throw failure;
+    return { ...outcome, opened };
+  }
+
+  it("serves the review screen and the queue, opens the browser on it, and stops cleanly (task Verify)", async () => {
+    let base = "";
+    const { code, text, opened } = await withUi(async (url) => {
+      base = url;
+      const page = await fetch(url);
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("<title>latch review</title>");
+      const pending = (await (await fetch(`${url}/api/pending`)).json()) as PendingChange[];
+      expect(pending.map((c) => c.toolName).sort()).toEqual(["get_forecast", "read_config", "run_diagnostics", "sync_alerts"]);
+    });
+    expect(code).toBe(0);
+    expect(opened).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(text).toContain(`review UI on ${opened} (approvals are recorded as ui@example.com); press Ctrl+C to stop`);
+    expect(text).toContain("review UI stopped");
+    await expect(fetch(`${base}/api/pending`)).rejects.toThrow();
+  });
+
+  it("approves through the UI into this lockfile and state directory", async () => {
+    const forecast = (await readPending(dir))[0]!;
+    await withUi(async (url) => {
+      const response = await fetch(`${url}/api/pending/${forecast.id}/approve`, { method: "POST", headers: { "X-Latch-Client": "test" } });
+      expect(response.status).toBe(200);
+    });
+    expect(findRecord(await readLockfile(lockfilePath), "weather", "get_forecast")).toMatchObject({
+      hashes: forecast.after.hashes,
+      approvedBy: "ui@example.com",
+    });
+    expect((await readPending(dir)).some((c) => c.id === forecast.id)).toBe(false);
+  });
+
+  it("explains how to build the UI when it is missing", async () => {
+    const empty = join(dir, "empty");
+    await mkdir(empty);
+    await expect(review({ ui: true, port: 0, staticDir: empty, until: Promise.resolve() })).rejects.toThrow(
+      "latch review --ui: the review UI is not built; run `pnpm exec vite build --config web/vite.config.ts`",
+    );
+  });
+
+  it("rejects a port that is not a whole number from 0 to 65535", async () => {
+    for (const port of [Number.NaN, -1, 65_536, 1.5]) {
+      await expect(review({ ui: true, port, staticDir, until: Promise.resolve() }), String(port)).rejects.toThrow("--port must be a whole number");
+    }
+  });
+
+  it("says when the port is taken", async () => {
+    const blocker = createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
+    const { port } = blocker.address() as { port: number };
+    try {
+      await expect(review({ ui: true, port, staticDir, until: Promise.resolve(), openBrowser: () => {} })).rejects.toThrow(
+        `latch review: port ${port} is in use; choose another with --port`,
+      );
+    } finally {
+      await new Promise((resolve) => blocker.close(resolve));
+    }
+  });
+
+  it("refuses to start on a malformed queue", async () => {
+    await writeFile(join(dir, "pending.json"), "{ nope");
+    await expect(review({ ui: true, port: 0, staticDir, until: Promise.resolve(), openBrowser: () => {} })).rejects.toThrow("not valid JSON");
   });
 });
