@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, createRoutes, type RouteDeps } from "../../src/ui/routes.js";
-import { appendEvent, type LatchEvent } from "../../src/store/events.js";
-import { readLockfile } from "../../src/store/lockfile.js";
-import { writePending } from "../../src/store/pending.js";
+import { EVENTS_FILE, appendEvent, readEvents, type LatchEvent } from "../../src/store/events.js";
+import { findRecord, readLockfile } from "../../src/store/lockfile.js";
+import { readPending, writePending } from "../../src/store/pending.js";
 import type { PendingChange, ToolRecord } from "../../src/schema/index.js";
 
 const EXAMPLE_LOCK = new URL("../../latch.lock.example", import.meta.url);
@@ -43,7 +43,7 @@ const pendingChange = async (id: string, toolName: string, tier: PendingChange["
 };
 
 /** Sends a request to a fresh app built from `deps`. */
-const request = (path: string, init?: RequestInit) => createRoutes(deps).request(path, init);
+const request = async (path: string, init?: RequestInit): Promise<Response> => createRoutes(deps).request(path, init);
 
 const json = async (response: Response): Promise<unknown> => response.json();
 
@@ -143,5 +143,130 @@ describe("unknown routes", () => {
     const response = await request("/api/nothing-here");
     expect(response.status).toBe(404);
     expect(await json(response)).toEqual({ error: "no route for GET /api/nothing-here" });
+  });
+});
+
+/** POSTs to a fresh app built from `deps`. */
+const post = async (path: string, app = createRoutes(deps)): Promise<Response> => app.request(path, { method: "POST" });
+
+describe("createRoutes", () => {
+  it("requires a reviewer, since approvals record who made them", () => {
+    expect(() => createRoutes({ ...deps, reviewer: "  " })).toThrow(TypeError);
+  });
+});
+
+describe("POST /api/pending/:id/approve", () => {
+  it("pins the change in latch.lock, dequeues it, logs it and returns the new record", async () => {
+    const change = await pendingChange("chg_1", "get_forecast", 3, "2026-10-23T09:00:00.000Z");
+    const other = await pendingChange("chg_2", "get_alerts", 2, "2026-10-23T09:05:00.000Z");
+    await writePending(deps.stateDir, [change, other]);
+
+    const response = await post("/api/pending/chg_1/approve");
+    expect(response.status).toBe(200);
+    const record = (await json(response)) as ToolRecord;
+    expect(record).toMatchObject({ name: "get_forecast", approvedBy: "alice@example.com", approvedAt: NOW.toISOString() });
+    expect(record.hashes.composite).toBe(HASH);
+
+    const lock = await readLockfile(deps.lockfilePath);
+    expect(findRecord(lock, "weather", "get_forecast")).toEqual(record);
+    expect(findRecord(lock, "weather", "get_alerts")).toEqual(await pinned("get_alerts"));
+    expect(lock.generatedAt).toBe(NOW.toISOString());
+    expect((await readPending(deps.stateDir)).map((c) => c.id)).toEqual(["chg_2"]);
+    expect(await readEvents(deps.stateDir)).toEqual([
+      { kind: "approved", at: NOW.toISOString(), serverId: "weather", toolName: "get_forecast", changeId: "chg_1", approvedBy: "alice@example.com" },
+    ]);
+  });
+
+  it("records the reviewer without surrounding whitespace", async () => {
+    deps.reviewer = "  bob@example.com\n";
+    await writePending(deps.stateDir, [await pendingChange("chg_1", "get_forecast", 2, "2026-10-23T09:00:00.000Z")]);
+    expect(((await json(await post("/api/pending/chg_1/approve"))) as ToolRecord).approvedBy).toBe("bob@example.com");
+  });
+
+  it("adds a tool that was not pinned before", async () => {
+    await writePending(deps.stateDir, [await pendingChange("chg_new", "new_tool", 2, "2026-10-23T09:00:00.000Z")]);
+    expect((await post("/api/pending/chg_new/approve")).status).toBe(200);
+    expect((await readLockfile(deps.lockfilePath)).servers.weather!.tools.map((t) => t.name)).toEqual(["get_alerts", "get_forecast", "new_tool"]);
+  });
+
+  it("returns 404 for an unknown change and leaves latch.lock untouched", async () => {
+    const before = await readFile(deps.lockfilePath, "utf8");
+    const response = await post("/api/pending/nope/approve");
+    expect(response.status).toBe(404);
+    expect(await readFile(deps.lockfilePath, "utf8")).toBe(before);
+  });
+
+  it("returns 409 for a change that cannot be recorded, changing nothing", async () => {
+    const change = await pendingChange("chg_mail", "send_email", 2, "2026-10-23T09:00:00.000Z");
+    const foreign: PendingChange = { ...change, serverId: "mail", after: { ...change.after, serverId: "mail" } };
+    await writePending(deps.stateDir, [foreign]);
+    const before = await readFile(deps.lockfilePath, "utf8");
+    const response = await post("/api/pending/chg_mail/approve");
+    expect(response.status).toBe(409);
+    expect(((await json(response)) as { error: string }).error).toContain('server "mail" is not in the lockfile');
+    expect(await readFile(deps.lockfilePath, "utf8")).toBe(before);
+    expect(await readPending(deps.stateDir)).toEqual([foreign]);
+  });
+
+  it("returns 500 and keeps the change queued when latch.lock is invalid", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const change = await pendingChange("chg_1", "get_forecast", 3, "2026-10-23T09:00:00.000Z");
+    await writePending(deps.stateDir, [change]);
+    await writeFile(deps.lockfilePath, "{ broken");
+    expect((await post("/api/pending/chg_1/approve")).status).toBe(500);
+    expect(await readPending(deps.stateDir)).toEqual([change]);
+  });
+
+  it("serializes concurrent approvals so neither is lost", async () => {
+    const changes = [
+      await pendingChange("chg_a", "get_forecast", 3, "2026-10-23T09:00:00.000Z"),
+      await pendingChange("chg_b", "new_tool", 2, "2026-10-23T09:01:00.000Z"),
+      await pendingChange("chg_c", "get_alerts", 2, "2026-10-23T09:02:00.000Z"),
+    ];
+    await writePending(deps.stateDir, changes);
+    const app = createRoutes(deps);
+    const statuses = await Promise.all(changes.map((c) => post(`/api/pending/${c.id}/approve`, app).then((r) => r.status)));
+    expect(statuses).toEqual([200, 200, 200]);
+    const lock = await readLockfile(deps.lockfilePath);
+    for (const name of ["get_forecast", "new_tool", "get_alerts"]) expect(findRecord(lock, "weather", name)?.hashes.composite).toBe(HASH);
+    expect(await readPending(deps.stateDir)).toEqual([]);
+  });
+
+  it("approves a change only once when the same request races", async () => {
+    await writePending(deps.stateDir, [await pendingChange("chg_1", "get_forecast", 3, "2026-10-23T09:00:00.000Z")]);
+    const app = createRoutes(deps);
+    const statuses = await Promise.all([post("/api/pending/chg_1/approve", app), post("/api/pending/chg_1/approve", app)].map((p) => p.then((r) => r.status)));
+    expect(statuses.sort()).toEqual([200, 404]);
+    expect(await readEvents(deps.stateDir)).toHaveLength(1);
+  });
+
+  it("still succeeds when the event log cannot be written", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    await writePending(deps.stateDir, [await pendingChange("chg_1", "get_forecast", 3, "2026-10-23T09:00:00.000Z")]);
+    await mkdir(join(deps.stateDir, EVENTS_FILE)); // a directory where the log file should be
+    expect((await post("/api/pending/chg_1/approve")).status).toBe(200);
+    expect(findRecord(await readLockfile(deps.lockfilePath), "weather", "get_forecast")?.hashes.composite).toBe(HASH);
+    expect(logged).toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/pending/:id/reject", () => {
+  it("dequeues the change, logs it, leaves latch.lock untouched and returns 204", async () => {
+    const change = await pendingChange("chg_1", "get_forecast", 3, "2026-10-23T09:00:00.000Z");
+    await writePending(deps.stateDir, [change]);
+    const before = await readFile(deps.lockfilePath, "utf8");
+
+    const response = await post("/api/pending/chg_1/reject");
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(await readFile(deps.lockfilePath, "utf8")).toBe(before);
+    expect(await readPending(deps.stateDir)).toEqual([]);
+    expect(await readEvents(deps.stateDir)).toEqual([
+      { kind: "rejected", at: NOW.toISOString(), serverId: "weather", toolName: "get_forecast", changeId: "chg_1" },
+    ]);
+  });
+
+  it("returns 404 for an unknown change", async () => {
+    expect((await post("/api/pending/nope/reject")).status).toBe(404);
   });
 });
