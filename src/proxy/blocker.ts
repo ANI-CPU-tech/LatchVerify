@@ -23,6 +23,10 @@ export type BlockVerdict = { blocked: false } | { blocked: true; reason: BlockRe
  *
  * A pending change outranks "unpinned" so a poisoned new tool is reported as the hard block it
  * is, with the change id the reviewer needs.
+ *
+ * A pending change whose `after` hashes are already the pinned ones is ignored: it was approved
+ * in latch.lock (for example by a teammate's merged PR) while this machine's queue still holds
+ * it, and blocking an approved definition would force a pointless re-review.
  */
 export function shouldBlock(
   serverId: string,
@@ -30,18 +34,28 @@ export function shouldBlock(
   lockfile: LockFile,
   pending: readonly PendingChange[],
 ): BlockVerdict {
-  const change = blockingChange(serverId, toolName, pending);
+  const record = pinnedRecord(lockfile, serverId, toolName);
+  const change = blockingChange(serverId, toolName, pending, record);
   if (change?.tier === 3) return { blocked: true, reason: { kind: "hard_block", changeId: change.id } };
   if (change) return { blocked: true, reason: { kind: "pending_review", changeId: change.id, tier: change.tier } };
-  if (pinnedRecord(lockfile, serverId, toolName) === undefined) return { blocked: true, reason: { kind: "unpinned" } };
+  if (record === undefined) return { blocked: true, reason: { kind: "unpinned" } };
   return { blocked: false };
 }
 
-/** Highest-tier pending change of tier 2 or more for the tool; the first in queue order on a tie. */
-function blockingChange(serverId: string, toolName: string, pending: readonly PendingChange[]): PendingChange | undefined {
+/**
+ * Highest-tier pending change of tier 2 or more for the tool that `record` does not already
+ * approve; the first in queue order on a tie.
+ */
+function blockingChange(
+  serverId: string,
+  toolName: string,
+  pending: readonly PendingChange[],
+  record: ToolRecord | undefined,
+): PendingChange | undefined {
   let worst: PendingChange | undefined;
   for (const change of pending) {
     if (change.serverId !== serverId || change.toolName !== toolName || change.tier < 2) continue;
+    if (record !== undefined && change.after.hashes.composite === record.hashes.composite) continue;
     if (worst === undefined || change.tier > worst.tier) worst = change;
   }
   return worst;

@@ -130,6 +130,31 @@ describe("shouldBlock", () => {
     }
   });
 
+  it("ignores a pending change that latch.lock already approves", () => {
+    const lock = exampleLock();
+    const stale = change(3, { id: "chg_approved" });
+    lock.servers.weather!.tools = lock.servers.weather!.tools.map((tool) => (tool.name === "get_forecast" ? stale.after : tool));
+    expect(shouldBlock("weather", "get_forecast", lock, [stale])).toEqual({ blocked: false });
+  });
+
+  it("ignores an approved new tool's change once the tool is pinned", () => {
+    const lock = exampleLock();
+    const stale = change(2, { toolName: "read_config", before: null });
+    lock.servers.weather!.tools.push(stale.after);
+    expect(shouldBlock("weather", "read_config", lock, [stale])).toEqual({ blocked: false });
+  });
+
+  it("still blocks a newer pending change next to an approved one", () => {
+    const lock = exampleLock();
+    const approved = change(3, { id: "chg_approved" });
+    lock.servers.weather!.tools = lock.servers.weather!.tools.map((tool) => (tool.name === "get_forecast" ? approved.after : tool));
+    const newer = { ...change(2, { id: "chg_newer" }), after: changedRecord(approved.after, "1") };
+    expect(shouldBlock("weather", "get_forecast", lock, [approved, newer])).toEqual({
+      blocked: true,
+      reason: { kind: "pending_review", changeId: "chg_newer", tier: 2 },
+    });
+  });
+
   it("does not mutate its inputs", () => {
     const lock = exampleLock();
     const pending = [change(2), change(3)];
