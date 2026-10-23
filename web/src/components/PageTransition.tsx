@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { pageChange } from "../lib/nav";
 
 /** Milliseconds the old page takes to fade out; the new one then fades in over the same time. */
 export const PAGE_FADE_MS = 160;
@@ -15,11 +16,15 @@ export function PageTransition({ pageKey, children }: { pageKey: string; childre
   const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
-    if (pageKey === shown.key) {
+    const change = pageChange(shown.key, pageKey, prefersReducedMotion());
+    if (change === "stay") {
+      // Also reached by going back to the shown page before its fade-out finished: cancel the fade,
+      // or the page would stay invisible.
+      setLeaving(false);
       setShown((current) => (current.content === children ? current : { key: pageKey, content: children }));
       return;
     }
-    if (prefersReducedMotion()) {
+    if (change === "swap") {
       setShown({ key: pageKey, content: children });
       return;
     }

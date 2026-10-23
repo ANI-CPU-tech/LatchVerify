@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { navKeyTarget } from "../../web/src/lib/nav.js";
+import { navKeyTarget, pageChange } from "../../web/src/lib/nav.js";
 
 describe("navKeyTarget", () => {
   it("moves down and up the sidebar, wrapping at both ends", () => {
@@ -24,5 +24,16 @@ describe("navKeyTarget", () => {
     expect(navKeyTarget("ArrowDown", 2, 8, "strip")).toBeNull();
     expect(navKeyTarget("Enter", 2, 8, "sidebar")).toBeNull();
     expect(navKeyTarget("ArrowDown", 0, 0, "sidebar")).toBeNull();
+  });
+});
+
+describe("pageChange", () => {
+  it("stays on the shown page, including when navigation comes back to it mid-fade", () => {
+    expect(pageChange("overview", "overview", false)).toBe("stay");
+  });
+
+  it("fades to another page, or swaps at once without motion", () => {
+    expect(pageChange("overview", "servers", false)).toBe("fade");
+    expect(pageChange("overview", "servers", true)).toBe("swap");
   });
 });

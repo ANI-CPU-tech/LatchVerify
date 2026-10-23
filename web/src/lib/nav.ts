@@ -16,3 +16,13 @@ export function navKeyTarget(key: string, index: number, count: number, layout: 
   if (key === KEYS[layout].previous) return (index - 1 + count) % count;
   return null;
 }
+
+/**
+ * What the page fade does when the route's page becomes `next` while `shown` is on screen:
+ * "stay" when it is the page already shown (also when coming back to it mid-fade, which must
+ * cancel the fade), "swap" when it changes without motion, "fade" otherwise.
+ */
+export function pageChange(shown: string, next: string, reducedMotion: boolean): "stay" | "swap" | "fade" {
+  if (next === shown) return "stay";
+  return reducedMotion ? "swap" : "fade";
+}
