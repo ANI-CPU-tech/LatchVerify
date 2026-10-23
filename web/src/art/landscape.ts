@@ -51,6 +51,8 @@ const SHORE: Array<[number, number]> = [[0, 70], [60, 75], [130, 83], [185, 91],
 const CLOUDS: Array<[number, number, number]> = [[262, 42, 70], [318, 54, 50], [118, 26, 60], [398, 30, 46], [40, 22, 40]];
 /** Log cabin on the left shore: left edge and width. */
 const CABIN = { x: 144, w: 17 };
+/** Jetty from the cabin into the lake: planks from x to x + w on row y. */
+const JETTY = { x: 166, w: 46, y: 90 };
 /** Waterline of the canoe's hull, on the edge of the sun's glitter path. */
 const CANOE = { x: 284, y: 86 };
 const BIRDS: Array<[number, number]> = [[176, 30], [186, 26], [195, 31], [168, 34], [206, 24]];
@@ -289,6 +291,19 @@ export function landscape(): PixelArt {
           if ((x - px) ** 2 + (y - py) ** 2 <= r * r && dither(x, y, 0.95 - i * 0.12)) set(x, y, "cloud");
         }
       }
+    }
+  }
+
+  // Jetty: sunlit planks on posts, the posts mirrored in the water below.
+  {
+    const { x, w, y } = JETTY;
+    for (let dx = 0; dx <= w; dx++) {
+      set(x + dx, y, "far");
+      set(x + dx, y + 1, "tree");
+    }
+    for (let dx = 2; dx <= w; dx += 6) {
+      for (let dy = 2; dy <= 3; dy++) set(x + dx, y + dy, "tree");
+      if (shoreAt(x + dx) > y + 3) for (let dy = 4; dy <= 6; dy += 2) set(x + dx, y + dy, "mid-shade");
     }
   }
 
