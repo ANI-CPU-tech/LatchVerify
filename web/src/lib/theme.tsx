@@ -1,8 +1,11 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { SURFACE_STORAGE_KEY, parseSurface, readSurface, writeSurface } from "./surface";
 import { THEME_STORAGE_KEY, parsePreference, readPreference, resolveTheme, writePreference, type ThemeId, type ThemePreference } from "./themes";
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+/** How long colors cross-fade when the theme changes. */
+const THEME_FADE_MS = 400;
 
 const safeStorage = (): Storage | undefined => {
   try {
@@ -39,8 +42,24 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.style.setProperty("--surface-mix", String(surface));
   }, [surface]);
 
+  // On a theme change (not the first paint), cross-fade colors: index.css transitions colors on
+  // everything under html.theme-switching for THEME_FADE_MS, motion-safe only.
+  const appliedTheme = useRef<ThemeId | null>(null);
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
+    const root = document.documentElement;
+    const switching = appliedTheme.current !== null && appliedTheme.current !== theme;
+    appliedTheme.current = theme;
+    if (!switching) {
+      root.setAttribute("data-theme", theme);
+      return;
+    }
+    root.classList.add("theme-switching");
+    root.setAttribute("data-theme", theme);
+    const timer = window.setTimeout(() => root.classList.remove("theme-switching"), THEME_FADE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      root.classList.remove("theme-switching");
+    };
   }, [theme]);
 
   useEffect(() => {

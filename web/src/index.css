@@ -713,3 +713,19 @@
     opacity: 0;
   }
 }
+
+/* Theme change (lib/theme.tsx adds .theme-switching for 400 ms): colors cross-fade everywhere. */
+@media (prefers-reduced-motion: no-preference) {
+  html.theme-switching,
+  html.theme-switching *,
+  html.theme-switching *::before,
+  html.theme-switching *::after {
+    transition:
+      background-color 400ms ease,
+      border-color 400ms ease,
+      color 400ms ease,
+      fill 400ms ease,
+      stroke 400ms ease,
+      box-shadow 400ms ease !important;
+  }
+}
