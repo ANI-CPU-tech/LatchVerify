@@ -295,3 +295,4 @@ export * from "./transport.js";
 export * from "./interceptor.js";
 export * from "./blocker.js";
 export * from "./analysis.js";
+export * from "./capture.js";
