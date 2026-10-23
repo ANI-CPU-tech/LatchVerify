@@ -133,10 +133,15 @@ Ctrl+C.
 LATCH_LOCKFILE_PATH="$W/latch.lock" LATCH_STATE_DIR="$W/.latch" pnpm ui
 ```
 
-Open `http://localhost:5173`; Vite proxies `/api` to the API. If the API is
-unreachable the screen falls back to sample data and says so. Approving in the UI
-rewrites the lockfile; a running proxy applies the decision to its next call without a
-restart.
+Open `http://localhost:5173`; Vite proxies `/api` to the API. The top bar shows
+whether the API is reachable. If it is not, the Review Queue shows labeled sample
+data with Approve and Reject disabled, and the other pages show an error. Approving
+in the UI rewrites the lockfile; a running proxy applies the decision to its next call
+without a restart.
+
+The UI has seven pages: Overview, MCP Servers, Review Queue, Approved Tools, Audit
+Log, Git & CI, and Settings. Settings has six themes plus "Follow system"; the
+choice is kept in the browser's local storage.
 
 ## 5. Use it with a real MCP client (optional)
 
