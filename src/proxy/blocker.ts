@@ -1,5 +1,6 @@
 import { escapeForEvidence } from "../analyze/unicode.js";
 import type { LockFile, PendingChange, Tier, ToolRecord } from "../schema/index.js";
+import { findRecord } from "../store/lockfile.js";
 import type { JsonRpcId, JsonRpcResponse } from "./transport.js";
 
 /** JSON-RPC server-defined error code used for every LatchVerify block. */
@@ -10,7 +11,9 @@ export type BlockReason =
   | { kind: "pending_review"; changeId: string; tier: Tier }
   | { kind: "hard_block"; changeId: string }
   /** Set by the interceptor, not shouldBlock: no tools/list analyzed since start or list_changed. */
-  | { kind: "unverified" };
+  | { kind: "unverified" }
+  /** Set by startProxy when routing the call itself failed: it is refused rather than forwarded unchecked. */
+  | { kind: "internal_error" };
 
 export type BlockVerdict = { blocked: false } | { blocked: true; reason: BlockReason };
 
@@ -37,7 +40,7 @@ export function shouldBlock(
   lockfile: LockFile,
   pending: readonly PendingChange[],
 ): BlockVerdict {
-  const record = pinnedRecord(lockfile, serverId, toolName);
+  const record = findRecord(lockfile, serverId, toolName);
   const change = blockingChange(serverId, toolName, pending, record);
   if (change?.tier === 3) return { blocked: true, reason: { kind: "hard_block", changeId: change.id } };
   if (change) return { blocked: true, reason: { kind: "pending_review", changeId: change.id, tier: change.tier } };
@@ -65,11 +68,6 @@ function blockingChange(
 }
 
 /** The pinned record, looked up by own keys only so names like "constructor" never resolve. */
-function pinnedRecord(lockfile: LockFile, serverId: string, toolName: string): ToolRecord | undefined {
-  if (!Object.hasOwn(lockfile.servers, serverId)) return undefined;
-  return lockfile.servers[serverId]!.tools.find((tool) => tool.name === toolName);
-}
-
 /** MCP tool names should be at most 128 characters; longer ones are cut in the message. */
 const MAX_NAME_IN_MESSAGE = 128;
 
@@ -77,8 +75,8 @@ const MAX_NAME_IN_MESSAGE = 128;
  * Build the JSON-RPC error returned to the client in place of the real tools/call result:
  * `{ jsonrpc, id, error: { code: BLOCK_ERROR_CODE, message, data: { reason } } }`.
  *
- * The message is written for the model to read and relay to the user, and always names
- * `latch review`. Returning an error, not hanging, makes the agent report the block.
+ * The message is written for the model to read and relay to the user, and names `latch review`
+ * (or, for an internal error, the proxy's stderr). Returning an error, not hanging, makes the agent report the block.
  *
  * The tool name comes from the client request, so it is shown as printable ASCII in quotes
  * (invisible and bidi characters as [U+XXXX]) and cut at MAX_NAME_IN_MESSAGE characters: a
@@ -95,6 +93,8 @@ export function buildBlockError(id: JsonRpcId, toolName: string, reason: BlockRe
       ? `LatchVerify blocked ${name}: the tool is not approved in latch.lock — run \`latch review\``
       : reason.kind === "unverified"
         ? `LatchVerify blocked ${name}: this server's tools have not been verified yet — retry in a moment, or run \`latch review\` if it stays blocked`
-        : `LatchVerify blocked ${name} pending review — run \`latch review\``;
+        : reason.kind === "internal_error"
+          ? `LatchVerify could not check ${name} because of an internal error; see the proxy's stderr`
+          : `LatchVerify blocked ${name} pending review — run \`latch review\``;
   return { jsonrpc: "2.0", id, error: { code: BLOCK_ERROR_CODE, message, data: { reason } } };
 }

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -267,4 +267,17 @@ describe("runInspect --json", () => {
     expect(text).not.toContain("\u001b");
     expect(report.tools[0]!.name).toBe("evil\u001btool");
   });
+});
+
+describe("latch inspect (CLI)", () => {
+  it("passes the server's own flags through instead of parsing them as inspect options", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["--import", tsx, join(root, "src/cli.ts"), "inspect", "--json", process.execPath, "--import", tsx, join(root, "demo/weather-server.ts")],
+      { cwd: root, encoding: "utf8", timeout: 30_000 },
+    );
+    expect(result.stderr).not.toContain("unknown option");
+    expect(result.status).toBe(0);
+    expect(JSON.stringify(JSON.parse(result.stdout))).toContain("get_forecast");
+  }, 30_000);
 });

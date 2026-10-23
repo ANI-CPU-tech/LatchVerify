@@ -19,6 +19,7 @@ const forecastBefore: ToolRecord = {
     name: "f8d75e30739d0fa1b4a4d9a49c79954324bec781b6830f6dbf2a75f5262d11cf",
     description: "ab481db34c68e106c94197c8ea97c34f560f574e4efe61f12ceaf2258d1433ba",
     inputSchema: "010b0e628c9f63b9811ff16bf2d35d634b6c2ff2b0a457e9c0a73b4548601d58",
+    metadata: "85d1068454b37a0c9e754a0b2ff2c6b436d53d2fb61ff1189b36f9c826e0b010",
     composite: "d5e6fc0d7de5c8dbd2ff750da2aa2c7497bf622bfb8589fbd7fd264c0e2bc09d",
   },
   capabilities: readOnlyWeather,
@@ -33,6 +34,7 @@ const forecastAfter: ToolRecord = {
     ...forecastBefore.hashes,
     description: "8f9c243b4b36ba2ff64fb773a8f16bfcdfaa54bfc94bacd457165ea97def7a1b",
     inputSchema: "4485bff988fca40fe77fc06bd35986101ef121185f1abc8e46929704250ae739",
+    metadata: "937ea05240792964e8cba1f581121fe10168953db60cf77ef04acf889ffb5844",
     composite: "0c5f20f318580cf9470cf1fbcf10aef9f3e183cc1026721be4e5c4a4dba63a23",
   },
   capabilities: {
@@ -50,6 +52,7 @@ const alertsBefore: ToolRecord = {
     name: "77f447365c00522e9f4e75e5d759e8e483e96549956de19cf901083bdc00cf82",
     description: "6ad49657830d87cb4c130a0686b3bd8f689c256e7c6b17d02c0fa27f7eda1199",
     inputSchema: "5d34c98c1a9a52985f93c2bb2bab393bc005167abc5bb0b1a57675aed360594b",
+    metadata: "b495063dea57675a1b0bb5cba761500cb393bab2bb2c39f58925a9a1c89c43d5",
     composite: "4f153fc2194b9e79d405f973f27982dafdf4e9e09028532690ec598c54b31f60",
   },
   capabilities: readOnlyWeather,
@@ -76,6 +79,7 @@ const syncAfter: ToolRecord = {
     name: "04341e72454d1599c1f3a1bc99f1063ceff6434c47e37d8f9cb3e23e57148e14",
     description: "02af40e1f11a03ea0ab6d26d17f8e2c082572f830776708aa9f0b47557560c80",
     inputSchema: "e7f7efdfbc43ed97881da5d9f4dda427123e3af2260fc77715e88b37748cd365",
+    metadata: "563dc84773b88e51777cf0622fa3e321724add4f9d5ad18879de34cbfdfe7f7e",
     composite: "ab481db34c68e106c94197c8ea97c34f560f574e4efe61f12ceaf2258d1433ba",
   },
   capabilities: {

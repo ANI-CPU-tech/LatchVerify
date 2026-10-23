@@ -6,12 +6,12 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderChange, reviewOrder, runReview, type ReviewOptions } from "../../src/commands/review.js";
+import { renderChange, runReview, type ReviewOptions } from "../../src/commands/review.js";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
 import { LockFileSchema, type LockFile, type McpTool, type PendingChange } from "../../src/schema/index.js";
 import { readEvents } from "../../src/store/events.js";
 import { applyApproval, findRecord, readLockfile } from "../../src/store/lockfile.js";
-import { readPending, writePending } from "../../src/store/pending.js";
+import { readPending, reviewOrder, writePending } from "../../src/store/pending.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const example = (): LockFile => LockFileSchema.parse(JSON.parse(readFileSync(join(root, "latch.lock.example"), "utf8")));
@@ -68,7 +68,7 @@ describe("renderChange", () => {
       `tier 3 · hard block  weather/get_forecast  ${forecast.id}`,
       "  detected  2026-10-23T09:00:00.000Z",
       "  changed   description, input schema",
-      "  delta     lost network.domains:api.weather.gov",
+      "  delta     no capability change",
     ]);
     expect(card).toContain("  findings\n");
     expect(card).toContain('    ✖ critical pattern  Text points the model at a sensitive file (description): "~/.ssh/id_rsa"');
@@ -349,11 +349,23 @@ describe("runReview --ui", () => {
     expect((await readPending(dir)).some((c) => c.id === forecast.id)).toBe(false);
   });
 
+  it("records approvals as the reviewer option when one is given", async () => {
+    const forecast = (await readPending(dir))[0]!;
+    const { text } = await withUi(
+      async (url) => {
+        await fetch(`${url}/api/pending/${forecast.id}/approve`, { method: "POST", headers: { "X-Latch-Client": "test" } });
+      },
+      { reviewer: " lead@example.com " },
+    );
+    expect(text).toContain("approvals are recorded as lead@example.com");
+    expect(findRecord(await readLockfile(lockfilePath), "weather", "get_forecast")!.approvedBy).toBe("lead@example.com");
+  });
+
   it("explains how to build the UI when it is missing", async () => {
     const empty = join(dir, "empty");
     await mkdir(empty);
     await expect(review({ ui: true, port: 0, staticDir: empty, until: Promise.resolve() })).rejects.toThrow(
-      "latch review --ui: the review UI is not built; run `pnpm exec vite build --config web/vite.config.ts`",
+      "latch review --ui: the review UI is not built; run `pnpm build` in the latchverify checkout",
     );
   });
 

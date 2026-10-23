@@ -9,21 +9,17 @@ servers. It derives a structured capability set from each tool definition, pins 
 in a git-committed `latch.lock`, and blocks `tools/call` when a tool gains
 capabilities without review. Read `README.md` and `docs/ARCHITECTURE.md` first.
 
-## Current phase: scaffold only
+## Current phase: implemented
 
-The repository is a scaffold. Until the user says the scaffold phase is over:
+Every module is implemented and tested; the scaffold phase is over. Fix bugs with
+a regression test first.
 
-- **Do not implement logic.** Functions keep their full typed signatures, a
-  `// TODO:` or JSDoc `TODO:` saying what they will do and return, and
-  `throw new Error("not implemented");`.
-- **The one exception is `src/schema/`.** The zod schemas there are complete and
-  everything else mocks against them. Change them deliberately: every module,
+- **`src/schema/` is the shared contract.** Change it deliberately: every module,
   `tests/schema.test.ts`, `web/src/lib/mock.ts` and `latch.lock.example` depend
-  on their shape.
-- React components render static markup from `web/src/lib/mock.ts`.
-
-When implementation starts, follow the build order below and replace stubs one
-module at a time, with tests.
+  on its shape.
+- `latch.lock.example` holds real hashes and capabilities; tests check both.
+- The review UI reads the hono API and falls back to `web/src/lib/mock.ts` when the
+  API is unreachable.
 
 ## Stack (fixed, do not substitute)
 
@@ -38,7 +34,7 @@ module at a time, with tests.
 | Diff | `diff` (jsdiff) |
 | Tests | `vitest` |
 | Package manager | `pnpm` (single package, no workspaces; `pnpm-workspace.yaml` only holds pnpm 11 settings) |
-| Optional LLM pass | `@anthropic-ai/sdk` |
+| Optional LLM pass | any OpenAI-compatible chat-completions API via `fetch` (Groq, OpenRouter); no SDK |
 
 ## Hard rules
 
@@ -84,7 +80,7 @@ that blocks on every reword gets disabled by its users.
 - Fixtures: `tests/fixtures/benign-tools.json` and `poisoned-tools.json`, which
   the demo servers also serve.
 
-## Build order
+## Build order (as built)
 
 1. `analyze/hash.ts` (canonical JSON, segment hashes) and `store/lockfile.ts`
    (read, write with stable sorting, approve). Test the round trip against

@@ -680,3 +680,16 @@ describe("findToolMentions", () => {
     expect(findToolMentions("use read_file", new Set(["read_file"]))).toEqual(["read_file"]);
   });
 });
+
+describe("latch.lock.example", () => {
+  it("pins exactly the capabilities extractCapabilities derives from the benign fixture", () => {
+    const lock = JSON.parse(readFileSync(new URL("../../latch.lock.example", import.meta.url), "utf8")) as {
+      servers: Record<string, { tools: Array<{ name: string; capabilities: unknown }> }>;
+    };
+    const benign = (JSON.parse(readFileSync(new URL("../fixtures/benign-tools.json", import.meta.url), "utf8")) as { tools: McpTool[] }).tools;
+    for (const record of lock.servers.weather!.tools) {
+      const tool = benign.find((candidate) => candidate.name === record.name)!;
+      expect(record.capabilities, record.name).toEqual(extractCapabilities(tool, []).capabilities);
+    }
+  });
+});

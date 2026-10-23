@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { isAutoPass } from "../analyze/tiers.js";
-import type { LockFile, PendingChange } from "../schema/index.js";
+import type { LlmAdvisory, LockFile, McpTool, PendingChange } from "../schema/index.js";
 import { appendEvent, type LatchEvent } from "../store/events.js";
-import { enqueue, writePending } from "../store/pending.js";
-import { analyzeToolList, type ListAnalysis } from "./analysis.js";
+import { enqueue, updatePending } from "../store/pending.js";
+import { analyzeToolList, type DetectedChange, type ListAnalysis } from "./analysis.js";
 import { buildBlockError, shouldBlock, type BlockReason, type BlockVerdict } from "./blocker.js";
 import {
   isNotification,
@@ -47,10 +47,15 @@ export interface InterceptorContext {
    * the server still serves stays blocked.
    */
   observed: Map<string, PendingChange>;
-  /** True once a tools/list result has been analyzed since start or the last list_changed. */
+  /** True once a complete tools/list has been analyzed since start or the last list_changed. */
   verified: boolean;
-  /** Ids of tools/list requests the proxy sent itself, mapped to their page number. */
-  ownRequests: Map<JsonRpcId, number>;
+  /** Ids of tools/list requests the proxy sent itself, mapped to the listing they continue. */
+  ownRequests: Map<JsonRpcId, OwnListing>;
+  /**
+   * The optional LLM advisory pass (runAdvisory with the configured options); undefined when
+   * LATCH_LLM_ENABLED is off. `cached` is the pinned record's advisory.
+   */
+  advise?: (tool: McpTool, cached: LlmAdvisory | undefined) => Promise<LlmAdvisory>;
   /** Queue a request to the server. It is written after the frame being routed is handled. */
   sendToServer(message: JsonRpcRequest): void;
   /** Re-read latch.lock and the pending queue if they changed on disk (approvals, rejections). */
@@ -58,6 +63,19 @@ export interface InterceptorContext {
   /** Write one diagnostic line to stderr. stdout is the protocol. */
   log(message: string): void;
 }
+
+/** A tools/list the proxy is paging through itself. */
+export interface OwnListing {
+  /** Page number of the request this entry belongs to, from 1. */
+  page: number;
+  /** Tools from the pages before it. */
+  tools: unknown[];
+  /** Set by list_changed: the listing may mix old and new definitions, so it is dropped unanalyzed. */
+  stale: boolean;
+}
+
+/** inflight value for a client tools/list that continues from a cursor: only a part of a list. */
+const TOOLS_LIST_PAGE = "tools/list (page)";
 
 const FORWARD: InterceptDecision = Object.freeze({ action: "forward" });
 const DROP: InterceptDecision = Object.freeze({ action: "drop" });
@@ -99,15 +117,18 @@ export async function routeFrame(ctx: InterceptorContext, direction: Direction, 
     }
     if (!isRequest(message)) return FORWARD;
     if (message.method === "tools/call") return onToolsCall(ctx, message);
-    if (TRACKED_METHODS.has(message.method)) ctx.inflight.set(message.id, message.method);
+    if (TRACKED_METHODS.has(message.method)) {
+      const continues = message.method === "tools/list" && isPlainObject(message.params) && message.params.cursor !== undefined;
+      ctx.inflight.set(message.id, continues ? TOOLS_LIST_PAGE : message.method);
+    }
     return FORWARD;
   }
 
   if (isResponse(message)) {
-    const page = ctx.ownRequests.get(message.id);
-    if (page !== undefined) {
+    const listing = ctx.ownRequests.get(message.id);
+    if (listing !== undefined) {
       ctx.ownRequests.delete(message.id);
-      await onOwnToolList(ctx, message, page);
+      await onOwnToolList(ctx, message, listing);
       return DROP;
     }
     const method = ctx.inflight.get(message.id);
@@ -115,6 +136,7 @@ export async function routeFrame(ctx: InterceptorContext, direction: Direction, 
     ctx.inflight.delete(message.id);
     if (method === "initialize") captureSpecVersion(ctx, message);
     if (method === "tools/list") return onToolsList(ctx, message);
+    if (method === TOOLS_LIST_PAGE) return onToolsList(ctx, message, false);
     return FORWARD;
   }
   if (isNotification(message) && message.method === "notifications/tools/list_changed") {
@@ -126,44 +148,62 @@ export async function routeFrame(ctx: InterceptorContext, direction: Direction, 
 /** Pages the proxy fetches on its own before giving up on a server that never stops paging. */
 export const MAX_OWN_PAGES = 100;
 
-/** Send the proxy's own tools/list (page `page`, from `cursor`) to the server. */
-function requestToolList(ctx: InterceptorContext, cursor?: string, page = 1): void {
+/** Send the proxy's own tools/list (page `page`, from `cursor`, after `tools`) to the server. */
+function requestToolList(ctx: InterceptorContext, cursor?: string, page = 1, tools: unknown[] = []): void {
   const id = `latchverify-${randomUUID()}`;
-  ctx.ownRequests.set(id, page);
+  ctx.ownRequests.set(id, { page, tools, stale: false });
   ctx.sendToServer(
     cursor === undefined ? { jsonrpc: "2.0", id, method: "tools/list" } : { jsonrpc: "2.0", id, method: "tools/list", params: { cursor } },
   );
 }
 
-/** Analyze a page of the proxy's own tools/list and fetch the next one, if any. */
-async function onOwnToolList(ctx: InterceptorContext, response: JsonRpcResponse, page: number): Promise<void> {
+/**
+ * Collect a page of the proxy's own tools/list and fetch the next one. The last page analyzes the
+ * whole list at once, so the server stays unverified (and calls held) until every page is in: a
+ * drifted tool on page 2 must not become callable once page 1 checks out.
+ */
+async function onOwnToolList(ctx: InterceptorContext, response: JsonRpcResponse, listing: OwnListing): Promise<void> {
+  if (listing.stale) return;
   if (response.error !== undefined) {
     ctx.log(`${ctx.serverId}: the server answered the proxy's tools/list with an error: ${response.error.message}`);
     return;
   }
-  await onToolsList(ctx, response);
-  const cursor = isPlainObject(response.result) ? response.result.nextCursor : undefined;
-  if (typeof cursor !== "string") return;
-  if (page >= MAX_OWN_PAGES) {
-    ctx.log(`${ctx.serverId}: stopped fetching tools/list after ${MAX_OWN_PAGES} pages`);
+  const { result } = response;
+  if (!isPlainObject(result) || !Array.isArray(result.tools)) {
+    ctx.log(`${ctx.serverId}: tools/list result has no tools array; nothing analyzed`);
     return;
   }
-  requestToolList(ctx, cursor, page + 1);
+  const tools = [...listing.tools, ...result.tools];
+  if (typeof result.nextCursor === "string" && result.nextCursor !== "") {
+    if (listing.page >= MAX_OWN_PAGES) {
+      ctx.log(`${ctx.serverId}: stopped fetching tools/list after ${MAX_OWN_PAGES} pages`);
+      return;
+    }
+    requestToolList(ctx, result.nextCursor, listing.page + 1, tools);
+    return;
+  }
+  await onToolsList(ctx, { ...response, result: { tools } });
 }
 
 /**
  * tools/list response from the server.
  *
- * Runs analyzeToolList over the result and records the outcome: every new or changed tool is
+ * Runs analyzeToolList over the result and records the outcome. For a server latch.lock does
+ * not have, nothing is queued and a `latch init` hint is logged. Otherwise every new or changed tool is
  * queued (tier 0 and 1 too, so `latch review` can fold them into the lockfile; the blocker lets
- * them through), logged as change_detected, and tier 0/1 also as auto_passed. A definition
+ * them through), logged as change_detected, and tier 0/1 also as auto_passed, except a new tool,
+ * which stays blocked as unpinned until approved. A definition
  * already queued or already seen this session is not queued again, so repeated lists do not
  * churn change ids. A tool back at its pinned definition leaves ctx.observed, but its queued
  * change stays for review: the server did serve that definition.
  *
+ * Only a complete list marks the server verified: one that neither continues from a cursor
+ * (`fromStart` false) nor has a nextCursor. A page of a list is still analyzed and queued, but
+ * calls stay unverified until the proxy's own listing has seen every page.
+ *
  * Returns "forward": the client still sees the list; enforcement happens at tools/call.
  */
-export async function onToolsList(ctx: InterceptorContext, response: JsonRpcResponse): Promise<InterceptDecision> {
+export async function onToolsList(ctx: InterceptorContext, response: JsonRpcResponse, fromStart = true): Promise<InterceptDecision> {
   if (response.error !== undefined) return FORWARD;
   await ctx.refresh();
   const now = new Date();
@@ -172,18 +212,27 @@ export async function onToolsList(ctx: InterceptorContext, response: JsonRpcResp
     ctx.log(`${ctx.serverId}: tools/list result has no tools array; nothing analyzed`);
     return FORWARD;
   }
-  await recordAnalysis(ctx, analysis, now);
+  const result = response.result as Record<string, unknown>;
+  const complete = fromStart && (typeof result.nextCursor !== "string" || result.nextCursor === "");
+  await recordAnalysis(ctx, analysis, now, complete);
   return FORWARD;
 }
 
-async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, now: Date): Promise<void> {
+async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, now: Date, complete: boolean): Promise<void> {
   const at = now.toISOString();
   const { serverId } = ctx;
   const events: LatchEvent[] = [{ kind: "tools_listed", at, serverId, toolCount: analysis.toolCount }];
   for (const name of analysis.unchanged) ctx.observed.delete(name);
 
-  let queueChanged = false;
-  for (const { change, reason } of analysis.changes) {
+  // A server latch.lock does not know cannot have changes approved (applyApproval refuses them),
+  // so nothing is queued: every call is blocked as unpinned until `latch init` pins the server.
+  const pinnedServer = Object.hasOwn(ctx.lockfile.servers, serverId);
+  if (!pinnedServer && analysis.changes.length > 0) {
+    ctx.log(`${serverId}: not in latch.lock, so its tools are blocked as unpinned; run \`latch init\` to pin them`);
+  }
+  const added: DetectedChange[] = [];
+  for (const detected of pinnedServer ? analysis.changes : []) {
+    const { change, reason } = detected;
     const { toolName, tier } = change;
     const composite = change.after.hashes.composite;
     if (ctx.observed.get(toolName)?.after.hashes.composite === composite) continue;
@@ -194,19 +243,51 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
     if (queued !== undefined) continue;
 
     ctx.pending = enqueue(ctx.pending, change);
-    queueChanged = true;
+    added.push(detected);
     events.push({ kind: "change_detected", at, serverId, toolName, tier, changeId: change.id });
-    if (isAutoPass(tier)) {
+    if (change.before === null && isAutoPass(tier)) {
+      // The blocker holds every unpinned tool whatever its tier, so this is no auto-pass.
+      ctx.log(`${serverId}/${toolName}: new tool blocked until approved: ${reason}`);
+    } else if (isAutoPass(tier)) {
       events.push({ kind: "auto_passed", at, serverId, toolName, tier });
       ctx.log(`${serverId}/${toolName}: tier ${tier} change auto-passed: ${reason}`);
     } else {
       ctx.log(`${serverId}/${toolName}: tier ${tier} change ${tier === 3 ? "hard-blocked" : "blocked for review"}: ${reason}`);
     }
   }
-  ctx.verified = true;
+  if (complete) ctx.verified = true;
 
-  if (queueChanged) await persist(ctx, "pending queue", () => writePending(ctx.stateDir, ctx.pending));
+  if (added.length > 0) {
+    // Merge into the queue on disk: other servers' proxies and `latch review` write it too.
+    await persist(ctx, "pending queue", async () => {
+      ctx.pending = await updatePending(ctx.stateDir, (queue) => added.reduce((next, { change }) => enqueue(next, change), queue));
+    });
+    // In the background: frames are routed one at a time, and a model call must not hold them up.
+    for (const { change, tool } of added) if (ctx.advise !== undefined && tool !== undefined) void attachAdvisory(ctx, change, tool);
+  }
   for (const event of events) await persist(ctx, "event log", () => appendEvent(ctx.stateDir, event));
+}
+
+/**
+ * Run the LLM advisory for a queued change and store it on the queued entry: `after.advisory`
+ * (kept in latch.lock on approval) and its findings, for the reviewer. Advisory only: the tier is
+ * left alone, so it never blocks or unblocks a call, and any failure is logged and ignored.
+ */
+async function attachAdvisory(ctx: InterceptorContext, change: PendingChange, tool: McpTool): Promise<void> {
+  const where = `${ctx.serverId}/${change.toolName}`;
+  try {
+    const advisory = await ctx.advise!(tool, change.before?.advisory);
+    await updatePending(ctx.stateDir, (queue) =>
+      queue.some((entry) => entry.id === change.id)
+        ? queue.map((entry) =>
+            entry.id === change.id ? { ...entry, after: { ...entry.after, advisory }, findings: [...entry.findings, ...advisory.findings] } : entry,
+          )
+        : queue,
+    );
+    ctx.log(`${where}: LLM advisory added ${advisory.findings.length} finding(s) for review`);
+  } catch (error) {
+    ctx.log(`${where}: LLM advisory skipped: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /**
@@ -258,6 +339,7 @@ function describeReason(reason: BlockReason): string {
  */
 export async function onToolsListChanged(ctx: InterceptorContext, _notification: JsonRpcNotification): Promise<InterceptDecision> {
   ctx.verified = false;
+  for (const listing of ctx.ownRequests.values()) listing.stale = true;
   ctx.log(`${ctx.serverId}: server announced tools/list_changed; re-checking its tools`);
   requestToolList(ctx);
   await persist(ctx, "event log", () =>

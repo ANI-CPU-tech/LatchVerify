@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import type { LlmOptions } from "../analyze/llm.js";
 import { startProxy } from "../proxy/index.js";
 
 export interface ProxyCommandOptions {
@@ -7,11 +8,9 @@ export interface ProxyCommandOptions {
   command: string[];
   lockfilePath: string;
   stateDir: string;
+  /** LLM advisory pass options, when LATCH_LLM_ENABLED is on. */
+  llm?: LlmOptions;
 }
-
-/** What src/cli.ts passes for --lockfile and --state-dir when they are not given. */
-const CLI_DEFAULT_LOCKFILE = "./latch.lock";
-const CLI_DEFAULT_STATE_DIR = "./.latch";
 
 /**
  * `latch proxy --server <id> -- <cmd> [args...]` (internal; written into client configs by init)
@@ -20,10 +19,9 @@ const CLI_DEFAULT_STATE_DIR = "./.latch";
  * absolute ones, and delegates to startProxy(). Resolves with the real server's exit code.
  *
  * Clients launch servers from a working directory of their choosing (Claude Desktop uses "/"),
- * and a wrapped entry has nowhere to put global flags, so LATCH_LOCKFILE_PATH and LATCH_STATE_DIR
- * from the entry's `env` apply when --lockfile or --state-dir was not given. An explicit flag
- * wins. As in loadEnv(), values are trimmed, blank means unset, and relative paths resolve
- * against the working directory.
+ * and a wrapped entry has nowhere to put global flags, so src/cli.ts resolves the paths with
+ * statePaths(): LATCH_LOCKFILE_PATH and LATCH_STATE_DIR from the entry's `env` apply when
+ * --lockfile or --state-dir was not given.
  *
  * stdout carries nothing but JSON-RPC: problems are thrown for the CLI to print on stderr, and
  * the proxy logs to stderr and .latch/events.jsonl.
@@ -43,13 +41,8 @@ export async function runProxy(options: ProxyCommandOptions): Promise<number> {
     serverId: options.serverId,
     command,
     args,
-    lockfilePath: pathOption(options.lockfilePath, CLI_DEFAULT_LOCKFILE, process.env.LATCH_LOCKFILE_PATH),
-    stateDir: pathOption(options.stateDir, CLI_DEFAULT_STATE_DIR, process.env.LATCH_STATE_DIR),
+    lockfilePath: resolve(options.lockfilePath),
+    stateDir: resolve(options.stateDir),
+    llm: options.llm,
   });
-}
-
-/** The flag's value, or the environment's when the flag was left at the CLI default; absolute. */
-function pathOption(given: string, cliDefault: string, fromEnv: string | undefined): string {
-  const env = fromEnv?.trim();
-  return resolve(given === cliDefault && env !== undefined && env !== "" ? env : given);
 }

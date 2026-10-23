@@ -47,7 +47,9 @@ export const ToolHashesSchema = z.object({
   name: Sha256HexSchema,
   description: Sha256HexSchema,
   inputSchema: Sha256HexSchema,
-  /** Hash over the three segment hashes; the quick equality check. */
+  /** Title and annotations: what clients show the model and the server's claims about the tool. */
+  metadata: Sha256HexSchema,
+  /** Hash over the four segment hashes; the quick equality check. */
   composite: Sha256HexSchema,
 });
 export type ToolHashes = z.infer<typeof ToolHashesSchema>;
