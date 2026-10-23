@@ -25,13 +25,19 @@ const PAGINATION_WORDS: ReadonlySet<string> = new Set(["page", "next", "continua
 const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 
 /**
+ * NFKC-folds `text` and removes invisible characters, so full-width letters and words split by
+ * zero-width characters match their plain form. Offsets in the result differ from `text`.
+ */
+export function foldText(text: string): string {
+  return text.normalize("NFKC").replace(IGNORABLE, "");
+}
+
+/**
  * Lowercase words of an identifier or sentence: splits camelCase, PascalCase, acronyms,
  * snake_case, kebab-case and punctuation, after NFKC folding and removing invisible characters.
  */
 function splitWords(text: string): string[] {
-  return text
-    .normalize("NFKC")
-    .replace(IGNORABLE, "")
+  return foldText(text)
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .toLowerCase()
@@ -558,19 +564,29 @@ const NAME_CHAR = String.raw`[\p{L}\p{N}_-]`;
 const escapeRegExp = (text: string): string => text.replace(/[\^$\\.*+?()[\]{}|/]/g, "\\$&");
 
 /**
+ * Names from `names` mentioned as whole words in `text`, deduplicated and sorted. A mention
+ * must not continue into another name character, so "send_email" does not match
+ * "send_email_v2". Matching is case-sensitive, like tool names; empty names are ignored.
+ * `text` is matched as given: pass it through foldText first to see past invisible characters.
+ */
+export function findToolMentions(text: string, names: Iterable<string>): string[] {
+  const found = new Set<string>();
+  for (const name of names) {
+    if (name.length === 0 || found.has(name)) continue;
+    const mention = new RegExp(`(?<!${NAME_CHAR})${escapeRegExp(name)}(?!${NAME_CHAR})`, "u");
+    if (mention.test(text)) found.add(name);
+  }
+  return [...found].sort();
+}
+
+/**
  * Names from `knownTools` mentioned as whole words anywhere in the tool's prose, sorted.
- * Text is NFKC-folded with invisible characters removed first, so "send_\u200bemail" still
- * counts. Matching is case-sensitive, like tool names. The tool's own name is never a reference.
+ * Text is folded first, so "send_\u{200b}email" still counts. The tool's own name is never a
+ * reference.
  */
 function crossServerReferences(tool: McpTool, knownTools: readonly string[]): string[] {
-  const prose = toolProse(tool).map((t) => t.normalize("NFKC").replace(IGNORABLE, "")).join("\n");
-  const refs = new Set<string>();
-  for (const name of new Set(knownTools)) {
-    if (name.length === 0 || name === tool.name || refs.has(name)) continue;
-    const mention = new RegExp(`(?<!${NAME_CHAR})${escapeRegExp(name)}(?!${NAME_CHAR})`, "u");
-    if (mention.test(prose)) refs.add(name);
-  }
-  return [...refs].sort();
+  const prose = toolProse(tool).map(foldText).join("\n");
+  return findToolMentions(prose, knownTools.filter((name) => name !== tool.name));
 }
 
 /**
