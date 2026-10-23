@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { constants } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { runAdvisory, type LlmOptions } from "../analyze/llm.js";
 import { readLockfile } from "../store/lockfile.js";
 import { PENDING_FILE, readPending } from "../store/pending.js";
 import { BLOCK_ERROR_CODE } from "./blocker.js";
@@ -30,6 +31,8 @@ export interface ProxyOptions {
   output?: Writable;
   /** How long client frames are held waiting for the server's tools to be verified. */
   holdTimeoutMs?: number;
+  /** Run the LLM advisory pass on new and changed tools with these options. Off when absent. */
+  llm?: LlmOptions;
 }
 
 /** Default for ProxyOptions.holdTimeoutMs. */
@@ -110,6 +113,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     observed: new Map(),
     verified: false,
     ownRequests: new Map(),
+    advise: options.llm === undefined ? undefined : (tool, cached) => runAdvisory(tool, options.llm!, cached),
     sendToServer: (message) => void outbox.push(message),
     refresh: async () => {
       const nextLock = await fileStamp(options.lockfilePath).catch(() => lockStamp);

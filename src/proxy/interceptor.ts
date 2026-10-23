@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { isAutoPass } from "../analyze/tiers.js";
-import type { LockFile, PendingChange } from "../schema/index.js";
+import type { LlmAdvisory, LockFile, McpTool, PendingChange } from "../schema/index.js";
 import { appendEvent, type LatchEvent } from "../store/events.js";
 import { enqueue, updatePending } from "../store/pending.js";
-import { analyzeToolList, type ListAnalysis } from "./analysis.js";
+import { analyzeToolList, type DetectedChange, type ListAnalysis } from "./analysis.js";
 import { buildBlockError, shouldBlock, type BlockReason, type BlockVerdict } from "./blocker.js";
 import {
   isNotification,
@@ -51,6 +51,11 @@ export interface InterceptorContext {
   verified: boolean;
   /** Ids of tools/list requests the proxy sent itself, mapped to the listing they continue. */
   ownRequests: Map<JsonRpcId, OwnListing>;
+  /**
+   * The optional LLM advisory pass (runAdvisory with the configured options); undefined when
+   * LATCH_LLM_ENABLED is off. `cached` is the pinned record's advisory.
+   */
+  advise?: (tool: McpTool, cached: LlmAdvisory | undefined) => Promise<LlmAdvisory>;
   /** Queue a request to the server. It is written after the frame being routed is handled. */
   sendToServer(message: JsonRpcRequest): void;
   /** Re-read latch.lock and the pending queue if they changed on disk (approvals, rejections). */
@@ -217,8 +222,9 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
   const events: LatchEvent[] = [{ kind: "tools_listed", at, serverId, toolCount: analysis.toolCount }];
   for (const name of analysis.unchanged) ctx.observed.delete(name);
 
-  const added: PendingChange[] = [];
-  for (const { change, reason } of analysis.changes) {
+  const added: DetectedChange[] = [];
+  for (const detected of analysis.changes) {
+    const { change, reason } = detected;
     const { toolName, tier } = change;
     const composite = change.after.hashes.composite;
     if (ctx.observed.get(toolName)?.after.hashes.composite === composite) continue;
@@ -229,7 +235,7 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
     if (queued !== undefined) continue;
 
     ctx.pending = enqueue(ctx.pending, change);
-    added.push(change);
+    added.push(detected);
     events.push({ kind: "change_detected", at, serverId, toolName, tier, changeId: change.id });
     if (isAutoPass(tier)) {
       events.push({ kind: "auto_passed", at, serverId, toolName, tier });
@@ -243,10 +249,34 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
   if (added.length > 0) {
     // Merge into the queue on disk: other servers' proxies and `latch review` write it too.
     await persist(ctx, "pending queue", async () => {
-      ctx.pending = await updatePending(ctx.stateDir, (queue) => added.reduce(enqueue, queue));
+      ctx.pending = await updatePending(ctx.stateDir, (queue) => added.reduce((next, { change }) => enqueue(next, change), queue));
     });
+    // In the background: frames are routed one at a time, and a model call must not hold them up.
+    for (const { change, tool } of added) if (ctx.advise !== undefined && tool !== undefined) void attachAdvisory(ctx, change, tool);
   }
   for (const event of events) await persist(ctx, "event log", () => appendEvent(ctx.stateDir, event));
+}
+
+/**
+ * Run the LLM advisory for a queued change and store it on the queued entry: `after.advisory`
+ * (kept in latch.lock on approval) and its findings, for the reviewer. Advisory only: the tier is
+ * left alone, so it never blocks or unblocks a call, and any failure is logged and ignored.
+ */
+async function attachAdvisory(ctx: InterceptorContext, change: PendingChange, tool: McpTool): Promise<void> {
+  const where = `${ctx.serverId}/${change.toolName}`;
+  try {
+    const advisory = await ctx.advise!(tool, change.before?.advisory);
+    await updatePending(ctx.stateDir, (queue) =>
+      queue.some((entry) => entry.id === change.id)
+        ? queue.map((entry) =>
+            entry.id === change.id ? { ...entry, after: { ...entry.after, advisory }, findings: [...entry.findings, ...advisory.findings] } : entry,
+          )
+        : queue,
+    );
+    ctx.log(`${where}: LLM advisory added ${advisory.findings.length} finding(s) for review`);
+  } catch (error) {
+    ctx.log(`${where}: LLM advisory skipped: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /**

@@ -19,6 +19,8 @@ export interface DetectedChange {
   change: PendingChange;
   /** Why the change got its tier, for logs. */
   reason: string;
+  /** The definition as served, for the LLM advisory; absent when it could not be analyzed. */
+  tool?: McpTool;
 }
 
 /** Result of analyzing one tools/list result. */
@@ -130,6 +132,7 @@ function analyzeTool(context: ToolContext, name: string, raw: unknown): Detected
         findings,
       },
       reason: decision.reason,
+      tool,
     };
   } catch (error) {
     return unanalyzable(context, name, error instanceof Error ? error.message : String(error));

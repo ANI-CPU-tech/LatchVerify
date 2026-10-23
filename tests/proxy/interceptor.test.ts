@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { LlmError } from "../../src/analyze/llm.js";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
 import { MAX_OWN_PAGES, routeFrame, type InterceptorContext } from "../../src/proxy/interceptor.js";
 import { parseLine, type Direction, type JsonRpcRequest } from "../../src/proxy/transport.js";
@@ -244,6 +245,44 @@ describe("onToolsList", () => {
     expect(ctx.pending).toHaveLength(4);
     expect(logs.some((line) => line.startsWith("could not write the pending queue:"))).toBe(true);
     expect(logs.some((line) => line.startsWith("could not write the event log:"))).toBe(true);
+  });
+
+  it("stores the LLM advisory on the queued change without changing its tier", async () => {
+    const advise = vi.fn(async (tool: McpTool) => ({
+      contentHash: "a".repeat(64),
+      model: "test-model",
+      findings: [{ type: "pattern" as const, severity: "warn" as const, message: `LLM advisory: ${tool.name}`, evidence: "e" }],
+    }));
+    const { listTools, ctx, stateDir, logs } = await setup({ advise });
+    await listTools(poisoned);
+    expect(ctx.verified).toBe(true);
+    const tiers = ctx.pending.map((c) => [c.toolName, c.tier]);
+    await vi.waitFor(async () => expect((await readPending(stateDir)).every((c) => c.after.advisory !== undefined)).toBe(true));
+    const queue = await readPending(stateDir);
+    expect(queue.map((c) => [c.toolName, c.tier])).toEqual(tiers);
+    const forecast = queue.find((c) => c.toolName === "get_forecast")!;
+    expect(forecast.after.advisory).toMatchObject({ model: "test-model" });
+    expect(forecast.findings.at(-1)).toMatchObject({ message: "LLM advisory: get_forecast" });
+    const pinned = exampleLock().servers.weather!.tools.find((t) => t.name === "get_forecast")!;
+    expect(advise).toHaveBeenCalledWith(expect.objectContaining({ name: "get_forecast" }), pinned.advisory);
+    expect(logs).toContain("weather/get_forecast: LLM advisory added 1 finding(s) for review");
+  });
+
+  it("logs and ignores a failed LLM advisory, which never blocks", async () => {
+    const advise = vi.fn(async () => {
+      throw new LlmError("could not reach the LLM API at https://x/chat/completions");
+    });
+    const { listTools, fromClient, ctx, stateDir, logs } = await setup({ advise });
+    await listTools(benign);
+    expect(advise).not.toHaveBeenCalled();
+    await listTools([benign[0], { ...benign[1]!, description: `${benign[1]!.description} Now faster.` }]);
+    await vi.waitFor(() => expect(logs).toContain("weather/get_alerts: LLM advisory skipped: could not reach the LLM API at https://x/chat/completions"));
+    const [queued, ...rest] = await readPending(stateDir);
+    expect(rest).toEqual([]);
+    expect(queued).toMatchObject({ toolName: "get_alerts", tier: ctx.pending[0]!.tier });
+    expect(queued!.after.advisory).toBeUndefined();
+    expect(ctx.verified).toBe(true);
+    expect(await fromClient(call(9, "get_alerts", { state: "CA" }))).toEqual(FORWARD);
   });
 
   it("merges into the queue another server's proxy wrote, instead of overwriting it", async () => {

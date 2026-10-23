@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import type { LlmOptions } from "../analyze/llm.js";
 import { startProxy } from "../proxy/index.js";
 
 export interface ProxyCommandOptions {
@@ -7,6 +8,8 @@ export interface ProxyCommandOptions {
   command: string[];
   lockfilePath: string;
   stateDir: string;
+  /** LLM advisory pass options, when LATCH_LLM_ENABLED is on. */
+  llm?: LlmOptions;
 }
 
 /**
@@ -40,5 +43,6 @@ export async function runProxy(options: ProxyCommandOptions): Promise<number> {
     args,
     lockfilePath: resolve(options.lockfilePath),
     stateDir: resolve(options.stateDir),
+    llm: options.llm,
   });
 }

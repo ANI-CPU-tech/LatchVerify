@@ -74,7 +74,14 @@ program
   .argument("<command...>", "real server command, after --")
   .passThroughOptions()
   .action((command: string[], opts: { server: string }) =>
-    run(() => runProxy({ serverId: opts.server, command, ...globals() })),
+    run((env) =>
+      runProxy({
+        serverId: opts.server,
+        command,
+        ...globals(),
+        llm: env.llmEnabled ? { apiKey: env.llmApiKey!, baseUrl: env.llmBaseUrl, model: env.llmModel } : undefined,
+      }),
+    ),
   );
 
 await program.parseAsync();
