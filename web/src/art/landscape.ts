@@ -9,6 +9,7 @@ export const ART_COLORS = [
   "glow",
   "sun",
   "cloud",
+  "haze",
   "far",
   "far-shade",
   "snow",
@@ -40,6 +41,8 @@ const SNOW_LINE = 35;
 
 /** Peaks as [x, summit y, drop per pixel]; a range's ridge is the lowest envelope of its peaks. */
 type Peak = [number, number, number];
+/** Hazy range far behind the snowy one, seen only through its valleys. */
+const DISTANT: Peak[] = [[60, 34, 0.5], [165, 30, 0.45], [232, 38, 0.5], [340, 40, 0.45], [450, 32, 0.5]];
 const FAR: Peak[] = [[30, 30, 0.7], [88, 20, 0.6], [140, 34, 0.75], [196, 24, 0.65], [250, 42, 0.7], [305, 54, 0.5], [360, 38, 0.7], [418, 18, 0.6], [480, 30, 0.7]];
 const MID: Peak[] = [[10, 58, 0.35], [70, 50, 0.4], [150, 56, 0.35], [215, 52, 0.4], [400, 54, 0.4], [462, 48, 0.35], [520, 58, 0.4]];
 /** Foreground shore as [x, y] points; below the canvas means open water. */
@@ -152,6 +155,10 @@ export function landscape(): PixelArt {
       const b = cx + Math.round(w * to - hash(cy + dy, cx + 1) * 6);
       for (let x = a; x <= b; x++) set(x, cy + dy, "cloud");
     }
+  }
+
+  for (let x = 0; x < WIDTH; x++) {
+    for (let y = ridge(DISTANT, x, 3, 3); y < LAKE; y++) set(x, y, "haze");
   }
 
   // Far range: sunlit and shadowed faces, snow above the snow line reaching down the gullies.

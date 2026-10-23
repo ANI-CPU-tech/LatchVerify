@@ -50,6 +50,7 @@
     --art-glow: 30 95% 70%;
     --art-sun: 19 87% 54%;
     --art-cloud: 28 85% 80%;
+    --art-haze: 25 55% 77%;
     --art-far: 20 42% 62%;
     --art-far-shade: 18 32% 51%;
     --art-snow: 40 100% 97%;
@@ -95,6 +96,7 @@
     --art-glow: 35 80% 72%;
     --art-sun: 24 70% 54%;
     --art-cloud: 38 70% 84%;
+    --art-haze: 32 40% 77%;
     --art-far: 28 30% 60%;
     --art-far-shade: 26 24% 49%;
     --art-snow: 45 70% 95%;
@@ -140,6 +142,7 @@
     --art-glow: 32 95% 70%;
     --art-sun: 14 88% 55%;
     --art-cloud: 24 95% 81%;
+    --art-haze: 15 65% 78%;
     --art-far: 10 48% 60%;
     --art-far-shade: 8 38% 49%;
     --art-snow: 30 100% 95%;
@@ -185,6 +188,7 @@
     --art-glow: 28 70% 32%;
     --art-sun: 22 90% 58%;
     --art-cloud: 26 50% 38%;
+    --art-haze: 26 32% 21%;
     --art-far: 24 26% 30%;
     --art-far-shade: 24 22% 23%;
     --art-snow: 38 45% 72%;
@@ -230,6 +234,7 @@
     --art-glow: 30 15% 88%;
     --art-sun: 19 45% 72%;
     --art-cloud: 30 10% 91%;
+    --art-haze: 30 6% 87%;
     --art-far: 30 6% 78%;
     --art-far-shade: 30 6% 71%;
     --art-snow: 0 0% 100%;
@@ -275,6 +280,7 @@
     --art-glow: 35 85% 75%;
     --art-sun: 24 80% 52%;
     --art-cloud: 38 75% 85%;
+    --art-haze: 70 22% 73%;
     --art-far: 85 18% 56%;
     --art-far-shade: 95 18% 46%;
     --art-snow: 48 60% 96%;
