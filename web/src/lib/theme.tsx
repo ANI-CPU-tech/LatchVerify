@@ -1,11 +1,11 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { SURFACE_STORAGE_KEY, parseSurface, readSurface, writeSurface } from "./surface";
 import { THEME_STORAGE_KEY, parsePreference, readPreference, resolveTheme, writePreference, type ThemeId, type ThemePreference } from "./themes";
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
-/** How long colors cross-fade when the theme changes. */
-const THEME_FADE_MS = 400;
+const prefersReducedMotion = (): boolean => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 const safeStorage = (): Storage | undefined => {
   try {
@@ -42,24 +42,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.style.setProperty("--surface-mix", String(surface));
   }, [surface]);
 
-  // On a theme change (not the first paint), cross-fade colors: index.css transitions colors on
-  // everything under html.theme-switching for THEME_FADE_MS, motion-safe only.
-  const appliedTheme = useRef<ThemeId | null>(null);
   useEffect(() => {
-    const root = document.documentElement;
-    const switching = appliedTheme.current !== null && appliedTheme.current !== theme;
-    appliedTheme.current = theme;
-    if (!switching) {
-      root.setAttribute("data-theme", theme);
-      return;
-    }
-    root.classList.add("theme-switching");
-    root.setAttribute("data-theme", theme);
-    const timer = window.setTimeout(() => root.classList.remove("theme-switching"), THEME_FADE_MS);
-    return () => {
-      window.clearTimeout(timer);
-      root.classList.remove("theme-switching");
-    };
+    document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
   useEffect(() => {
@@ -79,9 +63,25 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  /**
+   * Applies at once. A change the viewer picks cross-fades the whole page with the View Transition
+   * API: a snapshot of the old theme fades into the new one, sky gradient and artwork included,
+   * which per-property CSS transitions cannot do (gradients do not transition and the day and
+   * night art are different elements). Without the API, or with reduced motion, it switches at once.
+   */
   const setPreference = (next: ThemePreference) => {
-    setPreferenceState(next);
-    return { saved: writePreference(safeStorage(), next) };
+    const saved = writePreference(safeStorage(), next);
+    const nextTheme = resolveTheme(next, prefersDark);
+    const apply = () => {
+      flushSync(() => setPreferenceState(next));
+      document.documentElement.setAttribute("data-theme", nextTheme);
+    };
+    if (nextTheme !== theme && typeof document.startViewTransition === "function" && !prefersReducedMotion()) {
+      document.startViewTransition(apply);
+    } else {
+      apply();
+    }
+    return { saved };
   };
 
   const setSurface = (next: number) => {
