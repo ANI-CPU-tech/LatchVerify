@@ -48,8 +48,12 @@ const BUTTON = {
   ghost: "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
 } as const;
 
+/**
+ * Buttons ease their colors, lift a pixel with a soft shadow on hover and give a little on press;
+ * disabled ones stay put. Movement only for viewers who have not asked for reduced motion.
+ */
 export const buttonClass = (variant: keyof typeof BUTTON = "secondary", size: "sm" | "md" = "md"): string =>
-  `inline-flex items-center justify-center gap-2 rounded-md border font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+  `inline-flex items-center justify-center gap-2 rounded-md border font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:shadow-card motion-safe:hover:-translate-y-px motion-safe:active:translate-y-0 motion-safe:active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none ${
     size === "sm" ? "px-2.5 py-1 text-xs" : "px-4 py-2 text-sm"
   } ${BUTTON[variant]}`;
 
@@ -103,9 +107,11 @@ export function Panel({
 /** "View all →" style link for panel headers. */
 export function PanelLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a href={href} className="inline-flex shrink-0 items-center gap-1 rounded-sm text-xs font-medium text-primary hover:underline">
+    <a href={href} className="group inline-flex shrink-0 items-center gap-1 rounded-sm text-xs font-medium text-primary hover:underline">
       {children}
-      <ArrowRightIcon />
+      <span className="transition-transform duration-200 motion-safe:group-hover:translate-x-0.5">
+        <ArrowRightIcon />
+      </span>
     </a>
   );
 }
