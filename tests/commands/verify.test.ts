@@ -1,9 +1,11 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VERIFY_EXIT, VERIFY_REPORT_VERSION, runVerify, type VerifyReport } from "../../src/commands/verify.js";
 import { LockFileSchema, type LockFile, type ServerEntry } from "../../src/schema/index.js";
@@ -234,5 +236,18 @@ describe("runVerify --json", () => {
     const { report, text } = await verifyJson(await lockfile(listing([...benignTools, hostile])));
     expect(text).not.toContain("\u001b");
     expect(report.servers[0]!.tools[0]!.name).toBe("evil\u001b[2Jtool");
+  });
+});
+
+describe("latch verify (CLI)", () => {
+  it("exits 3, not the drift code, when the command fails unexpectedly", () => {
+    const tsx = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
+    const result = spawnSync(process.execPath, ["--import", tsx, join(root, "src/cli.ts"), "verify"], {
+      cwd: root,
+      env: { ...process.env, LATCH_UI_PORT: "not-a-port" },
+      encoding: "utf8",
+    });
+    expect(result.stderr).toContain("LATCH_UI_PORT must be a port number");
+    expect(result.status).toBe(VERIFY_EXIT.error);
   });
 });

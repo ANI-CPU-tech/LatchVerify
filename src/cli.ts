@@ -7,19 +7,20 @@ import { runInit } from "./commands/init.js";
 import { runInspect } from "./commands/inspect.js";
 import { runProxy } from "./commands/proxy.js";
 import { runReview } from "./commands/review.js";
-import { runVerify } from "./commands/verify.js";
+import { VERIFY_EXIT, runVerify } from "./commands/verify.js";
 
 /**
  * Run a command and turn its result (or thrown error) into the process exit code. The
  * environment (./.env included) is validated first, so a malformed variable stops every command.
+ * A throw exits with `failureCode`.
  */
-async function run(command: (env: LatchEnv) => Promise<number>): Promise<void> {
+async function run(command: (env: LatchEnv) => Promise<number>, failureCode = 1): Promise<void> {
   try {
     loadDotEnv();
     process.exitCode = await command(loadEnv());
   } catch (error) {
     console.error(pc.red(error instanceof Error ? error.message : String(error)));
-    process.exitCode = 1;
+    process.exitCode = failureCode;
   }
 }
 
@@ -55,7 +56,8 @@ program
   .command("verify")
   .description("CI check: exit non-zero if any server drifted from latch.lock")
   .option("--json", "machine-readable output", false)
-  .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: globals().lockfilePath })));
+  // An unexpected failure is an error (3), never drift (1): CI must tell the two apart.
+  .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: globals().lockfilePath }), VERIFY_EXIT.error));
 
 program
   .command("inspect")
