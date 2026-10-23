@@ -9,6 +9,16 @@ import { navigate } from "../lib/useRoute";
 export function Tools({ server }: { server: string | null }) {
   const { lockfile, reload } = useData();
   const [query, setQuery] = useState("");
+  // Rows whose details are open. Details render only while open, so their rise plays on every open
+  // (a closed <details> keeps its content in the DOM) and closed rows do not each build a JsonView.
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (key: string, isOpen: boolean) =>
+    setOpen((current) => {
+      const next = new Set(current);
+      if (isOpen) next.add(key);
+      else next.delete(key);
+      return next;
+    });
 
   const lock = lockfile.status === "ready" ? lockfile.data : null;
   const serverIds = lock ? Object.keys(lock.servers).sort() : [];
@@ -79,7 +89,7 @@ export function Tools({ server }: { server: string | null }) {
               const reach = isHighReach(tool.capabilities);
               return (
                 <li key={`${tool.serverId}/${tool.name}`}>
-                  <details className="group">
+                  <details className="group" onToggle={(event) => toggle(`${tool.serverId}/${tool.name}`, event.currentTarget.open)}>
                     <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition-colors duration-200 hover:bg-muted/50 [&::-webkit-details-marker]:hidden">
                       <span className="text-muted-foreground transition-[transform,color] duration-200 ease-out group-open:rotate-90 group-hover:text-foreground">
                         <ChevronRightIcon />
@@ -106,13 +116,14 @@ export function Tools({ server }: { server: string | null }) {
                         </time>
                       </span>
                     </summary>
-                    {/* Rises in each time the row opens (display none to shown restarts the animation). */}
+                    {open.has(`${tool.serverId}/${tool.name}`) && (
                     <div className="space-y-2 px-4 pb-4 motion-safe:animate-[ui-rise_0.25s_ease-out]">
                       <p className="text-xs text-muted-foreground">
                         Composite hash <code className="break-all font-mono">{tool.hashes.composite}</code> · spec {tool.specVersion}
                       </p>
                       <JsonView value={tool} label={`${tool.serverId}/${tool.name} record`} />
                     </div>
+                    )}
                   </details>
                 </li>
               );
