@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "sourceMap": true,
+    "noEmit": true,
+    // Shared-types alias. Used by web/ (Vite + web/tsconfig.json mirror it).
+    // src/ itself uses relative imports: tsc does not rewrite path aliases in
+    // emitted JS, so using "@schema/*" inside src/ would break dist/.
+    "paths": {
+      "@schema/*": ["./src/schema/*"]
+    }
+  },
+  "include": ["src", "tests", "demo", "vitest.config.ts"]
+}
