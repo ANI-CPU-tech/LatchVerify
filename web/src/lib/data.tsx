@@ -1,5 +1,5 @@
 import type { LatchEvent, LockFile } from "@schema/index.js";
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiUnreachableError, fetchEvents, fetchLockfile, fetchLockfileGit, fetchPending, type LockfileGitStatus, type ReviewItem } from "./api";
 
 /**
@@ -11,22 +11,32 @@ export type Resource<T> =
   | { status: "ready"; data: T; refreshing: boolean }
   | { status: "error"; error: unknown; refreshing: boolean };
 
-function useResource<T>(load: (signal: AbortSignal) => Promise<T>, reloadKey: number): Resource<T> {
+/** How often the data refetches while the API is connected, in milliseconds. */
+const POLL_MS = 3000;
+
+/**
+ * A `pollKey` change refetches silently: no `refreshing` flag, and a failure keeps the
+ * last state (the next tick retries).
+ */
+function useResource<T>(load: (signal: AbortSignal) => Promise<T>, reloadKey: number, pollKey: number): Resource<T> {
   const [state, setState] = useState<Resource<T>>({ status: "loading" });
+  const lastReloadKey = useRef(reloadKey);
   useEffect(() => {
+    const silent = lastReloadKey.current === reloadKey && pollKey > 0;
+    lastReloadKey.current = reloadKey;
     const controller = new AbortController();
-    setState((current) => (current.status === "loading" ? current : { ...current, refreshing: true }));
+    if (!silent) setState((current) => (current.status === "loading" ? current : { ...current, refreshing: true }));
     load(controller.signal).then(
       (data) => {
         if (!controller.signal.aborted) setState({ status: "ready", data, refreshing: false });
       },
       (error: unknown) => {
-        if (!controller.signal.aborted) setState({ status: "error", error, refreshing: false });
+        if (!controller.signal.aborted && !silent) setState({ status: "error", error, refreshing: false });
       },
     );
     return () => controller.abort();
-    // Only reloadKey triggers a fetch; `load` is a fixed fetcher for this resource.
-  }, [reloadKey]);
+    // Only the keys trigger a fetch; `load` is a fixed fetcher for this resource.
+  }, [reloadKey, pollKey]);
   return state;
 }
 
@@ -49,10 +59,11 @@ const isBusy = (resource: Resource<unknown>): boolean => resource.status === "lo
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [reloadKey, setReloadKey] = useState(0);
-  const pending = useResource(fetchPending, reloadKey);
-  const lockfile = useResource(fetchLockfile, reloadKey);
-  const events = useResource((signal) => fetchEvents(undefined, signal), reloadKey);
-  const git = useResource(fetchLockfileGit, reloadKey);
+  const [pollKey, setPollKey] = useState(0);
+  const pending = useResource(fetchPending, reloadKey, pollKey);
+  const lockfile = useResource(fetchLockfile, reloadKey, pollKey);
+  const events = useResource((signal) => fetchEvents(undefined, signal), reloadKey, pollKey);
+  const git = useResource(fetchLockfileGit, reloadKey, pollKey);
   const reload = useCallback(() => setReloadKey((n) => n + 1), []);
 
   const api =
@@ -61,6 +72,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       : pending.status === "error" && pending.error instanceof ApiUnreachableError
         ? "unreachable"
         : "connected";
+
+  // Poll so a change the proxy queues shows up without a manual Refresh.
+  useEffect(() => {
+    if (api !== "connected") return;
+    const timer = setInterval(() => setPollKey((n) => n + 1), POLL_MS);
+    return () => clearInterval(timer);
+  }, [api]);
 
   const value: AppData = {
     pending,
