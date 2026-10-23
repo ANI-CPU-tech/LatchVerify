@@ -29,6 +29,12 @@ OutputBaseFilename=latchverify-{#AppVersion}-windows-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+#ifdef Sign
+; scripts/package passes /DSign and /Slatchsign=<signtool command> when a certificate is
+; configured. Smart App Control requires both executables to be signed.
+SignTool=latchsign
+SignedUninstaller=yes
+#endif
 
 [Tasks]
 Name: addtopath; Description: "Add latch to PATH (needed by MCP client configs that ""latch init"" writes)"
