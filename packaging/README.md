@@ -28,7 +28,7 @@ every prerequisite, validation and verification check passed.
 |---|---|---|---|
 | `linux-tarball` | `latchverify-<v>-linux-portable.tar.gz` | Linux | GNU tar |
 | `windows-zip` | `latchverify-<v>-windows-portable.zip` | Linux, Windows, macOS | bsdtar (Windows: built-in `tar`) |
-| `windows-installer` | `latchverify-<v>-windows-setup.exe` | Windows | Inno Setup 6 |
+| `windows-installer` | `latchverify-<v>-windows-setup.exe` | Windows | Inno Setup 6; signtool + a certificate to sign |
 | `arch` | `latchverify-<v>-1-any.pkg.tar.zst` (+ PKGBUILD) | Arch, CachyOS | makepkg, fakeroot |
 | `deb` | `latchverify_<v>-1_all.deb` | Linux | dpkg-deb |
 | `flatpak` | `latchverify-<v>.flatpak` (local only) | Linux | flatpak-builder, freedesktop 24.08 runtime + SDK + node22 extension |
@@ -36,8 +36,19 @@ every prerequisite, validation and verification check passed.
 All targets need pnpm and a prior `pnpm install`. Optional validators run when installed and
 are reported as skipped otherwise: `desktop-file-validate`, `appstreamcli`, `namcap`, `lintian`.
 
-`.github/workflows/package.yml` builds the Windows installer and the `.deb` on GitHub runners.
-It is manual-trigger only and keeps the packages as workflow artifacts.
+**Releases** are built and published by GitHub Actions when you push a `v*` tag:
+`.github/workflows/release.yml` runs `package.yml` (every target, each on a native runner),
+signs, and creates the GitHub Release. See [RELEASING.md](RELEASING.md), which also covers
+setting up Windows code signing.
+
+`pnpm package --release <v>` collects the successful builds into
+`build/packages/<v>/release/` (each file once, SHA256SUMS, and SHA256SUMS.asc when
+`LATCH_GPG_KEY_ID` is set) and writes `RELEASE_NOTES.md`.
+
+**Windows signing:** Smart App Control and SmartScreen block unsigned installers and accept
+only certificates that chain to Microsoft's Trusted Root Program. Set
+`LATCH_WIN_SIGN_THUMBPRINT`, or `LATCH_WIN_SIGN_DLIB` + `LATCH_WIN_SIGN_METADATA` (Azure
+Artifact Signing). `LATCH_WIN_SIGN_REQUIRED=1` fails an unsigned build.
 
 Maintainer metadata: set `LATCH_PACKAGER="Name <email>"`; it defaults to a neutral
 "LatchVerify contributors" address.
@@ -70,6 +81,10 @@ PATH option take care of that; the portable archives document it.
 - **AppImage.** An AppImage must bundle the Node.js runtime and needs `appimagetool`. Neither
   is in this repository, and fetching them would mean downloading and running third-party
   binaries during the build. The portable archive covers the same "any distribution" case.
-- **Signed packages.** Packages are unsigned. Sign them (pacman `--sign`, `debsign`,
-  Authenticode) in your release process.
+- **Per-package Linux signatures.** The `.deb` and `.pkg.tar.zst` are not individually
+  signed (`debsigs`, pacman `.sig`). Release integrity comes from `SHA256SUMS`, its GPG
+  signature and GitHub build-provenance attestations. Distribute through a signed apt or
+  pacman repository if you need per-package signatures.
+- **A signed Windows zip.** Windows blocks `.cmd` files extracted from a downloaded zip
+  under Smart App Control; use the signed installer there.
 - **Flathub publication.** See [flatpak/FLATHUB.md](flatpak/FLATHUB.md).
