@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { PixelLandscape, StarrySky } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
 import { useTheme } from "../lib/theme";
@@ -39,28 +39,60 @@ function QueueCount() {
   );
 }
 
+/** Where the active link sits inside the nav, for the sliding highlight. */
+type Box = { x: number; y: number; width: number; height: number };
+
+/**
+ * The section links. One highlight sits behind the active link and slides to the next one on
+ * navigation; it is measured from the DOM, so it follows wrapping, zoom and font changes.
+ */
 function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "strip" }) {
+  const wrapper = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<Box | null>(null);
+
+  useLayoutEffect(() => {
+    const root = wrapper.current;
+    if (!root) return;
+    const measure = () => {
+      const link = root.querySelector<HTMLElement>('[aria-current="page"]');
+      setBox(link ? { x: link.offsetLeft, y: link.offsetTop, width: link.offsetWidth, height: link.offsetHeight } : null);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [current]);
+
   return (
-    <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"}>
-      {NAV.map((item) => {
-        const active = item.page === current;
-        return (
-          <li key={item.page}>
-            <a
-              href={item.href}
-              aria-current={active ? "page" : undefined}
-              className={`flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                active ? "bg-primary text-primary-foreground" : "text-sidebar-foreground hover:bg-muted"
-              }`}
-            >
-              <span className={`text-base ${active ? "" : "text-muted-foreground"}`}>{item.icon}</span>
-              {item.label}
-              {item.page === "review" && <QueueCount />}
-            </a>
-          </li>
-        );
-      })}
-    </ul>
+    <div ref={wrapper} className="relative">
+      {box && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute left-0 top-0 rounded-md bg-primary shadow-card transition-[transform,width,height] duration-300 ease-out motion-reduce:transition-none"
+          style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.width, height: box.height }}
+        />
+      )}
+      <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"}>
+        {NAV.map((item) => {
+          const active = item.page === current;
+          return (
+            <li key={item.page}>
+              <a
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={`relative flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors duration-300 ${
+                  active ? `text-primary-foreground ${box ? "" : "bg-primary"}` : "text-sidebar-foreground hover:bg-muted"
+                }`}
+              >
+                <span className={`text-base transition-colors duration-300 ${active ? "" : "text-muted-foreground"}`}>{item.icon}</span>
+                {item.label}
+                {item.page === "review" && <QueueCount />}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
