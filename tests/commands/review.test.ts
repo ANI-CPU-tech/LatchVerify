@@ -349,6 +349,18 @@ describe("runReview --ui", () => {
     expect((await readPending(dir)).some((c) => c.id === forecast.id)).toBe(false);
   });
 
+  it("records approvals as the reviewer option when one is given", async () => {
+    const forecast = (await readPending(dir))[0]!;
+    const { text } = await withUi(
+      async (url) => {
+        await fetch(`${url}/api/pending/${forecast.id}/approve`, { method: "POST", headers: { "X-Latch-Client": "test" } });
+      },
+      { reviewer: " lead@example.com " },
+    );
+    expect(text).toContain("approvals are recorded as lead@example.com");
+    expect(findRecord(await readLockfile(lockfilePath), "weather", "get_forecast")!.approvedBy).toBe("lead@example.com");
+  });
+
   it("explains how to build the UI when it is missing", async () => {
     const empty = join(dir, "empty");
     await mkdir(empty);

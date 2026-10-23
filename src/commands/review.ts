@@ -177,7 +177,8 @@ async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: s
   await readLockfile(lockfilePath);
   await readPending(stateDir);
 
-  const reviewer = defaultReviewer();
+  const reviewer = (options.reviewer ?? defaultReviewer()).trim();
+  if (reviewer === "") throw new Error("latch review: no reviewer name; set LATCH_REVIEWER or git config user.email");
   let handle;
   try {
     handle = await startUiServer({ port: options.port, lockfilePath, stateDir, reviewer, staticDir });
