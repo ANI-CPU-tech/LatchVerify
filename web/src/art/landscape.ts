@@ -1,123 +1,241 @@
 /**
- * Original pixel-art landscape (sun, mountains, pines, birds), generated from a few shapes so
- * it stays crisp at any size. Pure data: the React component (PixelLandscape.tsx) paints each
- * color with a theme token (--art-*), so every theme recolors it without new assets.
+ * Original pixel-art landscape: a sun setting behind snowy peaks, forested hills, a lake that
+ * mirrors them and pine shores in front. Built from a few shapes and seeded noise, so it is
+ * deterministic and stays crisp at any size. Pure data: the React component (PixelLandscape.tsx)
+ * paints each color with a theme token (--art-*), so every theme recolors it without new assets.
  */
 
-export const ART_COLORS = ["glow", "sun", "far", "snow", "near", "tree", "bird"] as const;
+export const ART_COLORS = [
+  "glow",
+  "sun",
+  "cloud",
+  "far",
+  "far-shade",
+  "snow",
+  "snow-shade",
+  "mid",
+  "mid-shade",
+  "water",
+  "near",
+  "tree",
+  "bird",
+] as const;
 export type ArtColor = (typeof ART_COLORS)[number];
 
 export interface PixelArt {
   width: number;
   height: number;
-  /** Horizontal runs of one color, painted in ART_COLORS order. */
+  /** Horizontal runs of one color; no two runs share a pixel. */
   runs: Array<{ x: number; y: number; w: number; color: ArtColor }>;
 }
 
-interface Scene {
-  width: number;
-  height: number;
-  sun: { x: number; y: number; r: number };
-  /** Ridge lines as [x, y] points, left to right, spanning the full width. */
-  far: Array<[number, number]>;
-  near: Array<[number, number]>;
-  /** Pines as [x, height]; each stands on the near ridge. */
-  pines: Array<[number, number]>;
-  birds: Array<[number, number]>;
+const WIDTH = 512;
+const HEIGHT = 96;
+/** Near the middle, so narrow screens (which crop the sides) still show it. */
+const SUN = { x: 300, y: 50, r: 15 };
+/** Water line of the lake: below it is water unless the shore covers it. */
+const LAKE = 74;
+/** Snow covers the peaks above this row, give or take the noise of the gullies. */
+const SNOW_LINE = 35;
+
+/** Peaks as [x, summit y, drop per pixel]; a range's ridge is the lowest envelope of its peaks. */
+type Peak = [number, number, number];
+const FAR: Peak[] = [[30, 30, 0.7], [88, 20, 0.6], [140, 34, 0.75], [196, 24, 0.65], [250, 42, 0.7], [305, 54, 0.5], [360, 38, 0.7], [418, 18, 0.6], [480, 30, 0.7]];
+const MID: Peak[] = [[10, 58, 0.35], [70, 50, 0.4], [150, 56, 0.35], [215, 52, 0.4], [400, 54, 0.4], [462, 48, 0.35], [520, 58, 0.4]];
+/** Foreground shore as [x, y] points; below the canvas means open water. */
+const SHORE: Array<[number, number]> = [[0, 70], [60, 75], [130, 83], [185, 91], [215, 100], [380, 100], [410, 90], [460, 79], [512, 72]];
+/** Stratus streaks as [x, y, width]; drawn in front of the sun, behind the peaks. */
+const CLOUDS: Array<[number, number, number]> = [[262, 42, 70], [318, 54, 50], [118, 26, 60], [398, 30, 46], [40, 22, 40]];
+const BIRDS: Array<[number, number]> = [[176, 30], [186, 26], [195, 31], [168, 34], [206, 24]];
+
+/** 4x4 ordered-dither thresholds, the pixel-art stand-in for a gradient. */
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+const dither = (x: number, y: number, density: number) => BAYER[(y & 3) * 4 + (x & 3)]! < density * 16;
+
+/** Integer hash to [0, 1). */
+function hash(n: number, seed: number): number {
+  let h = Math.imul(n ^ Math.imul(seed, 0x9e3779b1), 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
 }
 
-const SCENES = {
-  /** Dashboard header: wide, sun to the right. */
-  wide: {
-    width: 160,
-    height: 56,
-    sun: { x: 112, y: 30, r: 14 },
-    far: [[0, 42], [20, 31], [36, 37], [60, 20], [82, 34], [98, 27], [118, 39], [140, 23], [160, 33]],
-    near: [[0, 49], [28, 43], [50, 51], [76, 42], [104, 51], [130, 45], [160, 52]],
-    pines: [[6, 12], [12, 16], [18, 11], [122, 13], [129, 17], [136, 12], [148, 15], [154, 10]],
-    birds: [[38, 10], [46, 6], [53, 12]],
-  },
-  /** Sidebar footer: narrow and tall, pines in front. */
-  tall: {
-    width: 64,
-    height: 72,
-    sun: { x: 38, y: 34, r: 12 },
-    far: [[0, 46], [14, 32], [26, 40], [40, 26], [52, 38], [64, 30]],
-    near: [[0, 58], [18, 52], [34, 60], [50, 54], [64, 60]],
-    pines: [[5, 18], [12, 24], [20, 15], [48, 16], [56, 22], [62, 14]],
-    birds: [[10, 12], [18, 8], [24, 14]],
-  },
-} satisfies Record<string, Scene>;
-
-export type ArtVariant = keyof typeof SCENES;
-
-/** y of a ridge at column x (linear between points, rounded to whole pixels). */
-function ridgeAt(points: Array<[number, number]>, x: number): number {
-  for (let i = 1; i < points.length; i++) {
-    const [x0, y0] = points[i - 1]!;
-    const [x1, y1] = points[i]!;
-    if (x <= x1) return Math.round(y0 + ((y1 - y0) * (x - x0)) / (x1 - x0));
+/** Smooth 1D value noise in [0, 1], four octaves. */
+function fbm(x: number, seed: number): number {
+  let sum = 0;
+  let amp = 0.5;
+  for (let octave = 0; octave < 4; octave++) {
+    const f = x * 2 ** octave;
+    const i = Math.floor(f);
+    const t = (f - i) ** 2 * (3 - 2 * (f - i));
+    sum += amp * (hash(i, seed + octave) * (1 - t) + hash(i + 1, seed + octave) * t);
+    amp /= 2;
   }
-  return points[points.length - 1]![1];
+  return sum / 0.9375;
 }
 
-export function landscape(variant: ArtVariant): PixelArt {
-  const scene: Scene = SCENES[variant];
-  const { width, height } = scene;
-  const grid: Array<ArtColor | null> = new Array(width * height).fill(null);
+const cone = (p: Peak, x: number) => p[1] + Math.abs(x - p[0]) * p[2];
+
+/** Ridge y at column x. */
+function ridge(peaks: Peak[], x: number, seed: number, rough: number): number {
+  return Math.round(Math.min(...peaks.map((p) => cone(p, x))) + (fbm(x / 6, seed) - 0.5) * rough);
+}
+
+/**
+ * The peak whose surface a pixel is on: lower peaks stand in front of higher ones, so faces meet
+ * along the slopes of the front peaks, not as vertical seams under each valley.
+ */
+function ownerAt(peaks: Peak[], x: number, y: number): Peak {
+  let owner: Peak | undefined;
+  let nearest = peaks[0]!;
+  for (const p of peaks) {
+    if (y >= cone(p, x) && (!owner || p[1] > owner[1])) owner = p;
+    if (cone(p, x) < cone(nearest, x)) nearest = p;
+  }
+  // Ridge noise can lift a pixel above every cone; it then belongs to the one forming the ridge.
+  return owner ?? nearest;
+}
+
+/**
+ * True on the face of a peak turned away from the sun (the crest between faces is dithered),
+ * and in the gullies of the sunlit face.
+ */
+function shaded(peak: Peak, x: number, y: number): boolean {
+  const away = peak[0] < SUN.x ? -1 : 1;
+  const below = y - peak[1];
+  // The crest runs down from the summit toward the sunlit side, wandering a little.
+  const crest = peak[0] - away * below * 0.55 + (fbm(y / 3, peak[0]) - 0.5) * 5;
+  const d = (x - crest) * away;
+  if (d > 1 || (d > -1 && (x + y) % 2 === 0)) return true;
+  // Gullies follow the fall line of the face and thin out toward its foot.
+  return fbm((x + away * below * 0.6) / 2, peak[0] + 1) > 0.58 + below / 80;
+}
+
+function shoreAt(x: number): number {
+  for (let i = 1; i < SHORE.length; i++) {
+    const [x0, y0] = SHORE[i - 1]!;
+    const [x1, y1] = SHORE[i]!;
+    if (x <= x1) return Math.round(y0 + ((y1 - y0) * (x - x0)) / (x1 - x0) + (fbm(x / 6, 40) - 0.5) * 4);
+  }
+  return SHORE[SHORE.length - 1]![1];
+}
+
+export function landscape(): PixelArt {
+  const grid: Array<ArtColor | null> = new Array(WIDTH * HEIGHT).fill(null);
+  const get = (x: number, y: number) => (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT ? grid[y * WIDTH + x]! : null);
   const set = (x: number, y: number, color: ArtColor) => {
-    if (x >= 0 && x < width && y >= 0 && y < height) grid[y * width + x] = color;
+    if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) grid[y * WIDTH + x] = color;
   };
 
-  // Sun with a one-pixel dithered halo. Distances are squared to stay in integers.
-  const { sun } = scene;
-  for (let y = sun.y - sun.r - 3; y <= sun.y + sun.r + 3; y++) {
-    for (let x = sun.x - sun.r - 3; x <= sun.x + sun.r + 3; x++) {
-      const d = (x - sun.x) ** 2 + (y - sun.y) ** 2;
-      if (d <= sun.r ** 2) set(x, y, "sun");
-      else if (d <= (sun.r + 2) ** 2 && (x + y) % 2 === 0) set(x, y, "glow");
+  // Afterglow low on the horizon, fading with height and distance from the sun.
+  for (let y = 36; y < LAKE; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      const density = Math.max(0, 1 - Math.abs(x - SUN.x) / 190) * Math.min(1, (y - 36) / 34) * 0.55;
+      if (dither(x, y, density)) set(x, y, "glow");
     }
   }
 
-  // Far range, with snow on the top rows of the high peaks.
-  const peak = Math.min(...scene.far.map(([, y]) => y));
-  for (let x = 0; x < width; x++) {
-    const top = ridgeAt(scene.far, x);
-    for (let y = top; y < height; y++) set(x, y, y - top < 3 && top <= peak + 6 ? "snow" : "far");
-  }
-
-  for (let x = 0; x < width; x++) {
-    for (let y = ridgeAt(scene.near, x); y < height; y++) set(x, y, "near");
-  }
-
-  // Pines: stepped tiers, two-pixel trunk, standing a little into the near ridge.
-  for (const [cx, h] of scene.pines) {
-    const base = ridgeAt(scene.near, cx) + 2;
-    const top = base - h;
-    for (let r = 0; r < h - 2; r++) {
-      // Widens every other row; every fourth row steps back in, which reads as tiers.
-      const half = Math.floor(r / 2) - (r > 0 && r % 4 === 0 ? 1 : 0);
-      for (let dx = -half; dx <= half; dx++) set(cx + dx, top + r, "tree");
+  // Sun with a dithered halo. Distances are squared until the halo needs the real one.
+  for (let y = SUN.y - SUN.r - 7; y <= SUN.y + SUN.r + 7; y++) {
+    for (let x = SUN.x - SUN.r - 7; x <= SUN.x + SUN.r + 7; x++) {
+      const d = (x - SUN.x) ** 2 + (y - SUN.y) ** 2;
+      if (d <= SUN.r ** 2) set(x, y, "sun");
+      else if (d <= (SUN.r + 1) ** 2 || dither(x, y, 1 - (Math.sqrt(d) - SUN.r) / 7)) set(x, y, "glow");
     }
-    set(cx, base - 2, "tree");
+  }
+
+  // Clouds: a long streak with shorter ones above and below, frayed ends.
+  for (const [cx, cy, w] of CLOUDS) {
+    for (const [dy, from, to] of [[0, 0.25, 0.7], [1, 0, 1], [2, 0.15, 0.55]] as const) {
+      const a = cx + Math.round(w * from + hash(cy + dy, cx) * 6);
+      const b = cx + Math.round(w * to - hash(cy + dy, cx + 1) * 6);
+      for (let x = a; x <= b; x++) set(x, cy + dy, "cloud");
+    }
+  }
+
+  // Far range: sunlit and shadowed faces, snow above the snow line reaching down the gullies.
+  for (let x = 0; x < WIDTH; x++) {
+    const top = ridge(FAR, x, 1, 5);
+    const snow = SNOW_LINE + (fbm(x / 3, 7) - 0.5) * 16;
+    for (let y = top; y < LAKE; y++) {
+      const shade = shaded(ownerAt(FAR, x, y), x, y);
+      if (y < snow) set(x, y, shade ? "snow-shade" : "snow");
+      // Haze lightens the shadows toward the valley floor.
+      else set(x, y, shade && !dither(x, y, (y - 58) / 30) ? "far-shade" : "far");
+    }
+  }
+
+  // Mid range: forested hills, a fringe of distant treetops on the ridge and darker clumps.
+  for (let x = 0; x < WIDTH; x++) {
+    const top = ridge(MID, x, 2, 3);
+    const fringe = hash(x, 11) > 0.85 ? 2 : hash(x, 11) > 0.55 ? 1 : 0;
+    for (let y = top - fringe; y < LAKE; y++) {
+      const clump = hash(x * 977 + y, 12) > 0.88;
+      const at = Math.max(y, top);
+      set(x, y, shaded(ownerAt(MID, x, at), x, at) || clump ? "mid-shade" : "mid");
+    }
+  }
+
+  // Lake: a mirror of the ranges broken by ripples that thicken toward the viewer, and the
+  // sun's glitter path.
+  for (let y = LAKE; y < HEIGHT; y++) {
+    const depth = y - LAKE;
+    const shift = Math.round((fbm(y * 0.7, 21) - 0.5) * 6);
+    for (let x = 0; x < WIDTH; x++) {
+      const ripple = fbm(x / 10, 60 + y) < 0.25 + depth * 0.012;
+      const above = ripple ? null : get(x + shift, LAKE - 1 - depth);
+      let color: ArtColor = "water";
+      if (above === "far" || above === "far-shade") color = "far-shade";
+      else if (above === "snow" || above === "snow-shade") color = "snow-shade";
+      else if (above === "mid" || above === "mid-shade") color = "mid-shade";
+      const half = 3 + depth * 1.2;
+      const dx = Math.abs(x - SUN.x);
+      if (depth % 2 === 0 && dx <= half && fbm(x / 3, 30 + y) > 0.45) color = dx < half * 0.4 ? "glow" : "sun";
+      set(x, y, color);
+    }
+  }
+
+  // Shore with grass tufts and dark speckles, then pines on it: taller where the shore rises toward the viewer.
+  for (let x = 0; x < WIDTH; x++) {
+    const shore = shoreAt(x);
+    if (hash(x, 70) > 0.6) set(x, shore - 1, "near");
+    for (let y = shore; y < HEIGHT; y++) set(x, y, hash(x * 977 + y, 71) > 0.9 ? "tree" : "near");
+  }
+  for (let cx = -4; cx < WIDTH + 4; cx += 2 + Math.floor(hash(cx, 50) * 4)) {
+    const ground = shoreAt(Math.min(Math.max(cx, 0), WIDTH - 1));
+    if (ground > 93) continue;
+    const h = Math.round(8 + (94 - ground) * 0.55 + hash(cx, 51) * 7);
+    const base = ground + 2;
+    const lit = cx < SUN.x ? 1 : -1;
+    for (let r = 0; r < h - 1; r++) {
+      // Each tier of branches flares out, then the next starts narrower; jitter frays the edges.
+      const half = Math.floor(r * 0.2 + (r % 4) * 0.35);
+      const left = half + (hash(r, cx * 7) > 0.75 ? 1 : 0);
+      const right = half + (hash(r, cx * 7 + 1) > 0.75 ? 1 : 0);
+      for (let dx = -left; dx <= right; dx++) {
+        const edge = dx === (lit > 0 ? right : -left);
+        set(cx + dx, base - h + r, edge && half > 0 && r % 2 === 1 ? "near" : "tree");
+      }
+    }
     set(cx, base - 1, "tree");
   }
 
-  // Birds: a distant gull, two raised wings ("^^").
-  for (const [bx, by] of scene.birds) {
-    for (const [dx, dy] of [[-1, 0], [1, 0], [-2, 1], [0, 1], [2, 1]] as const) set(bx + dx, by + dy, "bird");
+  // Birds: a small flock gliding with raised wings.
+  for (const [bx, by] of BIRDS) {
+    for (const [dx, dy] of [[-2, 0], [2, 0], [-1, 1], [1, 1], [0, 1]] as const) set(bx + dx, by + dy, "bird");
   }
 
   const runs: PixelArt["runs"] = [];
-  for (let y = 0; y < height; y++) {
+  for (let y = 0; y < HEIGHT; y++) {
     let x = 0;
-    while (x < width) {
-      const color = grid[y * width + x];
+    while (x < WIDTH) {
+      const color = grid[y * WIDTH + x];
       let end = x + 1;
-      while (end < width && grid[y * width + end] === color) end++;
+      while (end < WIDTH && grid[y * WIDTH + end] === color) end++;
       if (color) runs.push({ x, y, w: end - x, color });
       x = end;
     }
   }
-  return { width, height, runs };
+  return { width: WIDTH, height: HEIGHT, runs };
 }

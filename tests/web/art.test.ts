@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ART_COLORS, landscape, type ArtVariant } from "../../web/src/art/landscape.js";
+import { ART_COLORS, landscape } from "../../web/src/art/landscape.js";
 import { THEMES } from "../../web/src/lib/themes.js";
 
 const css = readFileSync(new URL("../../web/src/index.css", import.meta.url), "utf8");
 
-describe.each(["wide", "tall"] as ArtVariant[])("landscape %s", (variant) => {
-  const art = landscape(variant);
+describe("landscape", () => {
+  const art = landscape();
 
   it("is deterministic", () => {
-    expect(landscape(variant)).toEqual(art);
+    expect(landscape()).toEqual(art);
   });
 
   it("stays inside its canvas, one non-overlapping run per pixel", () => {
@@ -28,7 +28,7 @@ describe.each(["wide", "tall"] as ArtVariant[])("landscape %s", (variant) => {
     }
   });
 
-  it("draws the sun, both ranges, snow, pines and birds", () => {
+  it("draws the sun, clouds, both ranges with their shading, snow, lake, pines and birds", () => {
     expect(new Set(art.runs.map((run) => run.color))).toEqual(new Set(ART_COLORS));
   });
 
