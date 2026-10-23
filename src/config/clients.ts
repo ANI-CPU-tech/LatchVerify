@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { posix, win32, type PlatformPath } from "node:path";
+
 /** MCP clients whose config files `latch init` knows how to rewrite. */
 export const SUPPORTED_CLIENTS = ["claude-desktop", "claude-code", "cursor", "vscode"] as const;
 export type ClientId = (typeof SUPPORTED_CLIENTS)[number];
@@ -20,12 +23,44 @@ export interface ClientConfig {
 }
 
 /**
- * Platform-specific config file location for a client.
- * TODO: map each ClientId to its macOS / Linux / Windows path (e.g. Claude Desktop's
- * claude_desktop_config.json, Cursor's ~/.cursor/mcp.json). Returns an absolute path.
+ * Where a client keeps its user-level MCP server config on `platform`. Returns an absolute path.
+ *
+ * | Client         | macOS / Windows / Linux                                                          |
+ * |----------------|----------------------------------------------------------------------------------|
+ * | claude-desktop | <app data>/Claude/claude_desktop_config.json                                     |
+ * | claude-code    | ~/.claude.json                                                                   |
+ * | cursor         | ~/.cursor/mcp.json                                                               |
+ * | vscode         | <app data>/Code/User/mcp.json (the default profile's user MCP config)            |
+ *
+ * <app data> is ~/Library/Application Support on macOS, %APPDATA% on Windows (falling back to
+ * ~/AppData/Roaming), and $XDG_CONFIG_HOME or ~/.config elsewhere, which is where Electron apps
+ * keep it. ~ is os.homedir(), so HOME (USERPROFILE on Windows) redirects every path.
  */
 export function clientConfigPath(client: ClientId, platform: NodeJS.Platform = process.platform): string {
-  throw new Error("not implemented");
+  const path = platform === "win32" ? win32 : posix;
+  const home = homedir();
+  const appData = (): string => {
+    if (platform === "darwin") return path.join(home, "Library", "Application Support");
+    if (platform === "win32") return absoluteOrUndefined(process.env.APPDATA, path) ?? path.join(home, "AppData", "Roaming");
+    // The XDG spec says to ignore a relative XDG_CONFIG_HOME.
+    return absoluteOrUndefined(process.env.XDG_CONFIG_HOME, path) ?? path.join(home, ".config");
+  };
+  switch (client) {
+    case "claude-desktop":
+      return path.join(appData(), "Claude", "claude_desktop_config.json");
+    case "claude-code":
+      return path.join(home, ".claude.json");
+    case "cursor":
+      return path.join(home, ".cursor", "mcp.json");
+    case "vscode":
+      return path.join(appData(), "Code", "User", "mcp.json");
+    default:
+      throw new TypeError(`unknown MCP client ${JSON.stringify(client)}; expected one of ${SUPPORTED_CLIENTS.join(", ")}`);
+  }
+}
+
+function absoluteOrUndefined(value: string | undefined, path: PlatformPath): string | undefined {
+  return value !== undefined && path.isAbsolute(value) ? value : undefined;
 }
 
 /**
