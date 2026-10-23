@@ -351,7 +351,9 @@
 .art-glint-b,
 .art-smoke-b,
 .art-birds-b,
-.art-geese-b {
+.art-geese-b,
+.art-fireflies-b,
+.art-shooting-star {
   opacity: 0;
 }
 
@@ -405,6 +407,16 @@
   }
   .art-sailboat {
     animation: art-sail 50s ease-in-out infinite alternate;
+  }
+  .art-fireflies-a {
+    animation: art-blink 3.4s ease-in-out infinite;
+  }
+  .art-fireflies-b {
+    animation: art-blink 4.8s ease-in-out -2s infinite;
+  }
+  /* A shooting star now and then: hidden most of the cycle, then a quick streak down-left. */
+  .art-shooting-star {
+    animation: art-shoot 11s linear -6s infinite;
   }
   .art-rays {
     animation: art-pulse 9s ease-in-out infinite alternate;
@@ -487,6 +499,29 @@
     }
     to {
       transform: translateX(-340px);
+    }
+  }
+  @keyframes art-blink {
+    0%,
+    100% {
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @keyframes art-shoot {
+    0%,
+    86% {
+      opacity: 0;
+      transform: translate(0, 0);
+    }
+    88% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-70px, 35px);
     }
   }
   @keyframes art-bob {

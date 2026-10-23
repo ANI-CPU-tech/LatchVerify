@@ -31,7 +31,7 @@ export type ArtColor = (typeof ART_COLORS)[number];
 export type ArtTime = "day" | "night";
 
 /** Each theme's special touch, drawn on top of the shared scene. */
-export const ART_EXTRAS = ["balloon", "sailboat", "geese"] as const;
+export const ART_EXTRAS = ["balloon", "sailboat", "geese", "fireflies"] as const;
 export type ArtExtra = (typeof ART_EXTRAS)[number];
 
 /** Layers in paint order. A layer that is empty in a scene is left out of it. */
@@ -41,6 +41,7 @@ export const ART_LAYERS = [
   "stars-c",
   "rays",
   "sky",
+  "shooting-star",
   "clouds",
   "balloon",
   "geese-a",
@@ -54,6 +55,8 @@ export const ART_LAYERS = [
   "window",
   "smoke-a",
   "smoke-b",
+  "fireflies-a",
+  "fireflies-b",
   "birds-far",
   "birds-a",
   "birds-b",
@@ -511,7 +514,26 @@ function geese(on: Painter) {
   }
 }
 
-const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon, sailboat, geese };
+/** Fireflies among the shore pines, in two sets that blink out of step, and a shooting star. */
+function fireflies(on: Painter) {
+  for (let i = 0; i < 32; i++) {
+    const set = on(i % 2 ? "fireflies-b" : "fireflies-a");
+    // Half on the left shore, half on the right; low among the trees.
+    const x = i < 16 ? 20 + Math.floor(hash(i, 300) * 125) : 400 + Math.floor(hash(i, 300) * 105);
+    const y = shoreAt(x) - 2 - Math.floor(hash(i, 301) * 14);
+    set(x, y, "sun");
+    if (hash(i, 302) > 0.6) set(x + 1, y, "glow");
+  }
+  // Shooting star: a bright head with a tail trailing up and to the right, thinning out.
+  const star = on("shooting-star");
+  for (let i = 0; i < 13; i++) {
+    const [x, y] = [150 + i, 8 - Math.floor(i / 2)];
+    if (i < 2) star(x, y, "snow");
+    else if (i < 7 || i % 2 === 0) star(x, y, "snow-shade");
+  }
+}
+
+const EXTRAS: Record<ArtExtra, (on: Painter, night: boolean) => void> = { balloon, sailboat, geese, fireflies };
 
 /** A grid of pixels as horizontal runs of one color. */
 function toLayer(name: ArtLayer, grid: Grid, width: number, height: number): PixelLayer {
