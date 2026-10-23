@@ -1,7 +1,15 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SUPPORTED_CLIENTS, clientConfigPath, type ClientId } from "../../src/config/clients.js";
+import {
+  PROXY_COMMAND,
+  SUPPORTED_CLIENTS,
+  clientConfigPath,
+  unwrapProxy,
+  wrapWithProxy,
+  type ClientId,
+  type ClientServerEntry,
+} from "../../src/config/clients.js";
 
 // os.homedir() follows HOME only on POSIX hosts.
 const onWindows = process.platform === "win32";
@@ -64,5 +72,140 @@ describe("clientConfigPath", () => {
 
   it("rejects an unknown client at runtime", () => {
     expect(() => clientConfigPath("zed" as ClientId)).toThrow('unknown MCP client "zed"');
+  });
+});
+
+describe("wrapWithProxy", () => {
+  const orig: ClientServerEntry = { command: "node", args: ["w.js"], env: { A: "1" }, extra: true };
+
+  it("launches latch proxy with the real command after --", () => {
+    expect(wrapWithProxy("weather", orig)).toEqual({
+      command: "latch",
+      args: ["proxy", "--server", "weather", "--", "node", "w.js"],
+      env: { A: "1" },
+      extra: true,
+    });
+    expect(PROXY_COMMAND).toBe("latch");
+  });
+
+  it("matches the example in docs/ARCHITECTURE.md", () => {
+    expect(wrapWithProxy("weather", { command: "node", args: ["weather.js"] })).toEqual({
+      command: "latch",
+      args: ["proxy", "--server", "weather", "--", "node", "weather.js"],
+    });
+  });
+
+  it("keeps every other key in its original position", () => {
+    const entry = { type: "stdio", command: "npx", env: { B: "2" }, args: ["-y", "pkg"], cwd: "/srv" };
+    expect(Object.keys(wrapWithProxy("s", entry))).toEqual(["type", "command", "env", "args", "cwd"]);
+  });
+
+  it("adds args after the other keys when the entry had none", () => {
+    expect(wrapWithProxy("s", { command: "server", env: { A: "1" } })).toEqual({
+      command: "latch",
+      env: { A: "1" },
+      args: ["proxy", "--server", "s", "--", "server"],
+    });
+  });
+
+  it("passes the real arguments through literally, including -- and options", () => {
+    const entry = { command: "npx", args: ["tsx", "--", "--server", "x", ""] };
+    expect(wrapWithProxy("s", entry).args).toEqual(["proxy", "--server", "s", "--", "npx", "tsx", "--", "--server", "x", ""]);
+  });
+
+  it("is idempotent", () => {
+    const once = wrapWithProxy("weather", orig);
+    const twice = wrapWithProxy("weather", once);
+    expect(twice).toBe(once);
+    expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
+    expect(wrapWithProxy("other-id", once)).toBe(once);
+  });
+
+  it("recognizes an already wrapped entry however latch is spelled", () => {
+    for (const command of ["latch", "/usr/local/bin/latch", "C:\\tools\\latch.cmd", "LATCH.EXE"]) {
+      const entry = { command, args: ["proxy", "--server", "s", "--", "node", "x.js"] };
+      expect(wrapWithProxy("s", entry), command).toBe(entry);
+    }
+  });
+
+  it("wraps commands that only look like latch", () => {
+    for (const entry of [
+      { command: "latch", args: ["verify"] },
+      { command: "latchkey", args: ["proxy"] },
+      { command: "node", args: ["proxy"] },
+    ]) {
+      expect(wrapWithProxy("s", entry).args?.slice(0, 5), entry.command).toEqual(["proxy", "--server", "s", "--", entry.command]);
+    }
+  });
+
+  it("does not mutate its input", () => {
+    const entry = structuredClone(orig);
+    wrapWithProxy("weather", entry);
+    expect(entry).toEqual(orig);
+  });
+
+  it("keeps a parsed __proto__ key as data", () => {
+    const entry = JSON.parse('{"command":"node","__proto__":{"polluted":true}}') as ClientServerEntry;
+    const wrapped = wrapWithProxy("s", entry);
+    expect(Object.getPrototypeOf(wrapped)).toBe(Object.prototype);
+    expect(Object.hasOwn(wrapped, "__proto__")).toBe(true);
+    expect(JSON.stringify(unwrapProxy(wrapped))).toBe('{"command":"node","__proto__":{"polluted":true}}');
+  });
+
+  it("rejects a server id the proxy could not parse, or an entry without a command", () => {
+    expect(() => wrapWithProxy("", orig)).toThrow(TypeError);
+    expect(() => wrapWithProxy("--evil", orig)).toThrow(/must be non-empty and not start with "-"/);
+    expect(() => wrapWithProxy("s", { command: "" })).toThrow("has no command");
+    expect(() => wrapWithProxy("s", { url: "https://x" } as unknown as ClientServerEntry)).toThrow("has no command");
+  });
+});
+
+describe("unwrapProxy", () => {
+  it("reverses wrapWithProxy exactly (task Verify)", () => {
+    const orig = { command: "node", args: ["w.js"], env: { A: "1" }, extra: true };
+    const once = wrapWithProxy("weather", orig);
+    expect(JSON.stringify(unwrapProxy(once))).toBe(JSON.stringify(orig));
+  });
+
+  it("round-trips entries of every shape", () => {
+    const entries: ClientServerEntry[] = [
+      { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] },
+      { type: "stdio", command: "uvx", args: ["mcp-server-git", "--", "x"], env: { N: "1" }, cwd: "/srv" },
+      { command: "server" },
+      { command: "server", env: { A: "1" } },
+    ];
+    for (const entry of entries) {
+      expect(JSON.stringify(unwrapProxy(wrapWithProxy("s", entry))), entry.command).toBe(JSON.stringify(entry));
+    }
+  });
+
+  it("restores an empty argument list as no args key", () => {
+    expect(unwrapProxy(wrapWithProxy("s", { command: "server", args: [] }))).toEqual({ command: "server" });
+  });
+
+  it("returns entries that are not wrapped unchanged", () => {
+    for (const entry of [
+      { command: "node", args: ["x.js"] },
+      { command: "latch", args: ["verify"] },
+      { command: "latch", args: ["proxy", "--server", "s"] },
+      { command: "latch", args: ["proxy", "--server", "s", "--"] },
+      { command: "latch" },
+    ]) {
+      expect(unwrapProxy(entry), JSON.stringify(entry)).toBe(entry);
+    }
+  });
+
+  it("unwraps an entry whose latch is given by path", () => {
+    expect(unwrapProxy({ command: "/opt/bin/latch", args: ["proxy", "--server", "s", "--", "node", "x.js"] })).toEqual({
+      command: "node",
+      args: ["x.js"],
+    });
+  });
+
+  it("does not mutate its input", () => {
+    const wrapped = wrapWithProxy("s", { command: "node", args: ["x.js"] });
+    const before = structuredClone(wrapped);
+    unwrapProxy(wrapped);
+    expect(wrapped).toEqual(before);
   });
 });

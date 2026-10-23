@@ -71,22 +71,69 @@ export async function detectClients(): Promise<ClientConfig[]> {
   throw new Error("not implemented");
 }
 
+/** Command a wrapped entry runs. `latch init` relies on `latch` being on the client's PATH. */
+export const PROXY_COMMAND = "latch";
+
 /**
- * Rewrite one server entry so the client launches `latch proxy` instead of the real server.
- * TODO: return a new entry with command "latch", args ["proxy", "--server", serverId, "--",
- * original.command, ...original.args], preserving env and unknown keys. Must be idempotent:
- * an entry already wrapped is returned unchanged.
+ * Rewrite one server entry so the client launches `latch proxy` instead of the real server:
+ * command "latch", args ["proxy", "--server", serverId, "--", original.command, ...original.args].
+ * env and unknown keys are kept, in their original order. Pure.
+ *
+ * Idempotent: an entry that already runs `latch proxy` is returned unchanged (the same object),
+ * so re-running `latch init` never nests proxies.
+ *
+ * @throws TypeError when serverId is empty or starts with "-" (the proxy's option parser would
+ * misread it), or the entry has no command to wrap.
  */
 export function wrapWithProxy(serverId: string, original: ClientServerEntry): ClientServerEntry {
-  throw new Error("not implemented");
+  if (isProxyInvocation(original)) return original;
+  if (serverId === "" || serverId.startsWith("-")) {
+    throw new TypeError(`cannot wrap server ${JSON.stringify(serverId)}: the id must be non-empty and not start with "-"`);
+  }
+  if (typeof original.command !== "string" || original.command === "") {
+    throw new TypeError(`cannot wrap server ${JSON.stringify(serverId)}: it has no command`);
+  }
+  return withCommand(original, PROXY_COMMAND, ["proxy", "--server", serverId, "--", original.command, ...(original.args ?? [])]);
 }
 
 /**
- * Inverse of wrapWithProxy, used by uninstall paths.
- * TODO: return the original entry if wrapped, or the input unchanged.
+ * Inverse of wrapWithProxy, used by uninstall paths: the real command and its arguments come
+ * back from after the "--", with env and unknown keys kept. An entry that is not a well-formed
+ * wrapped entry is returned unchanged (the same object). Pure.
+ *
+ * An empty argument list is restored as no `args` key, so `{ command, args: [] }` comes back as
+ * `{ command }`; clients treat the two the same.
  */
 export function unwrapProxy(entry: ClientServerEntry): ClientServerEntry {
-  throw new Error("not implemented");
+  if (!isProxyInvocation(entry)) return entry;
+  const args = entry.args!;
+  const separator = args.indexOf("--");
+  if (separator === -1 || separator + 1 >= args.length) return entry;
+  return withCommand(entry, args[separator + 1]!, args.slice(separator + 2));
+}
+
+/** True for `latch proxy ...`, however the latch executable is spelled (path, .cmd, .exe). */
+function isProxyInvocation(entry: ClientServerEntry): boolean {
+  if (typeof entry.command !== "string" || !Array.isArray(entry.args) || entry.args[0] !== "proxy") return false;
+  const executable = entry.command.split(/[\\/]/).pop()!.toLowerCase();
+  return executable === PROXY_COMMAND || executable === `${PROXY_COMMAND}.cmd` || executable === `${PROXY_COMMAND}.exe`;
+}
+
+/**
+ * Copy of `entry` with a new command and args, every key in its original position. `args` is
+ * appended when the entry had none, and dropped when empty. Object.fromEntries keeps a parsed
+ * "__proto__" key as plain data instead of setting the prototype.
+ */
+function withCommand(entry: ClientServerEntry, command: string, args: string[]): ClientServerEntry {
+  const entries: Array<[string, unknown]> = [];
+  for (const [key, value] of Object.entries(entry)) {
+    if (key === "command") entries.push([key, command]);
+    else if (key === "args") {
+      if (args.length > 0) entries.push([key, args]);
+    } else entries.push([key, value]);
+  }
+  if (!Object.hasOwn(entry, "args") && args.length > 0) entries.push(["args", args]);
+  return Object.fromEntries(entries) as ClientServerEntry;
 }
 
 /**
