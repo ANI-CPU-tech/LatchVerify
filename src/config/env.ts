@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
@@ -25,7 +25,7 @@ const FALSE_WORDS = new Set(["false", "0", "no", "off"]);
  * | LATCH_LLM_ENABLED     | false          | true/false, 1/0, yes/no, on/off (any case) |
  * | LATCH_UI_PORT         | 7777           | a decimal integer from 1 to 65535          |
  * | LATCH_LOCKFILE_PATH   | ./latch.lock   | a path, resolved against the cwd           |
- * | LATCH_STATE_DIR       | ./.latch       | a path, resolved against the cwd           |
+ * | LATCH_STATE_DIR       | <lockfile dir>/.latch | a path, resolved against the cwd    |
  * | LATCH_LOG_LEVEL       | info           | debug, info, warn, error (any case)        |
  *
  * Values are trimmed, and a blank value counts as unset, so `ANTHROPIC_API_KEY=` copied from
@@ -74,14 +74,22 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): LatchEnv {
   if (problems.length > 0) {
     throw new Error(`Invalid LatchVerify environment:\n${problems.map((problem) => `  - ${problem}`).join("\n")}`);
   }
-  return {
-    anthropicApiKey,
-    llmEnabled,
-    uiPort,
-    lockfilePath: resolve(read("LATCH_LOCKFILE_PATH") ?? "./latch.lock"),
-    stateDir: resolve(read("LATCH_STATE_DIR") ?? "./.latch"),
-    logLevel,
-  };
+  return { anthropicApiKey, llmEnabled, uiPort, ...statePaths({}, env), logLevel };
+}
+
+/**
+ * The lockfile and state directory every command uses, absolute: a flag wins, then
+ * LATCH_LOCKFILE_PATH / LATCH_STATE_DIR (trimmed, blank is unset), then ./latch.lock and the
+ * `.latch` directory next to the lockfile. One default for all, so the proxy (started by a client
+ * in any directory), `latch review` and the UI read and write the same queue.
+ */
+export function statePaths(
+  flags: { lockfile?: string; stateDir?: string },
+  env: NodeJS.ProcessEnv = process.env,
+): { lockfilePath: string; stateDir: string } {
+  const read = (name: string) => env[name]?.trim() || undefined;
+  const lockfilePath = resolve(flags.lockfile ?? read("LATCH_LOCKFILE_PATH") ?? "./latch.lock");
+  return { lockfilePath, stateDir: resolve(flags.stateDir ?? read("LATCH_STATE_DIR") ?? join(dirname(lockfilePath), ".latch")) };
 }
 
 function isLogLevel(value: string): value is LogLevel {

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LOG_LEVELS, loadEnv } from "../../src/config/env.js";
+import { LOG_LEVELS, loadEnv, statePaths } from "../../src/config/env.js";
 
 const defaults = {
   anthropicApiKey: undefined,
@@ -132,5 +132,24 @@ describe("loadEnv", () => {
     vi.stubEnv("LATCH_UI_PORT", "9123");
     vi.stubEnv("LATCH_LOG_LEVEL", "warn");
     expect(loadEnv()).toMatchObject({ uiPort: 9123, logLevel: "warn" });
+  });
+});
+
+describe("statePaths", () => {
+  it("puts the state directory next to the lockfile by default, wherever the command runs", () => {
+    expect(statePaths({})).toEqual({ lockfilePath: resolve("latch.lock"), stateDir: resolve(".latch") });
+    expect(statePaths({ lockfile: "/srv/repo/latch.lock" })).toEqual({ lockfilePath: "/srv/repo/latch.lock", stateDir: "/srv/repo/.latch" });
+    expect(statePaths({}, { LATCH_LOCKFILE_PATH: " /srv/repo/latch.lock " }).stateDir).toBe("/srv/repo/.latch");
+    expect(loadEnv({ LATCH_LOCKFILE_PATH: "/srv/repo/latch.lock" }).stateDir).toBe("/srv/repo/.latch");
+  });
+
+  it("lets a flag win over the environment, and the environment over the default", () => {
+    const env = { LATCH_LOCKFILE_PATH: "/env/latch.lock", LATCH_STATE_DIR: "/env/state" };
+    expect(statePaths({}, env)).toEqual({ lockfilePath: "/env/latch.lock", stateDir: "/env/state" });
+    expect(statePaths({ lockfile: "/flag/latch.lock", stateDir: "/flag/state" }, env)).toEqual({
+      lockfilePath: "/flag/latch.lock",
+      stateDir: "/flag/state",
+    });
+    expect(statePaths({ lockfile: "/flag/latch.lock" }, { LATCH_STATE_DIR: " " }).stateDir).toBe("/flag/.latch");
   });
 });

@@ -2,6 +2,7 @@
 import { Command, Option } from "commander";
 import pc from "picocolors";
 import { SUPPORTED_CLIENTS } from "./config/clients.js";
+import { statePaths } from "./config/env.js";
 import { runInit } from "./commands/init.js";
 import { runInspect } from "./commands/inspect.js";
 import { runProxy } from "./commands/proxy.js";
@@ -23,10 +24,10 @@ const program = new Command()
   .description("Pin MCP tool capabilities in latch.lock and block unreviewed drift.")
   .version("0.0.0")
   .enablePositionalOptions()
-  .option("--lockfile <path>", "path to latch.lock", "./latch.lock")
-  .option("--state-dir <path>", "local state directory", "./.latch");
+  .option("--lockfile <path>", "path to latch.lock (default: $LATCH_LOCKFILE_PATH or ./latch.lock)")
+  .option("--state-dir <path>", "local state directory (default: $LATCH_STATE_DIR or .latch next to the lockfile)");
 
-const globals = () => program.opts<{ lockfile: string; stateDir: string }>();
+const globals = () => statePaths(program.opts<{ lockfile?: string; stateDir?: string }>());
 
 program
   .command("init")
@@ -34,7 +35,7 @@ program
   .addOption(new Option("--client <id>", "only configure this client").choices(SUPPORTED_CLIENTS))
   .option("--dry-run", "show planned changes without writing", false)
   .action((opts: { client?: (typeof SUPPORTED_CLIENTS)[number]; dryRun: boolean }) =>
-    run(() => runInit({ ...opts, lockfilePath: globals().lockfile })),
+    run(() => runInit({ ...opts, ...globals() })),
   );
 
 program
@@ -43,14 +44,14 @@ program
   .option("--ui", "open the web review UI", false)
   .option("--port <port>", "web UI port", (v) => Number.parseInt(v, 10), 7777)
   .action((opts: { ui: boolean; port: number }) =>
-    run(() => runReview({ ...opts, lockfilePath: globals().lockfile, stateDir: globals().stateDir })),
+    run(() => runReview({ ...opts, ...globals() })),
   );
 
 program
   .command("verify")
   .description("CI check: exit non-zero if any server drifted from latch.lock")
   .option("--json", "machine-readable output", false)
-  .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: globals().lockfile })));
+  .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: globals().lockfilePath })));
 
 program
   .command("inspect")
@@ -69,9 +70,7 @@ program
   .argument("<command...>", "real server command, after --")
   .passThroughOptions()
   .action((command: string[], opts: { server: string }) =>
-    run(() =>
-      runProxy({ serverId: opts.server, command, lockfilePath: globals().lockfile, stateDir: globals().stateDir }),
-    ),
+    run(() => runProxy({ serverId: opts.server, command, ...globals() })),
   );
 
 await program.parseAsync();

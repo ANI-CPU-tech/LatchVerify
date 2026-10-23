@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -167,6 +167,16 @@ describe("latch proxy paths from the environment", () => {
     );
     expect(blockedId2(stdout)).toBe(false);
     expect(await readFile(join(dir, "events.jsonl"), "utf8")).toContain('"tools_listed"');
+  }, 30_000);
+
+  it("keeps state next to the lockfile when no state directory is given", async () => {
+    await mkdir(join(dir, "repo"));
+    await writeFile(join(dir, "repo", "latch.lock"), await readFile(join(root, "latch.lock.example"), "utf8"));
+    const { code } = await latch(["--lockfile", "repo/latch.lock", "proxy", "--server", "weather", "--", ...weather], lines, [1, 2], {
+      cwd: dir,
+    });
+    expect(code).toBe(0);
+    expect(await readFile(join(dir, "repo", ".latch", "events.jsonl"), "utf8")).toContain('"tools_listed"');
   }, 30_000);
 
   it("falls back to ./latch.lock when the variables are blank", async () => {
