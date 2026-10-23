@@ -140,7 +140,7 @@ export function Simulation() {
             <SimFlow step={step} swapped={swapAt >= 0 && index >= swapAt} speed={speed} />
           </Panel>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
             <Panel title="Timeline" icon={<FlaskIcon />} bodyClassName="p-2">
               <ol className="space-y-1">
                 {steps.map((entry, i) => (
@@ -152,8 +152,10 @@ export function Simulation() {
                         setPlaying(false);
                       }}
                       aria-current={i === index ? "step" : undefined}
-                      className={`flex w-full items-start gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                        i === index ? "bg-muted font-medium" : i < index ? "text-foreground hover:bg-muted/60" : "text-muted-foreground hover:bg-muted/60"
+                      className={`flex w-full items-start gap-2 rounded-md border-l-4 px-3 py-2 text-left text-sm transition-colors ${
+                        i === index
+                          ? `bg-muted font-medium ${TONE_RING[entry.tone]}`
+                          : `border-transparent ${i < index ? "text-foreground hover:bg-muted/60" : "text-muted-foreground hover:bg-muted/60"}`
                       }`}
                     >
                       <span className="mt-1.5">
