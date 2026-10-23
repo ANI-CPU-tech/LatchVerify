@@ -58,6 +58,14 @@ const ROCKS: Array<[number, number, number]> = [[222, 7, 3], [231, 4, 2], [362, 
 /** Waterline of the canoe's hull, on the edge of the sun's glitter path. */
 const CANOE = { x: 284, y: 86 };
 const BIRDS: Array<[number, number]> = [[176, 30], [186, 26], [195, 31], [168, 34], [206, 24]];
+/** A second flock, far off and tiny. */
+const FAR_BIRDS: Array<[number, number]> = [[104, 12], [109, 10], [113, 14], [118, 11]];
+/** Wing poses as pixel offsets: raised, level, lowered. Each bird of the flock takes the next. */
+const WINGS = [
+  [[-2, 0], [2, 0], [-1, 1], [1, 1], [0, 1]],
+  [[-2, 0], [-1, 0], [0, 1], [1, 0], [2, 0]],
+  [[-2, 1], [-1, 0], [0, 0], [1, 0], [2, 1]],
+] as const;
 
 /** 4x4 ordered-dither thresholds, the pixel-art stand-in for a gradient. */
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
@@ -325,9 +333,12 @@ export function landscape(): PixelArt {
     for (let r = 0; r < h; r++) set(x + (r > h / 2 ? lean : 0), HEIGHT - 1 - r, r === h - 1 ? "near" : "tree");
   }
 
-  // Birds: a small flock gliding with raised wings.
-  for (const [bx, by] of BIRDS) {
-    for (const [dx, dy] of [[-2, 0], [2, 0], [-1, 1], [1, 1], [0, 1]] as const) set(bx + dx, by + dy, "bird");
+  // Birds: a flock caught mid-flap, and a far one as single "v"s.
+  BIRDS.forEach(([bx, by], i) => {
+    for (const [dx, dy] of WINGS[i % WINGS.length]!) set(bx + dx, by + dy, "bird");
+  });
+  for (const [bx, by] of FAR_BIRDS) {
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, 1]] as const) set(bx + dx, by + dy, "bird");
   }
 
   const runs: PixelArt["runs"] = [];
