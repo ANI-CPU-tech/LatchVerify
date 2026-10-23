@@ -47,11 +47,24 @@ export interface Frame {
 }
 
 /**
- * TODO: JSON.parse one line; return a Frame whose message is the parsed object when it has
- * jsonrpc "2.0", or null for blank / non-JSON / non-JSON-RPC lines (still forwarded raw).
+ * Parse one line into a Frame. `raw` is always the line exactly as given, so a frame the proxy
+ * does not rewrite is forwarded byte-for-byte.
+ *
+ * `message` is the parsed object when the line is a JSON object with `jsonrpc: "2.0"`, and null
+ * for anything else: blank lines, invalid JSON, JSON that is not an object, objects without
+ * the version tag, and batch arrays (MCP 2025-06-18 removed batching). Those are still
+ * forwarded raw; nothing here throws on peer input.
  */
 export function parseLine(line: string): Frame {
-  throw new Error("not implemented");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return { raw: line, message: null };
+  }
+  const isMessage =
+    typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && (parsed as { jsonrpc?: unknown }).jsonrpc === "2.0";
+  return { raw: line, message: isMessage ? (parsed as JsonRpcMessage) : null };
 }
 
 /** TODO: JSON.stringify plus "\n". Used only for messages the proxy rewrites or synthesizes. */
@@ -84,17 +97,26 @@ export function spawnUpstream(
   throw new Error("not implemented");
 }
 
-/** TODO: true when the message has both `method` and `id`. */
+// The guards check field types at runtime: parseLine only checks the version tag, so a peer can
+// send `"method": 5` or `"id": {}`. Such a message matches no guard and is forwarded unchanged.
+// At most one guard is true for any message.
+
+/** A string, a number or null, as JSON-RPC 2.0 allows for `id`. */
+function isJsonRpcId(value: unknown): value is JsonRpcId {
+  return value === null || typeof value === "string" || typeof value === "number";
+}
+
+/** True when the message has a string `method` and a valid `id` (null included). */
 export function isRequest(message: JsonRpcMessage): message is JsonRpcRequest {
-  throw new Error("not implemented");
+  return typeof message.method === "string" && "id" in message && isJsonRpcId(message.id);
 }
 
-/** TODO: true when the message has `method` and no `id`. */
+/** True when the message has a string `method` and no `id` member at all. */
 export function isNotification(message: JsonRpcMessage): message is JsonRpcNotification {
-  throw new Error("not implemented");
+  return typeof message.method === "string" && !("id" in message);
 }
 
-/** TODO: true when the message has `id` and no `method` (a result or error). */
+/** True when the message has a valid `id` and no `method` member (a result or an error). */
 export function isResponse(message: JsonRpcMessage): message is JsonRpcResponse {
-  throw new Error("not implemented");
+  return !("method" in message) && "id" in message && isJsonRpcId(message.id);
 }
