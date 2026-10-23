@@ -7,9 +7,21 @@ export interface SegmentChanges {
   inputSchema: boolean;
 }
 
-/** TODO: compare each segment hash. All false means the definitions are byte-identical. */
+/**
+ * Which hash segments differ between two records. All false means the three hashed segments
+ * (name, description, canonical inputSchema) are identical.
+ */
 export function diffHashes(before: ToolHashes, after: ToolHashes): SegmentChanges {
-  throw new Error("not implemented");
+  return {
+    name: before.name !== after.name,
+    description: before.description !== after.description,
+    inputSchema: before.inputSchema !== after.inputSchema,
+  };
+}
+
+/** True when any segment changed. */
+export function anySegmentChanged(segments: SegmentChanges): boolean {
+  return segments.name || segments.description || segments.inputSchema;
 }
 
 /**
