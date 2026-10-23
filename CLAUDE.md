@@ -108,14 +108,18 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
 - `lib/simulation.ts` holds the Simulation page's scenario (`RUG_PULL`, built from
   `tests/fixtures`) and turns the API's result into steps; `components/SimFlow.tsx` animates
   each step's messages between agent, proxy and server: a label above, and on the dotted line
-  marching dashes and a stream of dots in the message's outcome color. Every verdict, tier, finding and error
+  marching dashes and a stream of dots in the message's outcome color. Outcome labels are solid
+  status colors with their AA-tested foregrounds so they read on light themes. The player
+  starts at 0.5x; Space or K plays and pauses and the left/right arrows step when nothing
+  interactive has focus (`playerKey`). Every verdict, tier, finding and error
   on that page comes from `POST /api/simulate`; without the API the page shows an error, never
   sample data.
 - The nav (`components/AppShell.tsx`) is animated, all `motion-safe`: one highlight slides to
   the active link, links enter staggered, icons pop and nudge, the phone strip scrolls to the
   active link, and the Review Queue count pings while a tier-3 change waits. Arrow keys along
   the list (Up/Down in the sidebar, Left/Right in the strip), Home and End move focus and open
-  the section (`lib/nav.ts`). The highlight is
+  the section once the keys pause (`NAV_OPEN_DELAY_MS`, `lib/nav.ts`), so tapping or holding
+  a key does not restart the page fade on every press. The highlight is
   placed from the `<li>` offsets, not the link's: a transformed `<li>` becomes the link's
   offset parent.
 - `pages/` holds one file per sidebar entry. `components/ui.tsx` holds the shared pieces
