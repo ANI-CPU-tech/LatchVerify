@@ -131,7 +131,8 @@ export function Simulation() {
                 if (index >= last) setIndex(0);
                 setPlaying((p) => !p || index >= last);
               }}
-              className={buttonClass("primary", "sm")}
+              // Fixed width: "Pause", "Play" and "Replay" differ, and the controls beside it must not shift.
+              className={`${buttonClass("primary", "sm")} w-24`}
             >
               {playing ? <PauseIcon /> : <PlayIcon />}
               {playing ? "Pause" : index >= last ? "Replay" : "Play"}
@@ -161,7 +162,7 @@ export function Simulation() {
           </div>
 
           <Panel>
-            <SimFlow step={step} swapped={swapAt >= 0 && index >= swapAt} speed={speed} />
+            <SimFlow step={step} swapped={swapAt >= 0 && index >= swapAt} speed={speed} paused={!playing && index < last} />
           </Panel>
 
           <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">

@@ -42,10 +42,10 @@ function Node({ x, icon, label, sub, alert, scanning = false }: { x: number; ico
     <div className="absolute bottom-0 flex w-24 -translate-x-1/2 flex-col items-center text-center" style={{ left: `${x}%` }}>
       <span
         className={`relative flex h-11 w-11 items-center justify-center rounded-full border-2 bg-card text-xl shadow-card ${
-          alert ? "border-destructive text-destructive motion-safe:animate-pulse" : "border-primary/60 text-primary"
+          alert ? "sim-loop border-destructive text-destructive motion-safe:animate-pulse" : "border-primary/60 text-primary"
         }`}
       >
-        {scanning && <span className="absolute inset-0 hidden rounded-full border-2 border-primary motion-safe:block motion-safe:animate-ping" />}
+        {scanning && <span className="sim-loop absolute inset-0 hidden rounded-full border-2 border-primary motion-safe:block motion-safe:animate-ping" />}
         {icon}
       </span>
       {/* One line each: a wrapped status would make this node taller and lift its circle off the line. */}
@@ -62,10 +62,17 @@ function Node({ x, icon, label, sub, alert, scanning = false }: { x: number; ico
  * while it analyzes. Without motion the labels are shown where they arrive and the line stays
  * still. A list repeats the messages for screen readers.
  */
-export function SimFlow({ step, swapped, speed }: { step: SimStep; swapped: boolean; speed: number }) {
+export function SimFlow({ step, swapped, speed, paused = false }: { step: SimStep; swapped: boolean; speed: number; paused?: boolean }) {
   const blocking = step.messages.some((message) => message.from === "proxy" && message.tone === "destructive");
   return (
-    <figure className="space-y-2">
+    // Paused: the looping animations (the proxy's pulse, the scanning ring) freeze with the player;
+    // a message already in flight still lands.
+    <figure className={`relative space-y-2 ${paused ? "[&_.sim-loop]:[animation-play-state:paused]" : ""}`}>
+      {paused && (
+        <span className="absolute right-0 top-0 z-10 rounded-full border border-border bg-card px-2 py-0.5 font-mono text-[11px] text-muted-foreground motion-safe:animate-[ui-fade_0.2s_ease-out]">
+          Paused
+        </span>
+      )}
       <div className="relative h-48 overflow-hidden" aria-hidden="true">
         <div className="absolute bottom-[3.6rem] border-t-2 border-dashed border-foreground/25" style={{ left: `${X.agent}%`, right: `${100 - X.server}%` }} />
         {step.messages.map((message, i) => {
