@@ -495,6 +495,10 @@ function sailboat(on: Painter) {
   for (let dx = 8; dx <= 20; dx++) if (hash(dx, 91) > 0.45) set(x - dx, y + 1 + Math.floor(dx / 9), "cloud");
 }
 
+/** How far the sun rays reach from the sun's center, and how far either side of straight up (radians). */
+const RAY_LENGTH = 150;
+const RAY_SPREAD = 1.45;
+
 /** Sun rays fanning up behind the peaks, and a V of geese flying in two wing poses. */
 function geese(on: Painter) {
   const rays = on("rays");
@@ -503,9 +507,16 @@ function geese(on: Painter) {
       const [dx, dy] = [x - SUN.x, y - SUN.y];
       const dist = Math.hypot(dx, dy);
       const angle = Math.atan2(dx, -dy);
-      if (dist < SUN.r + 4 || dist > 150 || Math.abs(angle) > 1.45) continue;
+      if (dist < SUN.r + 4 || dist > RAY_LENGTH || Math.abs(angle) > RAY_SPREAD) continue;
+      // Each ray thins out three ways, so none ends on a hard edge: along its length, toward the
+      // top of the art (the stretched sky above has no rays), and toward the edges of the fan.
+      const along = (1 - dist / RAY_LENGTH) ** 1.5;
+      const top = Math.min(1, (y - 2) / 24);
+      const side = Math.min(1, (RAY_SPREAD - Math.abs(angle)) / 0.4);
       const phase = angle / 0.16;
-      if (Math.abs(phase - Math.round(phase)) < 0.18 && dither(x, y, 0.45 * (1 - dist / 150))) rays(x, y, "glow");
+      // A hashed threshold rather than the ordered dither: at low density the Bayer grid keeps a
+      // regular lattice of dots to the very end, where a random scatter dissolves.
+      if (Math.abs(phase - Math.round(phase)) < 0.18 && hash(x * 977 + y, 600) < 0.6 * along * top * side) rays(x, y, "glow");
     }
   }
   // Geese, wider than the small birds: wings raised in one pose, level and dipped in the other.
