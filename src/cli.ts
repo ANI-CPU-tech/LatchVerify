@@ -2,17 +2,21 @@
 import { Command, Option } from "commander";
 import pc from "picocolors";
 import { SUPPORTED_CLIENTS } from "./config/clients.js";
-import { statePaths } from "./config/env.js";
+import { loadDotEnv, loadEnv, statePaths, type LatchEnv } from "./config/env.js";
 import { runInit } from "./commands/init.js";
 import { runInspect } from "./commands/inspect.js";
 import { runProxy } from "./commands/proxy.js";
 import { runReview } from "./commands/review.js";
 import { runVerify } from "./commands/verify.js";
 
-/** Run a command and turn its result (or thrown error) into the process exit code. */
-async function run(command: () => Promise<number>): Promise<void> {
+/**
+ * Run a command and turn its result (or thrown error) into the process exit code. The
+ * environment (./.env included) is validated first, so a malformed variable stops every command.
+ */
+async function run(command: (env: LatchEnv) => Promise<number>): Promise<void> {
   try {
-    process.exitCode = await command();
+    loadDotEnv();
+    process.exitCode = await command(loadEnv());
   } catch (error) {
     console.error(pc.red(error instanceof Error ? error.message : String(error)));
     process.exitCode = 1;
@@ -42,9 +46,9 @@ program
   .command("review")
   .description("approve or reject pending tool changes")
   .option("--ui", "open the web review UI", false)
-  .option("--port <port>", "web UI port", (v) => Number.parseInt(v, 10), 7777)
-  .action((opts: { ui: boolean; port: number }) =>
-    run(() => runReview({ ...opts, ...globals() })),
+  .option("--port <port>", "web UI port (default: $LATCH_UI_PORT or 7777)", (v) => Number.parseInt(v, 10))
+  .action((opts: { ui: boolean; port?: number }) =>
+    run((env) => runReview({ ...opts, port: opts.port ?? env.uiPort, ...globals() })),
   );
 
 program

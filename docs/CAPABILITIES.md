@@ -64,7 +64,7 @@ nothing.
 ### Pass 3: LLM advisory (optional, off by default)
 
 Some intent only shows up in prose, for example "uploads the file to our backup
-service". With `LATCH_LLM_ENABLED=true` and `ANTHROPIC_API_KEY` set, pass 3 asks a
+service". With `LATCH_LLM_ENABLED=true` and `LATCH_LLM_API_KEY` set, pass 3 asks a
 model for extra findings and capability hints. It is advisory:
 
 - It can **add** findings and capabilities. It never removes a pass-1 signal.

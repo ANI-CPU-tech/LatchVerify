@@ -1,10 +1,15 @@
-import { resolve } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LOG_LEVELS, loadEnv, statePaths } from "../../src/config/env.js";
+import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from "../../src/analyze/llm.js";
+import { LOG_LEVELS, loadDotEnv, loadEnv, statePaths } from "../../src/config/env.js";
 
 const defaults = {
-  anthropicApiKey: undefined,
+  llmApiKey: undefined,
   llmEnabled: false,
+  llmBaseUrl: DEFAULT_LLM_BASE_URL,
+  llmModel: DEFAULT_LLM_MODEL,
   uiPort: 7777,
   lockfilePath: resolve("latch.lock"),
   stateDir: resolve(".latch"),
@@ -33,7 +38,7 @@ describe("loadEnv", () => {
   it("treats the blank values in .env.example as unset", () => {
     expect(
       loadEnv({
-        ANTHROPIC_API_KEY: "",
+        LATCH_LLM_API_KEY: "",
         LATCH_LLM_ENABLED: "false",
         LATCH_UI_PORT: "7777",
         LATCH_LOCKFILE_PATH: "./latch.lock",
@@ -41,22 +46,26 @@ describe("loadEnv", () => {
         LATCH_LOG_LEVEL: "info",
       }),
     ).toEqual(defaults);
-    expect(loadEnv({ ANTHROPIC_API_KEY: "   ", LATCH_UI_PORT: " ", LATCH_LOG_LEVEL: "" })).toEqual(defaults);
+    expect(loadEnv({ LATCH_LLM_API_KEY: "   ", LATCH_UI_PORT: " ", LATCH_LOG_LEVEL: "" })).toEqual(defaults);
   });
 
   it("reads every variable, trimming whitespace", () => {
     expect(
       loadEnv({
-        ANTHROPIC_API_KEY: " sk-ant-test ",
+        LATCH_LLM_API_KEY: " sk-ant-test ",
         LATCH_LLM_ENABLED: "TRUE",
+        LATCH_LLM_BASE_URL: " https://openrouter.ai/api/v1 ",
+        LATCH_LLM_MODEL: "some/model",
         LATCH_UI_PORT: " 8080 ",
         LATCH_LOCKFILE_PATH: "/srv/repo/latch.lock",
         LATCH_STATE_DIR: "state",
         LATCH_LOG_LEVEL: "Debug",
       }),
     ).toEqual({
-      anthropicApiKey: "sk-ant-test",
+      llmApiKey: "sk-ant-test",
       llmEnabled: true,
+      llmBaseUrl: "https://openrouter.ai/api/v1",
+      llmModel: "some/model",
       uiPort: 8080,
       lockfilePath: "/srv/repo/latch.lock",
       stateDir: resolve("state"),
@@ -72,7 +81,7 @@ describe("loadEnv", () => {
 
   it("accepts every boolean spelling for LATCH_LLM_ENABLED", () => {
     for (const value of ["true", "1", "yes", "on", "ON"]) {
-      expect(loadEnv({ LATCH_LLM_ENABLED: value, ANTHROPIC_API_KEY: "k" }).llmEnabled, value).toBe(true);
+      expect(loadEnv({ LATCH_LLM_ENABLED: value, LATCH_LLM_API_KEY: "k" }).llmEnabled, value).toBe(true);
     }
     for (const value of ["false", "0", "no", "off", "False"]) {
       expect(loadEnv({ LATCH_LLM_ENABLED: value }).llmEnabled, value).toBe(false);
@@ -110,22 +119,22 @@ describe("loadEnv", () => {
   });
 
   it("refuses the LLM pass without an API key", () => {
-    expect(failure({ LATCH_LLM_ENABLED: "true" })).toContain("LATCH_LLM_ENABLED is true but ANTHROPIC_API_KEY is not set");
-    expect(failure({ LATCH_LLM_ENABLED: "true", ANTHROPIC_API_KEY: "  " })).toContain("ANTHROPIC_API_KEY is not set");
+    expect(failure({ LATCH_LLM_ENABLED: "true" })).toContain("LATCH_LLM_ENABLED is true but LATCH_LLM_API_KEY is not set");
+    expect(failure({ LATCH_LLM_ENABLED: "true", LATCH_LLM_API_KEY: "  " })).toContain("LATCH_LLM_API_KEY is not set");
   });
 
   it("lists every problem in one error", () => {
     const message = failure({ LATCH_UI_PORT: "abc", LATCH_LOG_LEVEL: "loud", LATCH_LLM_ENABLED: "yes" });
     expect(message.split("\n")).toEqual([
       "Invalid LatchVerify environment:",
-      "  - LATCH_LLM_ENABLED is true but ANTHROPIC_API_KEY is not set",
+      "  - LATCH_LLM_ENABLED is true but LATCH_LLM_API_KEY is not set",
       '  - LATCH_UI_PORT must be a port number from 1 to 65535, got "abc"',
       '  - LATCH_LOG_LEVEL must be one of debug, info, warn, error, got "loud"',
     ]);
   });
 
   it("never puts the API key in an error message", () => {
-    expect(failure({ ANTHROPIC_API_KEY: "sk-ant-secret", LATCH_UI_PORT: "x" })).not.toContain("sk-ant-secret");
+    expect(failure({ LATCH_LLM_API_KEY: "sk-ant-secret", LATCH_UI_PORT: "x" })).not.toContain("sk-ant-secret");
   });
 
   it("reads process.env by default", () => {
@@ -151,5 +160,22 @@ describe("statePaths", () => {
       stateDir: "/flag/state",
     });
     expect(statePaths({ lockfile: "/flag/latch.lock" }, { LATCH_STATE_DIR: " " }).stateDir).toBe("/flag/.latch");
+  });
+});
+
+describe("loadDotEnv", () => {
+  it("loads a .env file into process.env without overriding variables already set", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "latch-env-"));
+    try {
+      const path = join(dir, ".env");
+      await writeFile(path, "LATCH_UI_PORT=9001\nLATCH_LOG_LEVEL=debug\n");
+      vi.stubEnv("LATCH_UI_PORT", undefined);
+      vi.stubEnv("LATCH_LOG_LEVEL", "error");
+      loadDotEnv(path);
+      expect(loadEnv()).toMatchObject({ uiPort: 9001, logLevel: "error" });
+      expect(() => loadDotEnv(join(dir, "missing.env"))).not.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

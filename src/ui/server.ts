@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createAdaptorServer } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { loadDotEnv, loadEnv } from "../config/env.js";
 import { createRoutes, type RouteDeps } from "./routes.js";
 
 /** The only interface the review server listens on: the API can approve changes. */
@@ -87,16 +88,11 @@ export function defaultReviewer(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 // `pnpm ui` runs this file directly; Vite proxies /api here.
-// shortcut: reads three env vars itself because config/env.ts loadEnv is not implemented yet;
-// switch to loadEnv() once it lands.
 async function main(): Promise<void> {
+  loadDotEnv();
+  const env = loadEnv();
   const reviewer = defaultReviewer();
-  const handle = await startUiServer({
-    port: Number(process.env.LATCH_UI_PORT || "7777"),
-    lockfilePath: process.env.LATCH_LOCKFILE_PATH || "./latch.lock",
-    stateDir: process.env.LATCH_STATE_DIR || "./.latch",
-    reviewer,
-  });
+  const handle = await startUiServer({ port: env.uiPort, lockfilePath: env.lockfilePath, stateDir: env.stateDir, reviewer });
   console.error(`[latch ui] review API on ${handle.url} (approvals recorded as ${reviewer})`);
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => void handle.close().finally(() => process.exit(0)));

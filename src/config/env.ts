@@ -1,12 +1,17 @@
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from "../analyze/llm.js";
 
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
 /** Runtime configuration resolved from process.env (see .env.example). */
 export interface LatchEnv {
-  anthropicApiKey: string | undefined;
+  llmApiKey: string | undefined;
   llmEnabled: boolean;
+  /** OpenAI-compatible API root for the advisory pass. */
+  llmBaseUrl: string;
+  llmModel: string;
   uiPort: number;
   lockfilePath: string;
   stateDir: string;
@@ -21,14 +26,18 @@ const FALSE_WORDS = new Set(["false", "0", "no", "off"]);
  *
  * | Variable              | Default        | Accepts                                    |
  * |-----------------------|----------------|--------------------------------------------|
- * | ANTHROPIC_API_KEY     | none           | any non-blank string                       |
+ * | LATCH_LLM_API_KEY     | none           | any non-blank string                       |
  * | LATCH_LLM_ENABLED     | false          | true/false, 1/0, yes/no, on/off (any case) |
+ * | LATCH_LLM_BASE_URL    | DEFAULT_LLM_BASE_URL | an OpenAI-compatible API root        |
+ * | LATCH_LLM_MODEL       | DEFAULT_LLM_MODEL | a model id served at the base URL       |
  * | LATCH_UI_PORT         | 7777           | a decimal integer from 1 to 65535          |
  * | LATCH_LOCKFILE_PATH   | ./latch.lock   | a path, resolved against the cwd           |
  * | LATCH_STATE_DIR       | <lockfile dir>/.latch | a path, resolved against the cwd    |
  * | LATCH_LOG_LEVEL       | info           | debug, info, warn, error (any case)        |
  *
- * Values are trimmed, and a blank value counts as unset, so `ANTHROPIC_API_KEY=` copied from
+ * LATCH_REVIEWER (who approvals are recorded as) is read by defaultReviewer() in ui/server.ts.
+ *
+ * Values are trimmed, and a blank value counts as unset, so `LATCH_LLM_API_KEY=` copied from
  * .env.example means "no key".
  *
  * @throws Error listing every malformed variable by name (non-numeric or out-of-range port,
@@ -42,7 +51,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): LatchEnv {
     return value === undefined || value === "" ? undefined : value;
   };
 
-  const anthropicApiKey = read("ANTHROPIC_API_KEY");
+  const llmApiKey = read("LATCH_LLM_API_KEY");
 
   let llmEnabled = false;
   const llm = read("LATCH_LLM_ENABLED");
@@ -51,8 +60,8 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): LatchEnv {
     if (TRUE_WORDS.has(word)) llmEnabled = true;
     else if (!FALSE_WORDS.has(word)) problems.push(`LATCH_LLM_ENABLED must be true or false, got ${JSON.stringify(llm)}`);
   }
-  if (llmEnabled && anthropicApiKey === undefined) {
-    problems.push("LATCH_LLM_ENABLED is true but ANTHROPIC_API_KEY is not set");
+  if (llmEnabled && llmApiKey === undefined) {
+    problems.push("LATCH_LLM_ENABLED is true but LATCH_LLM_API_KEY is not set");
   }
 
   let uiPort = 7777;
@@ -74,7 +83,20 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): LatchEnv {
   if (problems.length > 0) {
     throw new Error(`Invalid LatchVerify environment:\n${problems.map((problem) => `  - ${problem}`).join("\n")}`);
   }
-  return { anthropicApiKey, llmEnabled, uiPort, ...statePaths({}, env), logLevel };
+  return {
+    llmApiKey,
+    llmEnabled,
+    llmBaseUrl: read("LATCH_LLM_BASE_URL") ?? DEFAULT_LLM_BASE_URL,
+    llmModel: read("LATCH_LLM_MODEL") ?? DEFAULT_LLM_MODEL,
+    uiPort,
+    ...statePaths({}, env),
+    logLevel,
+  };
+}
+
+/** Load `path` (./.env) into process.env when it exists. Variables already set win over the file. */
+export function loadDotEnv(path = ".env"): void {
+  if (existsSync(path)) process.loadEnvFile(path);
 }
 
 /**

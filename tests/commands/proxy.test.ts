@@ -169,6 +169,21 @@ describe("latch proxy paths from the environment", () => {
     expect(await readFile(join(dir, "events.jsonl"), "utf8")).toContain('"tools_listed"');
   }, 30_000);
 
+  it("reads the paths from ./.env, and refuses a malformed environment", async () => {
+    const state = join(dir, "from-dotenv");
+    await writeFile(join(dir, ".env"), `LATCH_LOCKFILE_PATH=${join(root, "latch.lock.example")}\nLATCH_STATE_DIR=${state}\n`);
+    const { code, stdout } = await latch(["proxy", "--server", "weather", "--", ...weather], lines, [1, 2], { cwd: dir });
+    expect(code).toBe(0);
+    expect(blockedId2(stdout)).toBe(false);
+    expect(await readFile(join(state, "events.jsonl"), "utf8")).toContain('"tools_listed"');
+
+    await writeFile(join(dir, ".env"), "LATCH_LLM_ENABLED=true\n");
+    const bad = await latch(["proxy", "--server", "weather", "--", ...weather], [], [], { cwd: dir });
+    expect(bad.code).toBe(1);
+    expect(bad.stdout).toBe("");
+    expect(bad.stderr).toContain("LATCH_LLM_ENABLED is true but LATCH_LLM_API_KEY is not set");
+  }, 30_000);
+
   it("keeps state next to the lockfile when no state directory is given", async () => {
     await mkdir(join(dir, "repo"));
     await writeFile(join(dir, "repo", "latch.lock"), await readFile(join(root, "latch.lock.example"), "utf8"));
