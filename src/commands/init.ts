@@ -1,12 +1,11 @@
-import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { isDeepStrictEqual } from "node:util";
 import { isCancel, multiselect } from "@clack/prompts";
 import pc from "picocolors";
 import {
-  PROXY_COMMAND,
+  INSTALL_LAUNCH,
   SUPPORTED_CLIENTS,
   clientConfigPath,
   detectClients,
@@ -16,6 +15,7 @@ import {
   type ClientConfig,
   type ClientId,
   type ClientServerEntry,
+  type ProxyLaunch,
 } from "../config/clients.js";
 import { analyzeToolList } from "../proxy/analysis.js";
 import { captureTools } from "../proxy/capture.js";
@@ -45,6 +45,8 @@ export interface InitOptions {
   interactive?: boolean;
   /** Where answers to the prompt come from. Defaults to process.stdin. */
   input?: Readable;
+  /** How wrapped entries start latch. Defaults to INSTALL_LAUNCH (this install, by absolute path). */
+  launch?: ProxyLaunch;
 }
 
 /** One server latch init can wrap, as configured in one or more clients. */
@@ -205,7 +207,8 @@ function stringEnv(env: unknown): Record<string, string> {
  *    pre-selected; skipped when not interactive), and pins each chosen server latch.lock does
  *    not have yet (pinServer), under the reviewer. A server already in latch.lock is left as pinned:
  *    changes to it go through `latch review`, never through a re-run of init.
- * 3. Writes latch.lock, then rewrites each client entry to run `latch proxy`, with
+ * 3. Writes latch.lock, then rewrites each client entry to run `latch proxy` (by absolute path,
+ *    see INSTALL_LAUNCH), with
  *    LATCH_LOCKFILE_PATH and LATCH_STATE_DIR in its env so the proxy finds this lockfile and
  *    state directory (`stateDir`, by default <lockfile dir>/.latch) whatever directory the client
  *    starts it in. Each rewritten config
@@ -310,7 +313,7 @@ export async function runInit(options: InitOptions): Promise<number> {
     }
   }
 
-  const rewrites = planRewrites(configs, ready, lockfilePath, stateDir);
+  const rewrites = planRewrites(configs, ready, lockfilePath, stateDir, options.launch ?? INSTALL_LAUNCH);
   const lockChanged = serializeLockfile(next) !== serializeLockfile(lock);
   say();
   if (options.dryRun) {
@@ -341,48 +344,51 @@ export async function runInit(options: InitOptions): Promise<number> {
   }
   if (!lockChanged && rewrites.length === 0) say("nothing to change");
 
-  if (rewrites.length > 0 && !onPath(PROXY_COMMAND)) {
-    say(pc.yellow(`! \`${PROXY_COMMAND}\` is not on PATH, so clients cannot start the wrapped servers; run \`pnpm link --global\` in the latchverify checkout`));
-  }
   if (lockChanged) say(`next: commit ${printable(lockfilePath)} so the pins are reviewed like code`);
   if (rewrites.length > 0) say(`next: restart ${[...new Set(rewrites.map((r) => r.config.client))].join(", ")} to start the wrapped servers`);
   return failed ? 1 : 0;
 }
 
 /**
- * Per client config, the entries to write: each ready server it configures, wrapped with
- * `latch proxy` and given LATCH_LOCKFILE_PATH and LATCH_STATE_DIR. Entries already in that state
- * are left out, and configs with nothing left are dropped, which makes a second init a no-op.
+ * `entry` wrapped with `latch proxy` (wrapWithProxy) and given LATCH_LOCKFILE_PATH and
+ * LATCH_STATE_DIR, so the proxy finds this lockfile whatever directory the client starts it in.
+ */
+export function proxiedEntry(
+  serverId: string,
+  entry: ClientServerEntry,
+  lockfilePath: string,
+  stateDir: string,
+  launch: ProxyLaunch,
+): ClientServerEntry {
+  const wrapped = wrapWithProxy(serverId, entry, launch);
+  const env = typeof wrapped.env === "object" && wrapped.env !== null ? wrapped.env : {};
+  return { ...wrapped, env: { ...env, LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: stateDir } };
+}
+
+/**
+ * Per client config, the entries to write: each ready server it configures, as proxiedEntry.
+ * Entries already in that state are left out, and configs with nothing left are dropped, which
+ * makes a second init a no-op.
  */
 function planRewrites(
   configs: readonly ClientConfig[],
   ready: readonly InitServer[],
   lockfilePath: string,
   stateDir: string,
+  launch: ProxyLaunch,
 ): Array<{ config: ClientConfig; servers: Record<string, ClientServerEntry> }> {
   return configs.flatMap((config) => {
     const entries: Array<[string, ClientServerEntry]> = [];
     for (const server of ready) {
       if (!server.clients.includes(config.client)) continue;
       const current = config.servers[server.serverId]!;
-      const wrapped = wrapWithProxy(server.serverId, current);
-      const env = typeof wrapped.env === "object" && wrapped.env !== null ? wrapped.env : {};
-      const target: ClientServerEntry = { ...wrapped, env: { ...env, LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: stateDir } };
+      const target = proxiedEntry(server.serverId, current, lockfilePath, stateDir, launch);
       if (!isDeepStrictEqual(target, current)) entries.push([server.serverId, target]);
     }
     return entries.length > 0 ? [{ config, servers: Object.fromEntries(entries) }] : [];
   });
 }
 
-function commandLine(command: string, args: readonly string[]): string {
+export function commandLine(command: string, args: readonly string[]): string {
   return printable([command, ...args].join(" "));
-}
-
-/** True when an executable named `command` is in a PATH directory. */
-function onPath(command: string): boolean {
-  const names = process.platform === "win32" ? [`${command}.cmd`, `${command}.exe`, command] : [command];
-  return (process.env.PATH ?? "")
-    .split(delimiter)
-    .filter((dir) => dir !== "")
-    .some((dir) => names.some((name) => existsSync(join(dir, name))));
 }

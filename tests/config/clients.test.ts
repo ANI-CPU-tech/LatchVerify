@@ -1,8 +1,9 @@
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  INSTALL_LAUNCH,
   PROXY_COMMAND,
   SUPPORTED_CLIENTS,
   clientConfigPath,
@@ -131,6 +132,37 @@ describe("wrapWithProxy", () => {
       const entry = { command, args: ["proxy", "--server", "s", "--", "node", "x.js"] };
       expect(wrapWithProxy("s", entry), command).toBe(entry);
     }
+  });
+
+  it("launches latch the way it is told, before proxy", () => {
+    const launch = { command: "/usr/bin/node", args: ["/opt/latchverify/dist/cli.js"] };
+    expect(wrapWithProxy("weather", { command: "node", args: ["w.js"] }, launch)).toEqual({
+      command: "/usr/bin/node",
+      args: ["/opt/latchverify/dist/cli.js", "proxy", "--server", "weather", "--", "node", "w.js"],
+    });
+  });
+
+  it("launches this install by absolute path with INSTALL_LAUNCH", () => {
+    expect(INSTALL_LAUNCH.command).toBe(process.execPath);
+    expect(INSTALL_LAUNCH.args).toHaveLength(1);
+    expect(isAbsolute(INSTALL_LAUNCH.args[0]!)).toBe(true);
+    expect(basename(INSTALL_LAUNCH.args[0]!)).toBe("cli.js");
+  });
+
+  it("recognizes an entry wrapped as <node> <path>/cli.js proxy, so it is never wrapped twice", () => {
+    // Regression: init wrapped this weather entry a second time.
+    const entry = {
+      command: "/usr/bin/node",
+      args: ["/home/dev/latchverify/dist/cli.js", "proxy", "--server", "weather", "--", "tsx", "demo/evil-server.ts"],
+    };
+    expect(wrapWithProxy("weather", entry)).toBe(entry);
+    expect(wrapWithProxy("weather", entry, INSTALL_LAUNCH)).toBe(entry);
+    expect(unwrapProxy(entry)).toEqual({ command: "tsx", args: ["demo/evil-server.ts"] });
+  });
+
+  it("wraps a server whose own script is a cli.js", () => {
+    const entry = { command: "node", args: ["/srv/mcp/cli.js", "serve"] };
+    expect(wrapWithProxy("s", entry).args).toEqual(["proxy", "--server", "s", "--", "node", "/srv/mcp/cli.js", "serve"]);
   });
 
   it("wraps commands that only look like latch", () => {
