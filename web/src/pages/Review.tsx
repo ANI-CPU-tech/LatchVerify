@@ -4,6 +4,7 @@ import { PendingList } from "../components/PendingList";
 import { EmptyState, ErrorState, LoadingState, PageHeader, Panel } from "../components/ui";
 import { ApiUnreachableError, approveChange, rejectChange, type ReviewItem } from "../lib/api";
 import { useData } from "../lib/data";
+import { sentence } from "../lib/format";
 import { mockReviewItems } from "../lib/mock";
 import { navigate } from "../lib/useRoute";
 
@@ -61,15 +62,21 @@ export function Review({ selectedId }: { selectedId: string | null }) {
         description="Tool definitions that differ from latch.lock, highest tier first. The proxy blocks tier 2 and 3 until you decide."
       />
 
+      {/*
+        The live region stays mounted so screen readers announce each decision; each new message
+        rises in inside it (keyed, so it replays per decision).
+      */}
       <p aria-live="polite" className={announcement ? "rounded-md border border-success/30 bg-success/10 px-3 py-2 text-sm text-success" : "sr-only"}>
-        {announcement}
+        <span key={announcement} className="block motion-safe:animate-[ui-rise_0.3s_ease-out]">
+          {announcement}
+        </span>
       </p>
 
       {sample && (
         <div role="status" className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
           <p className="font-medium text-warning">Showing sample data: the review API is not reachable.</p>
           <p className="mt-1 text-muted-foreground">
-            {(pending.error as Error).message} Start it with <code className="font-mono">pnpm ui</code> or{" "}
+            {sentence((pending.error as Error).message)} Start it with <code className="font-mono">pnpm ui</code> or{" "}
             <code className="font-mono">latch review --ui</code>, then refresh. Approve and Reject are disabled until it is running.
           </p>
         </div>

@@ -95,6 +95,21 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
 **Web** (`web/src`):
 - `App.tsx` routes by hash (`lib/router.ts` parses, `lib/useRoute.ts` follows `hashchange`: `#/review/<id>`, `#/tools/<server>`, ...)
   so the same bundle works under Vite and under `latch review --ui`.
+- `components/PageTransition.tsx` fades the old page out and the new one in when the page
+  changes (160 ms each way, opacity only, instant under reduced motion); changes within a page
+  show at once.
+- Small UI motion, all `motion-safe`: a page's sections rise in staggered (`.page-stagger`, with
+  `backwards` fill so nothing keeps a transform; it is a later rule than Tailwind's utilities,
+  so a direct child of a page cannot animate itself), buttons lift and press, tabs slide their
+  underline, Overview numbers count up (`lib/motion.ts`, `lib/useCountUp.ts`), clickable cards
+  lift, loading states spin, and the API status dot pulses. A theme change the viewer picks goes
+  through the View Transition API (`setPreference` in `lib/theme.tsx`): a snapshot of the whole
+  page cross-fades, because gradients and the swapped day/night art cannot transition per
+  property. Keyframes: `ui-rise`, `ui-fade` and `ui-pop` in `index.css`.
+- The review queue (`components/PendingList.tsx`) steps with Up/Down, Home and End, selecting
+  the change it lands on; `navigate(route, { replace: true })` keeps that out of the Back history.
+- Dropdowns use `components/Select.tsx` (themed, WAI-ARIA select-only combobox; key logic in
+  `lib/listbox.ts`), never a native `<select>`, whose popup the OS paints in its own colors.
 - `lib/data.tsx` loads the queue, lockfile, events and git status once and shares them
   with every page. It polls every 3 s while the API is connected. Refresh, or a decision,
   reloads all four.
@@ -104,12 +119,19 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
   summaries). Keep logic there, not in components, so `tests/web/` can test it in node.
 - `lib/simulation.ts` holds the Simulation page's scenario (`RUG_PULL`, built from
   `tests/fixtures`) and turns the API's result into steps; `components/SimFlow.tsx` animates
-  each step's messages between agent, proxy and server. Every verdict, tier, finding and error
+  each step's messages between agent, proxy and server: a label above, and on the dotted line
+  marching dashes and a stream of dots in the message's outcome color. Outcome labels are solid
+  status colors with their AA-tested foregrounds so they read on light themes. The player
+  starts at 0.5x; Space or K plays and pauses and the left/right arrows step when nothing
+  interactive has focus (`playerKey`). Every verdict, tier, finding and error
   on that page comes from `POST /api/simulate`; without the API the page shows an error, never
   sample data.
 - The nav (`components/AppShell.tsx`) is animated, all `motion-safe`: one highlight slides to
   the active link, links enter staggered, icons pop and nudge, the phone strip scrolls to the
-  active link, and the Review Queue count pings while a tier-3 change waits. The highlight is
+  active link, and the Review Queue count pings while a tier-3 change waits. Arrow keys along
+  the list (Up/Down in the sidebar, Left/Right in the strip), Home and End move focus and open
+  the section once the keys pause (`NAV_OPEN_DELAY_MS`, `lib/nav.ts`), so tapping or holding
+  a key does not restart the page fade on every press. The highlight is
   placed from the `<li>` offsets, not the link's: a transformed `<li>` becomes the link's
   offset parent.
 - `pages/` holds one file per sidebar entry. `components/ui.tsx` holds the shared pieces
@@ -135,6 +157,10 @@ shows the last `tools_listed` event instead.
   is for decoration only.
 - The preference ("system" or a theme id) is stored in `localStorage` under
   `latch.theme`, with every access wrapped in try/catch.
+- Card opacity (Settings > Card transparency) is a second preference, `latch.surface`, from
+  0 to 1 (`lib/surface.ts`). `ThemeProvider` sets it as `--surface-mix` on `<html>`, and
+  `bg-card-glass` raises the theme's `--surface-alpha` floor by that much toward solid, so
+  it can only add opacity. `tests/web/themes.test.ts` checks text contrast at every step.
 
 **Artwork.** `web/src/art/landscape.ts` generates an original pixel-art landscape from
 seeded noise: a setting sun with dithered afterglow, clouds, a hazy distant range, a snowy
@@ -147,7 +173,8 @@ The art is drawn in named layers (`ART_LAYERS`), each a `<g class="art-<layer>">
 `index.css` only under `prefers-reduced-motion: no-preference`; second copies and alternate
 poses are hidden by default, so the still scene is complete. Each theme names its own extra
 in `themes.ts` (`art`): Default Light a balloon, Warm Retro a sailboat, Sunset sun rays and
-geese, Terminal Dark fireflies and a shooting star, Minimal snowfall, Forest Green a stag and
+geese (the rays thin out along their length, toward the top and the fan's edges), Terminal
+Dark fireflies and a shooting star, Minimal snowfall, Forest Green a stag and
 lake mist. `sceneFor(theme)` gives the time and extra; a test keeps the mapping one to one.
 `AppShell` shows it as a fixed backdrop behind the content column on every page (the sidebar
 stays plain): the art whole at the bottom, its sky stretched to the top as a gradient
@@ -158,7 +185,8 @@ behind content. Cards over it use `bg-card-glass`: see-through by the theme's
 `--surface-alpha`, which `tests/web/themes.test.ts` holds to 4.5:1 for text over any art color.
 Text outside a card is not covered by that test; keep page headings near the top, where the
 sky is plain. The favicon,
-`web/public/favicon.svg`, is a 16x16 pixel-art padlock with a sunset.
+`web/public/favicon.svg`, is a 16x16 pixel-art padlock with a sunset; the page header shows it
+next to the name, with a foreground glow so its dark outline reads on dark themes.
 
 ## Build order (as built)
 

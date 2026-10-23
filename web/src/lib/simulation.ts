@@ -140,3 +140,11 @@ export function descriptionDiff(request: SimulationRequest, toolName: string): D
   if (before === null || after === null) return null;
   return diffWordsWithSpace(revealInvisible(before), revealInvisible(after)).map(({ value, added, removed }) => ({ value, added, removed }));
 }
+
+/** What a key does to the simulation player, or null for keys it leaves alone. */
+export function playerKey(key: string): "toggle" | "previous" | "next" | null {
+  if (key === " " || key === "k" || key === "K") return "toggle";
+  if (key === "ArrowLeft") return "previous";
+  if (key === "ArrowRight") return "next";
+  return null;
+}

@@ -4,7 +4,7 @@ import { simulateRugPull } from "../../src/ui/simulation.js";
 // web/ resolves "@schema/*" through a Vite alias that this (node) test config does not define.
 vi.mock("@schema/index.js", () => import("../../src/schema/index.js"));
 
-const { RUG_PULL, descriptionDiff, revealInvisible, simulationSteps } = await import("../../web/src/lib/simulation.js");
+const { RUG_PULL, descriptionDiff, playerKey, revealInvisible, simulationSteps } = await import("../../web/src/lib/simulation.js");
 
 const result = simulateRugPull(RUG_PULL, new Date("2026-10-24T10:00:00.000Z"));
 const steps = simulationSteps(result);
@@ -57,5 +57,18 @@ describe("revealInvisible and descriptionDiff", () => {
     expect(added).toContain("[U+200B]");
     expect(added).toContain("~/.ssh/id_rsa");
     expect(descriptionDiff(RUG_PULL, "read_config")).toBeNull();
+  });
+});
+
+describe("playerKey", () => {
+  it("maps Space and K to play/pause and the arrows to stepping", () => {
+    expect(playerKey(" ")).toBe("toggle");
+    expect(playerKey("k")).toBe("toggle");
+    expect(playerKey("ArrowLeft")).toBe("previous");
+    expect(playerKey("ArrowRight")).toBe("next");
+  });
+
+  it("leaves other keys, including up and down, alone", () => {
+    for (const key of ["ArrowUp", "ArrowDown", "Enter", "a", "Tab"]) expect(playerKey(key)).toBeNull();
   });
 });

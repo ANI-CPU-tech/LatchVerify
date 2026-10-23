@@ -14,6 +14,7 @@ import {
   isHighReach,
   lastApproval,
   relativeTime,
+  sentence,
   serverSummaries,
 } from "../../web/src/lib/format.js";
 import { mockReviewItems } from "../../web/src/lib/mock.js";
@@ -48,6 +49,26 @@ describe("explainChange", () => {
     expect(explainChange(sync).details[0]).toBe("This tool is new and was never approved.");
     expect(explainChange(alerts).headline).toBe("Its capabilities did not change.");
     expect(explainChange(alerts).details.join(" ")).toContain("auto-passed");
+  });
+
+  it("never reads as all-clear for a blocked change whose capabilities did not move", () => {
+    const poisonedText = { ...forecast, capabilityDelta: { gained: [], lost: [], loosened: [] } };
+    const explained = explainChange(poisonedText);
+    expect(explained.tone).toBe("destructive");
+    expect(explained.headline).toBe("Its capabilities did not change, but its text has 2 critical findings.");
+    const review = explainChange({ ...poisonedText, tier: 2 as const, findings: [] });
+    expect(review).toMatchObject({ tone: "warning", headline: "Its capabilities did not change, but it still needs review." });
+  });
+
+  it("is a success only when the change auto-passes, and destructive when capabilities grew", () => {
+    expect(explainChange(alerts).tone).toBe("success");
+    expect(explainChange(forecast).tone).toBe("destructive");
+  });
+
+  it("reads as a sentence for a tier-2 change", () => {
+    const review = explainChange({ ...forecast, tier: 2 as const });
+    expect(review.details.join(" ")).toContain("The proxy blocked calls to it until you approve this definition.");
+    expect(review.details.join(" ")).not.toContain("until reviewed calls");
   });
 
   it("reports narrowing", () => {
@@ -204,5 +225,13 @@ describe("VERIFY_EXIT_CODES", () => {
       hard_block: VERIFY_EXIT.hardBlock,
       error: VERIFY_EXIT.error,
     });
+  });
+});
+
+describe("sentence", () => {
+  it("ends text with a full stop unless it already ends a sentence", () => {
+    expect(sentence("The LatchVerify review API is not running (HTTP 502 from the proxy)")).toBe("The LatchVerify review API is not running (HTTP 502 from the proxy).");
+    expect(sentence("is the review API running?")).toBe("is the review API running?");
+    expect(sentence("Done. ")).toBe("Done.");
   });
 });

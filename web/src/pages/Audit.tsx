@@ -1,6 +1,7 @@
 import type { LatchEvent } from "@schema/index.js";
+import { Select } from "../components/Select";
 import { useState } from "react";
-import { Badge, EmptyState, ErrorState, LoadingState, PageHeader, Panel, buttonClass, inputClass } from "../components/ui";
+import { Badge, EmptyState, ErrorState, LoadingState, PageHeader, Panel, buttonClass } from "../components/ui";
 import { MAX_EVENTS } from "../lib/api";
 import { useData } from "../lib/data";
 import { EVENT_KINDS, dateTime, describeEvent, eventTitle, relativeTime } from "../lib/format";
@@ -37,41 +38,27 @@ export function Audit() {
               <label className="sr-only" htmlFor="audit-kind">
                 Event kind
               </label>
-              <select
+              <Select
                 id="audit-kind"
-                className={inputClass}
                 value={kind}
-                onChange={(event) => {
-                  setKind(event.target.value as LatchEvent["kind"] | "");
+                options={[{ value: "", label: "All events" }, ...EVENT_KINDS.map((value) => ({ value, label: eventTitle(value) }))]}
+                onChange={(value) => {
+                  setKind(value as LatchEvent["kind"] | "");
                   setShown(PAGE_SIZE);
                 }}
-              >
-                <option value="">All events</option>
-                {EVENT_KINDS.map((value) => (
-                  <option key={value} value={value}>
-                    {eventTitle(value)}
-                  </option>
-                ))}
-              </select>
+              />
               <label className="sr-only" htmlFor="audit-server">
                 Server
               </label>
-              <select
+              <Select
                 id="audit-server"
-                className={inputClass}
                 value={server}
-                onChange={(event) => {
-                  setServer(event.target.value);
+                options={[{ value: "", label: "All servers" }, ...servers.map((id) => ({ value: id, label: id }))]}
+                onChange={(value) => {
+                  setServer(value);
                   setShown(PAGE_SIZE);
                 }}
-              >
-                <option value="">All servers</option>
-                {servers.map((id) => (
-                  <option key={id} value={id}>
-                    {id}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           }
         >

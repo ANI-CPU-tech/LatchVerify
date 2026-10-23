@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PixelLandscape, StarrySky } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
 import { useTheme } from "../lib/theme";
 import { sceneFor } from "../lib/themes";
+import { NAV_OPEN_DELAY_MS, navKeyTarget } from "../lib/nav";
 import { href, type Page } from "../lib/router";
-import { FlaskIcon, GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
+import { FlaskIcon, GitIcon, HomeIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
 
 export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon: ReactNode; href: string }> = [
@@ -53,6 +54,8 @@ type Box = { x: number; y: number; width: number; height: number };
 /**
  * The section links. One highlight sits behind the active link and slides to the next one on
  * navigation; it is measured from the DOM, so it follows wrapping, zoom and font changes.
+ * From a focused link, the arrow keys along the list (Home and End too) move focus to another
+ * link at once and open its section when the keys pause (NAV_OPEN_DELAY_MS).
  */
 function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "strip" }) {
   const wrapper = useRef<HTMLDivElement>(null);
@@ -75,10 +78,28 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
       const smooth = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
       link.scrollIntoView({ block: "nearest", inline: "center", behavior: smooth ? "smooth" : "auto" });
     }
+    // Watch every link too: when one grows (the queue count arriving), the links after it move
+    // while the wrapper keeps its size.
     const observer = new ResizeObserver(measure);
     observer.observe(root);
+    for (const anchor of root.querySelectorAll("a")) observer.observe(anchor);
     return () => observer.disconnect();
   }, [current, layout]);
+
+  const opening = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(opening.current), []);
+
+  const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const links = [...event.currentTarget.querySelectorAll<HTMLAnchorElement>("a[href]")];
+    const next = navKeyTarget(event.key, links.indexOf(event.target as HTMLAnchorElement), links.length, layout);
+    if (next === null || !links.includes(event.target as HTMLAnchorElement)) return;
+    event.preventDefault();
+    const target = links[next]!;
+    target.focus();
+    window.clearTimeout(opening.current);
+    opening.current = window.setTimeout(() => target.click(), NAV_OPEN_DELAY_MS);
+  };
 
   return (
     <div ref={wrapper} className="relative">
@@ -89,7 +110,7 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
           style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.width, height: box.height }}
         />
       )}
-      <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"}>
+      <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"} onKeyDown={onKeyDown}>
         {NAV.map((item, i) => {
           const active = item.page === current;
           return (
@@ -142,15 +163,29 @@ export function AppShell({ current, children }: { current: Page; children: React
       <header className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <div className="flex h-14 items-center gap-3 px-4">
           <a href={href({ page: "overview" })} className="flex items-center gap-2 rounded-sm">
-            <span className="text-xl text-accent">
-              <LockIcon />
-            </span>
+            {/*
+              The favicon, a pixel-art padlock, kept crisp. Its outline is near-black, so a 1px glow
+              in the theme's foreground keeps the shackle visible on dark headers.
+            */}
+            <img
+              src="/favicon.svg"
+              alt=""
+              width={24}
+              height={24}
+              className="h-6 w-6 [filter:drop-shadow(0_0_1px_hsl(var(--foreground)/0.7))] [image-rendering:pixelated]"
+            />
             <span className="font-display text-lg font-bold tracking-tight">LatchVerify</span>
           </a>
           <span className="hidden border-l pl-3 font-mono text-xs uppercase tracking-widest text-muted-foreground sm:inline">MCP security proxy</span>
           <div className="ml-auto flex items-center gap-2">
             <span role="status" title={status.detail} className="flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs">
-              <StatusDot tone={status.tone} />
+              {/* A slow ring while connected, a blink while checking; nothing moves when unreachable. */}
+              <span className={`relative flex ${api === "checking" ? "motion-safe:animate-pulse" : ""}`}>
+                {api === "connected" && (
+                  <span aria-hidden="true" className="absolute inset-0 hidden rounded-full bg-success opacity-50 motion-safe:block motion-safe:animate-[ping_2.4s_cubic-bezier(0,0,0.2,1)_infinite]" />
+                )}
+                <StatusDot tone={status.tone} />
+              </span>
               <span className="hidden sm:inline">{status.label}</span>
               <span className="sr-only sm:hidden">{status.label}</span>
             </span>

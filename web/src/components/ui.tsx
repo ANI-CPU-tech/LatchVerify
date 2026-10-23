@@ -1,7 +1,7 @@
-import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { Tone } from "../lib/format";
 import { describeError } from "../lib/data";
-import { AlertIcon, ArrowRightIcon } from "./icons";
+import { AlertIcon, ArrowRightIcon, RefreshIcon } from "./icons";
 
 /** Shared building blocks. Colors come only from theme tokens (src/index.css). */
 
@@ -48,8 +48,12 @@ const BUTTON = {
   ghost: "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
 } as const;
 
+/**
+ * Buttons ease their colors, lift a pixel with a soft shadow on hover and give a little on press;
+ * disabled ones stay put. Movement only for viewers who have not asked for reduced motion.
+ */
 export const buttonClass = (variant: keyof typeof BUTTON = "secondary", size: "sm" | "md" = "md"): string =>
-  `inline-flex items-center justify-center gap-2 rounded-md border font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+  `inline-flex items-center justify-center gap-2 rounded-md border font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:shadow-card motion-safe:hover:-translate-y-px motion-safe:active:translate-y-0 motion-safe:active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none ${
     size === "sm" ? "px-2.5 py-1 text-xs" : "px-4 py-2 text-sm"
   } ${BUTTON[variant]}`;
 
@@ -103,9 +107,11 @@ export function Panel({
 /** "View all →" style link for panel headers. */
 export function PanelLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a href={href} className="inline-flex shrink-0 items-center gap-1 rounded-sm text-xs font-medium text-primary hover:underline">
+    <a href={href} className="group inline-flex shrink-0 items-center gap-1 rounded-sm text-xs font-medium text-primary hover:underline">
       {children}
-      <ArrowRightIcon />
+      <span className="transition-transform duration-200 motion-safe:group-hover:translate-x-0.5">
+        <ArrowRightIcon />
+      </span>
     </a>
   );
 }
@@ -144,7 +150,8 @@ export function JsonView({ value, label }: { value: unknown; label?: string }) {
 
 export function LoadingState({ label }: { label: string }) {
   return (
-    <p role="status" className="py-6 text-center text-sm text-muted-foreground">
+    <p role="status" className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+      <RefreshIcon aria-hidden="true" className="text-primary motion-safe:animate-spin" />
       {label}
     </p>
   );
@@ -187,7 +194,25 @@ export function Tabs({ tabs, label }: { tabs: TabSpec[]; label: string }) {
   const [active, setActive] = useState(tabs[0]?.id);
   const base = useId();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const list = useRef<HTMLDivElement>(null);
   const current = tabs.find((tab) => tab.id === active) ?? tabs[0];
+  const selectedIndex = tabs.findIndex((tab) => tab.id === current?.id);
+  // One underline that slides to the selected tab, measured from the DOM.
+  const [underline, setUnderline] = useState<{ left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const root = list.current;
+    if (!root) return;
+    const measure = () => {
+      const tab = refs.current[selectedIndex];
+      setUnderline(tab ? { left: tab.offsetLeft, width: tab.offsetWidth } : null);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    for (const tab of refs.current) if (tab) observer.observe(tab);
+    return () => observer.disconnect();
+  }, [selectedIndex, tabs.length]);
 
   const onKeyDown = (event: KeyboardEvent, index: number) => {
     const last = tabs.length - 1;
@@ -205,7 +230,14 @@ export function Tabs({ tabs, label }: { tabs: TabSpec[]; label: string }) {
 
   return (
     <div>
-      <div role="tablist" aria-label={label} className="flex gap-1 overflow-x-auto border-b [scrollbar-width:none]">
+      <div ref={list} role="tablist" aria-label={label} className="relative flex gap-1 overflow-x-auto border-b [scrollbar-width:none]">
+        {underline && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-full bg-primary transition-[transform,width] duration-300 ease-out motion-reduce:transition-none"
+            style={{ transform: `translateX(${underline.left}px)`, width: underline.width }}
+          />
+        )}
         {tabs.map((tab, i) => {
           const selected = tab.id === current?.id;
           return (
@@ -223,7 +255,7 @@ export function Tabs({ tabs, label }: { tabs: TabSpec[]; label: string }) {
               onClick={() => setActive(tab.id)}
               onKeyDown={(event) => onKeyDown(event, i)}
               className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                selected ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                selected ? `text-primary ${underline ? "border-transparent" : "border-primary"}` : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               {tab.label}
@@ -232,7 +264,14 @@ export function Tabs({ tabs, label }: { tabs: TabSpec[]; label: string }) {
         })}
       </div>
       {current && (
-        <div role="tabpanel" id={`${base}-panel-${current.id}`} aria-labelledby={`${base}-tab-${current.id}`} tabIndex={0} className="pt-4">
+        <div
+          key={current.id}
+          role="tabpanel"
+          id={`${base}-panel-${current.id}`}
+          aria-labelledby={`${base}-tab-${current.id}`}
+          tabIndex={0}
+          className="pt-4 motion-safe:animate-[ui-fade_0.25s_ease-out]"
+        >
           {current.content}
         </div>
       )}

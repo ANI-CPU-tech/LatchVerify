@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { AppShell, NAV } from "./components/AppShell";
+import { PageTransition } from "./components/PageTransition";
 import { EmptyState, Panel, buttonClass } from "./components/ui";
 import { DataProvider } from "./lib/data";
 import { href, type Route } from "./lib/router";
@@ -60,7 +61,9 @@ export function App() {
     <ThemeProvider>
       <DataProvider>
         <AppShell current={route.page}>
-          <Page route={route} />
+          <PageTransition pageKey={route.page}>
+            <Page route={route} />
+          </PageTransition>
         </AppShell>
       </DataProvider>
     </ThemeProvider>

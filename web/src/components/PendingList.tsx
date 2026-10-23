@@ -1,6 +1,9 @@
+import type { KeyboardEvent } from "react";
 import type { ReviewItem } from "../lib/api";
 import { relativeTime } from "../lib/format";
+import { navKeyTarget } from "../lib/nav";
 import { href } from "../lib/router";
+import { navigate } from "../lib/useRoute";
 import { TierBadge } from "./TierBadge";
 
 interface Props {
@@ -8,11 +11,28 @@ interface Props {
   selectedId: string;
 }
 
-/** The queue as links: each change has its own URL (#/review/<id>). */
+/**
+ * The queue as links: each change has its own URL (#/review/<id>). From a focused change, Up and
+ * Down (Home and End too, wrapping at the ends) move focus through the queue and select the change
+ * they land on. That replaces the history entry, so stepping through is not a trail of Back steps.
+ */
 export function PendingList({ items, selectedId }: Props) {
+  const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const links = [...event.currentTarget.querySelectorAll<HTMLAnchorElement>("a[href]")];
+    const index = links.indexOf(event.target as HTMLAnchorElement);
+    if (index < 0) return;
+    const next = navKeyTarget(event.key, index, links.length, "sidebar");
+    const item = next === null ? undefined : items[next];
+    if (next === null || !item) return;
+    event.preventDefault();
+    links[next]!.focus();
+    navigate({ page: "review", id: item.change.id }, { replace: true });
+  };
+
   return (
     <nav aria-label="Pending changes">
-      <ul className="space-y-2">
+      <ul className="space-y-2" onKeyDown={onKeyDown}>
         {items.map(({ change }) => {
           const selected = change.id === selectedId;
           return (

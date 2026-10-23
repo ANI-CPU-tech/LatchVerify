@@ -2,6 +2,7 @@ import type { SimulationResult } from "@schema/index.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CapabilityDiff } from "../components/CapabilityDiff";
 import { FindingList } from "../components/FindingList";
+import { Select } from "../components/Select";
 import { SimFlow } from "../components/SimFlow";
 import { FlaskIcon, PauseIcon, PlayIcon, RefreshIcon, StepBackIcon, StepForwardIcon } from "../components/icons";
 import { TextDiff } from "../components/TextDiff";
@@ -9,11 +10,13 @@ import { TierBadge } from "../components/TierBadge";
 import { Badge, ErrorState, JsonView, LoadingState, PageHeader, Panel, StatusDot, buttonClass } from "../components/ui";
 import { simulateRugPull } from "../lib/api";
 import type { Tone } from "../lib/format";
-import { RUG_PULL, descriptionDiff, simulationSteps, type SimStep } from "../lib/simulation";
+import { RUG_PULL, descriptionDiff, playerKey, simulationSteps, type SimStep } from "../lib/simulation";
 
 /** Milliseconds a step stays on screen at 1x. */
 const STEP_MS = 2600;
 const SPEEDS = [0.5, 1, 2] as const;
+/** Half speed by default, so each step can be read as it plays. */
+const DEFAULT_SPEED: (typeof SPEEDS)[number] = 0.5;
 
 const TONE_RING: Record<Tone, string> = {
   neutral: "border-border",
@@ -33,7 +36,7 @@ export function Simulation() {
   const [index, setIndex] = useState(0);
   // Autoplay, unless the viewer asked for less motion; they can still press Play.
   const [playing, setPlaying] = useState(() => !prefersReducedMotion());
-  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
+  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(DEFAULT_SPEED);
 
   const start = useCallback((signal?: AbortSignal) => {
     setRun({ status: "loading" });
@@ -64,6 +67,27 @@ export function Simulation() {
     const timer = window.setTimeout(() => setIndex((i) => Math.min(i + 1, last)), STEP_MS / speed);
     return () => window.clearTimeout(timer);
   }, [playing, index, last, speed, steps.length]);
+
+  // Keyboard: Space or K plays and pauses, the left and right arrows step. Only when nothing
+  // interactive has focus, so links, buttons, the speed menu and the nav keep their own keys.
+  useEffect(() => {
+    if (steps.length === 0) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.target instanceof Element && event.target.closest("a, button, input, select, textarea, [contenteditable], [role=tab], [role=listbox]")) return;
+      const action = playerKey(event.key);
+      if (action === null) return;
+      event.preventDefault();
+      if (action === "previous") setIndex((i) => Math.max(0, i - 1));
+      else if (action === "next") setIndex((i) => Math.min(last, i + 1));
+      else {
+        if (index >= last) setIndex(0);
+        setPlaying((p) => !p || index >= last);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [steps.length, last, index]);
 
   const step = steps[index];
   const swapAt = steps.findIndex((entry) => entry.id === "swap");
@@ -108,7 +132,8 @@ export function Simulation() {
                 if (index >= last) setIndex(0);
                 setPlaying((p) => !p || index >= last);
               }}
-              className={buttonClass("primary", "sm")}
+              // Fixed width: "Pause", "Play" and "Replay" differ, and the controls beside it must not shift.
+              className={`${buttonClass("primary", "sm")} w-24`}
             >
               {playing ? <PauseIcon /> : <PlayIcon />}
               {playing ? "Pause" : index >= last ? "Replay" : "Play"}
@@ -116,18 +141,21 @@ export function Simulation() {
             <button type="button" onClick={() => setIndex((i) => Math.min(last, i + 1))} disabled={index === last} className={buttonClass("secondary", "sm")} aria-label="Next step">
               <StepForwardIcon />
             </button>
-            <label className="ml-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <label htmlFor="sim-speed" className="ml-2 text-xs text-muted-foreground">
               Speed
-              <select value={speed} onChange={(event) => setSpeed(Number(event.target.value) as (typeof SPEEDS)[number])} className="rounded-md border border-input bg-card px-2 py-1 text-xs text-foreground">
-                {SPEEDS.map((value) => (
-                  <option key={value} value={value}>
-                    {value}x
-                  </option>
-                ))}
-              </select>
             </label>
-            <span className="ml-auto font-mono text-xs text-muted-foreground">
-              Step {index + 1} of {steps.length}
+            <Select
+              id="sim-speed"
+              size="sm"
+              value={String(speed)}
+              options={SPEEDS.map((value) => ({ value: String(value), label: `${value}x` }))}
+              onChange={(value) => setSpeed(Number(value) as (typeof SPEEDS)[number])}
+            />
+            <span className="ml-auto flex items-center gap-3 font-mono text-xs text-muted-foreground">
+              <span className="hidden lg:inline">Space play/pause · ← → step</span>
+              <span>
+                Step {index + 1} of {steps.length}
+              </span>
             </span>
           </div>
           <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
@@ -135,10 +163,10 @@ export function Simulation() {
           </div>
 
           <Panel>
-            <SimFlow step={step} swapped={swapAt >= 0 && index >= swapAt} speed={speed} />
+            <SimFlow step={step} swapped={swapAt >= 0 && index >= swapAt} speed={speed} paused={!playing && index < last} />
           </Panel>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
             <Panel title="Timeline" icon={<FlaskIcon />} bodyClassName="p-2">
               <ol className="space-y-1">
                 {steps.map((entry, i) => (
@@ -150,8 +178,10 @@ export function Simulation() {
                         setPlaying(false);
                       }}
                       aria-current={i === index ? "step" : undefined}
-                      className={`flex w-full items-start gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                        i === index ? "bg-muted font-medium" : i < index ? "text-foreground hover:bg-muted/60" : "text-muted-foreground hover:bg-muted/60"
+                      className={`flex w-full items-start gap-2 rounded-md border-l-4 px-3 py-2 text-left text-sm transition-colors ${
+                        i === index
+                          ? `bg-muted font-medium ${TONE_RING[entry.tone]}`
+                          : `border-transparent ${i < index ? "text-foreground hover:bg-muted/60" : "text-muted-foreground hover:bg-muted/60"}`
                       }`}
                     >
                       <span className="mt-1.5">

@@ -12,7 +12,8 @@
  * data-theme on its own element and render with that theme's real tokens.
  *
  * surface-alpha: opacity of cards over the landscape backdrop (bg-card-glass); the lowest that
- *          keeps every text color at AA over any art color, per tests/web/themes.test.ts.
+ *          keeps every text color at AA over any art color, per tests/web/themes.test.ts. The
+ *          viewer's --surface-mix (Settings, 0 to 1) only raises it toward solid.
  * primary: buttons, links, the active nav item; dark enough for AA text on background.
  * accent:  brand orange for decoration only (icons, artwork, highlights), never for body text.
  * art-*:   the pixel-art landscape (web/src/art/landscape.ts), recolored per theme; art-sky and
@@ -599,10 +600,12 @@
   }
 }
 
-/* Simulation flow: a message crosses from its sender (--from) to its receiver (--to). */
+/* Simulation flow: a message crosses from its sender (--from) to its receiver (--to), anchored
+   by its own position so it stays inside the diagram at either end. */
 @keyframes sim-travel {
   from {
     left: var(--from);
+    transform: translateX(calc(var(--from) * -1));
     opacity: 0;
   }
   15% {
@@ -610,6 +613,7 @@
   }
   to {
     left: var(--to);
+    transform: translateX(calc(var(--to) * -1));
     opacity: 1;
   }
 }
@@ -637,5 +641,92 @@
 @keyframes nav-fade {
   from {
     opacity: 0;
+  }
+}
+
+/* Simulation flow, on the dotted line: dashes march toward the receiver (--march) while the
+   message is in flight (sim-window), and dots run from --from to --to, fading at both ends. */
+@keyframes sim-march {
+  to {
+    background-position: var(--march) 0;
+  }
+}
+@keyframes sim-window {
+  0% {
+    opacity: 0;
+  }
+  10%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes sim-dot {
+  from {
+    left: var(--from);
+    opacity: 0;
+  }
+  12%,
+  88% {
+    opacity: 1;
+  }
+  to {
+    left: var(--to);
+    opacity: 0;
+  }
+}
+
+/*
+ * UI motion, only for viewers who have not asked for less. Fill mode is backwards so nothing keeps
+ * a transform once it has arrived (a transform would make it a containing block).
+ */
+@media (prefers-reduced-motion: no-preference) {
+  /* A page's sections rise in one after another when it opens; later inserts rise on their own. */
+  .page-stagger > * {
+    animation: ui-rise 0.4s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  }
+  .page-stagger > :nth-child(2) {
+    animation-delay: 50ms;
+  }
+  .page-stagger > :nth-child(3) {
+    animation-delay: 100ms;
+  }
+  .page-stagger > :nth-child(4) {
+    animation-delay: 150ms;
+  }
+  .page-stagger > :nth-child(n + 5) {
+    animation-delay: 200ms;
+  }
+}
+
+@keyframes ui-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes ui-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Theme change (lib/theme.tsx, View Transition API): the old page's snapshot fades into the new. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 450ms;
+    animation-timing-function: ease;
+  }
+}
+
+/* Themed Select popup (components/Select.tsx) opening: a short scale and fade from the top. */
+@keyframes ui-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
   }
 }
