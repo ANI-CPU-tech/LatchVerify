@@ -33,7 +33,8 @@ export interface ListAnalysis {
 
 /**
  * Run the analysis pipeline over a tools/list `result` for `serverId`: per tool, hash the
- * segments, extract capabilities, run the Unicode and pattern detectors over every text field,
+ * segments, extract capabilities (cross-server references count tools pinned for other servers,
+ * except names this list also has), run the Unicode and pattern detectors over every text field,
  * diff against the pinned record and classify a tier. A tool whose composite hash matches its
  * pinned record is unchanged and not re-analyzed, so a detector update never causes phantom
  * drift on an approved definition.
@@ -54,8 +55,11 @@ export function analyzeToolList(
   now: Date,
 ): ListAnalysis | null {
   if (!isPlainObject(result) || !Array.isArray(result.tools)) return null;
-  const knownTools = otherServerTools(lockfile, serverId);
   const named = result.tools.map((raw) => ({ raw, name: toolName(raw) }));
+  // Names this server lists itself are not references to another server: clients namespace tools
+  // per server, so two servers may both have a "search" tool, and each mentions its own.
+  const own = new Set(named.map(({ name }) => name));
+  const knownTools = otherServerTools(lockfile, serverId).filter((name) => !own.has(name));
   const counts = new Map<string, number>();
   for (const { name } of named) if (name !== null) counts.set(name, (counts.get(name) ?? 0) + 1);
 
