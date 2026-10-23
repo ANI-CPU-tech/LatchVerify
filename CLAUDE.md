@@ -129,6 +129,13 @@ far range and forested mid range (each with sunlit and shadowed faces), a lake t
 them with the sun's glitter path, a canoe, pine shores with a cabin, jetty, rocks and reeds,
 and birds. Dark themes (`dark: true` in `themes.ts`, matching `color-scheme: dark`) get the
 night scene: a cratered moon, stars and a moonlit path instead of the sun, no birds.
+The art is drawn in named layers (`ART_LAYERS`), each a `<g class="art-<layer>">`. Moving parts
+(clouds, birds, glints, smoke, stars, canoe, window) have their own layers, animated in
+`index.css` only under `prefers-reduced-motion: no-preference`; second copies and alternate
+poses are hidden by default, so the still scene is complete. Each theme names its own extra
+in `themes.ts` (`art`): Default Light a balloon, Warm Retro a sailboat, Sunset sun rays and
+geese, Terminal Dark fireflies and a shooting star, Minimal snowfall, Forest Green a stag and
+lake mist. `sceneFor(theme)` gives the time and extra; a test keeps the mapping one to one.
 `AppShell` shows it as a fixed backdrop behind the content column on every page (the sidebar
 stays plain): the art whole at the bottom, its sky stretched to the top as a gradient
 (`--art-sky` to `--art-horizon`), with `starrySky()` stars at night. `PixelLandscape.tsx` draws
