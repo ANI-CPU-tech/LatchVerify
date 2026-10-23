@@ -203,9 +203,16 @@ export function landscape(): PixelArt {
     }
   }
 
+  // A bright line where the lake meets the far bank, broken by noise and warmer near the sun.
+  for (let x = 0; x < WIDTH; x++) {
+    if (fbm(x / 4, 80) > 0.42) set(x, LAKE, Math.abs(x - SUN.x) < 60 ? "glow" : "cloud");
+  }
+
   // Shore with grass tufts and dark speckles, then pines on it: taller where the shore rises toward the viewer.
   for (let x = 0; x < WIDTH; x++) {
     const shore = shoreAt(x);
+    // Ripples lap at the waterline wherever the shore runs into the lake.
+    if (shore > LAKE + 1 && shore < HEIGHT && hash(x, 72) > 0.35) set(x + (x < SUN.x ? 1 : -1), shore - 1, "cloud");
     if (hash(x, 70) > 0.6) set(x, shore - 1, "near");
     for (let y = shore; y < HEIGHT; y++) set(x, y, hash(x * 977 + y, 71) > 0.9 ? "tree" : "near");
   }
