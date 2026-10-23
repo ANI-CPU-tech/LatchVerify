@@ -106,6 +106,8 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
   through the View Transition API (`setPreference` in `lib/theme.tsx`): a snapshot of the whole
   page cross-fades, because gradients and the swapped day/night art cannot transition per
   property. Keyframes: `ui-rise`, `ui-fade` and `ui-pop` in `index.css`.
+- The review queue (`components/PendingList.tsx`) steps with Up/Down, Home and End, selecting
+  the change it lands on; `navigate(route, { replace: true })` keeps that out of the Back history.
 - Dropdowns use `components/Select.tsx` (themed, WAI-ARIA select-only combobox; key logic in
   `lib/listbox.ts`), never a native `<select>`, whose popup the OS paints in its own colors.
 - `lib/data.tsx` loads the queue, lockfile, events and git status once and shares them
