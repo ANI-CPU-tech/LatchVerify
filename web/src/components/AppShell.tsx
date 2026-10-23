@@ -4,7 +4,7 @@ import { useData } from "../lib/data";
 import { useTheme } from "../lib/theme";
 import { sceneFor } from "../lib/themes";
 import { href, type Page } from "../lib/router";
-import { FlaskIcon, GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
+import { FlaskIcon, GitIcon, HomeIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
 
 export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon: ReactNode; href: string }> = [
@@ -142,9 +142,17 @@ export function AppShell({ current, children }: { current: Page; children: React
       <header className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <div className="flex h-14 items-center gap-3 px-4">
           <a href={href({ page: "overview" })} className="flex items-center gap-2 rounded-sm">
-            <span className="text-xl text-accent">
-              <LockIcon />
-            </span>
+            {/*
+              The favicon, a pixel-art padlock, kept crisp. Its outline is near-black, so a 1px glow
+              in the theme's foreground keeps the shackle visible on dark headers.
+            */}
+            <img
+              src="/favicon.svg"
+              alt=""
+              width={24}
+              height={24}
+              className="h-6 w-6 [filter:drop-shadow(0_0_1px_hsl(var(--foreground)/0.7))] [image-rendering:pixelated]"
+            />
             <span className="font-display text-lg font-bold tracking-tight">LatchVerify</span>
           </a>
           <span className="hidden border-l pl-3 font-mono text-xs uppercase tracking-widest text-muted-foreground sm:inline">MCP security proxy</span>
