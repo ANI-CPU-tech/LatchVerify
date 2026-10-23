@@ -53,7 +53,15 @@ program
   .option("--ui", "open the web review UI", false)
   .option("--port <port>", "web UI port (default: $LATCH_UI_PORT or 7777)", (v) => Number.parseInt(v, 10))
   .action((opts: { ui: boolean; port?: number }) =>
-    run((env) => runReview({ ...opts, port: opts.port ?? env.uiPort, ...globals() })),
+    run((env) =>
+      runReview({
+        ...opts,
+        port: opts.port ?? env.uiPort,
+        // Only the built-in default may move to a free port; a port the user chose must not.
+        portFallback: opts.port === undefined && !process.env.LATCH_UI_PORT?.trim(),
+        ...globals(),
+      }),
+    ),
   );
 
 program

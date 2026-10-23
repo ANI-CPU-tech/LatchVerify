@@ -92,7 +92,19 @@ async function main(): Promise<void> {
   loadDotEnv();
   const env = loadEnv();
   const reviewer = defaultReviewer();
-  const handle = await startUiServer({ port: env.uiPort, lockfilePath: env.lockfilePath, stateDir: env.stateDir, reviewer });
+  let handle: UiServerHandle;
+  try {
+    handle = await startUiServer({ port: env.uiPort, lockfilePath: env.lockfilePath, stateDir: env.stateDir, reviewer });
+  } catch (error) {
+    // No fallback here: Vite proxies /api to LATCH_UI_PORT, so the API must be on that port.
+    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+      throw new Error(
+        `port ${env.uiPort} is in use (often a \`latch review --ui\` that is still running); stop it, or export LATCH_UI_PORT=<free port> so the API and Vite's proxy both move`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   console.error(`[latch ui] review API on ${handle.url} (approvals recorded as ${reviewer})`);
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => void handle.close().finally(() => process.exit(0)));

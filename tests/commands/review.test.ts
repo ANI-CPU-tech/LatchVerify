@@ -375,17 +375,44 @@ describe("runReview --ui", () => {
     }
   });
 
-  it("says when the port is taken", async () => {
+  /** Occupies a free port on 127.0.0.1 for the duration of `use`, as another process would. */
+  async function withPortTaken(use: (port: number) => Promise<void>) {
     const blocker = createServer();
     await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
-    const { port } = blocker.address() as { port: number };
     try {
-      await expect(review({ ui: true, port, staticDir, until: Promise.resolve(), openBrowser: () => {} })).rejects.toThrow(
-        `latch review: port ${port} is in use; choose another with --port`,
-      );
+      await use((blocker.address() as { port: number }).port);
     } finally {
       await new Promise((resolve) => blocker.close(resolve));
     }
+  }
+
+  it("fails on a port the user chose when it is taken, naming the likely cause", async () => {
+    await withPortTaken(async (port) => {
+      await expect(review({ ui: true, port, staticDir, until: Promise.resolve(), openBrowser: () => {} })).rejects.toThrow(
+        `latch review: port ${port} is in use (often an earlier \`latch review --ui\` that is still running); stop it, or choose another port with --port`,
+      );
+    });
+  });
+
+  it("moves to a free port when the default port is taken, and opens the browser there", async () => {
+    await withPortTaken(async (port) => {
+      let opened = "";
+      const { code, text } = await review({
+        ui: true,
+        port,
+        portFallback: true,
+        staticDir,
+        until: Promise.resolve(),
+        openBrowser: (url) => (opened = url),
+      });
+      expect(code).toBe(0);
+      expect(text).toContain(`port ${port} is in use`);
+      expect(text).toContain("using a free port instead");
+      const actual = Number(new URL(opened).port);
+      expect(actual).toBeGreaterThan(0);
+      expect(actual).not.toBe(port);
+      expect(text).toContain(`review UI on http://127.0.0.1:${actual}`);
+    });
   });
 
   it("refuses to start on a malformed queue", async () => {

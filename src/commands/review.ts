@@ -17,6 +17,11 @@ export interface ReviewOptions {
   /** Open the web UI instead of the terminal flow. */
   ui: boolean;
   port: number;
+  /**
+   * --ui: when `port` is taken, use a free port instead of failing. For the default port only:
+   * a port the user chose (--port, LATCH_UI_PORT) fails rather than silently moving.
+   */
+  portFallback?: boolean;
   lockfilePath: string;
   stateDir: string;
   /** Ask for a decision on each change. Defaults to true when stdin and stdout are terminals. */
@@ -171,14 +176,22 @@ async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: s
 
   const reviewer = (options.reviewer ?? defaultReviewer()).trim();
   if (reviewer === "") throw new Error("latch review: no reviewer name; set LATCH_REVIEWER or git config user.email");
+  const start = (port: number) => startUiServer({ port, lockfilePath, stateDir, reviewer, staticDir });
+  const inUse = (error: unknown) => (error as NodeJS.ErrnoException).code === "EADDRINUSE";
   let handle;
   try {
-    handle = await startUiServer({ port: options.port, lockfilePath, stateDir, reviewer, staticDir });
+    handle = await start(options.port);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
-      throw new Error(`latch review: port ${options.port} is in use; choose another with --port`, { cause: error });
+    if (!inUse(error)) throw error;
+    if (!options.portFallback) {
+      throw new Error(
+        `latch review: port ${options.port} is in use (often an earlier \`latch review --ui\` that is still running); stop it, or choose another port with --port`,
+        { cause: error },
+      );
     }
-    throw error;
+    // Port 0: the OS picks a free port. The browser is opened on the actual URL below.
+    handle = await start(0);
+    say(pc.yellow(`port ${options.port} is in use (often an earlier \`latch review --ui\` that is still running); using a free port instead`));
   }
   say(`review UI on ${handle.url} (approvals are recorded as ${printable(reviewer)}); press Ctrl+C to stop`);
   (options.openBrowser ?? ((url: string) => openInBrowser(url, say)))(handle.url);
