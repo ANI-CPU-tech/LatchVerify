@@ -13,7 +13,8 @@
  *
  * primary: buttons, links, the active nav item; dark enough for AA text on background.
  * accent:  brand orange for decoration only (icons, artwork, highlights), never for body text.
- * art-*:   the pixel-art landscape (web/src/art/landscape.ts), recolored per theme.
+ * art-*:   the pixel-art landscape (web/src/art/landscape.ts), recolored per theme; art-sky and
+ *          art-horizon are the gradient its sky stretches into, up to the top of the page.
  */
 @layer base {
   :root,
@@ -47,6 +48,8 @@
     --terminal-muted: 30 14% 62%;
     --terminal-accent: 22 90% 62%;
     --shadow: 0 1px 2px hsl(28 30% 20% / 0.06), 0 2px 8px hsl(28 30% 20% / 0.05);
+    --art-sky: 38 55% 94%;
+    --art-horizon: 28 85% 85%;
     --art-glow: 30 95% 70%;
     --art-sun: 19 87% 54%;
     --art-cloud: 28 85% 80%;
@@ -93,6 +96,8 @@
     --terminal-muted: 30 16% 60%;
     --terminal-accent: 28 75% 60%;
     --shadow: 0 1px 2px hsl(25 35% 20% / 0.07), 0 2px 6px hsl(25 35% 20% / 0.05);
+    --art-sky: 44 60% 94%;
+    --art-horizon: 32 75% 85%;
     --art-glow: 35 80% 72%;
     --art-sun: 24 70% 54%;
     --art-cloud: 38 70% 84%;
@@ -139,6 +144,8 @@
     --terminal-muted: 20 18% 62%;
     --terminal-accent: 18 90% 64%;
     --shadow: 0 1px 2px hsl(15 40% 25% / 0.07), 0 2px 8px hsl(15 40% 25% / 0.06);
+    --art-sky: 30 85% 93%;
+    --art-horizon: 20 90% 84%;
     --art-glow: 32 95% 70%;
     --art-sun: 14 88% 55%;
     --art-cloud: 24 95% 81%;
@@ -185,6 +192,8 @@
     --terminal-muted: 30 12% 58%;
     --terminal-accent: 22 90% 62%;
     --shadow: 0 1px 2px hsl(0 0% 0% / 0.4), 0 2px 8px hsl(0 0% 0% / 0.25);
+    --art-sky: 28 14% 8%;
+    --art-horizon: 26 28% 15%;
     --art-glow: 28 70% 32%;
     --art-sun: 22 90% 58%;
     --art-cloud: 26 50% 38%;
@@ -231,6 +240,8 @@
     --terminal-muted: 0 0% 62%;
     --terminal-accent: 19 70% 64%;
     --shadow: none;
+    --art-sky: 40 10% 97%;
+    --art-horizon: 30 12% 91%;
     --art-glow: 30 15% 88%;
     --art-sun: 19 45% 72%;
     --art-cloud: 30 10% 91%;
@@ -277,6 +288,8 @@
     --terminal-muted: 90 12% 60%;
     --terminal-accent: 80 45% 62%;
     --shadow: 0 1px 2px hsl(140 25% 15% / 0.07), 0 2px 8px hsl(140 25% 15% / 0.05);
+    --art-sky: 50 40% 94%;
+    --art-horizon: 35 70% 86%;
     --art-glow: 35 85% 75%;
     --art-sun: 24 80% 52%;
     --art-cloud: 38 75% 85%;

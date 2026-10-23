@@ -24,6 +24,7 @@ export default {
         info: pair("info"),
         sidebar: pair("sidebar"),
         terminal: { ...pair("terminal"), muted: token("terminal-muted"), accent: token("terminal-accent") },
+        art: { sky: token("art-sky"), horizon: token("art-horizon") },
       },
       borderRadius: {
         lg: "var(--radius)",

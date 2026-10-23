@@ -111,13 +111,16 @@ export function AppShell({ current, children }: { current: Page; children: React
             <NavLinks current={current} layout="sidebar" />
           </nav>
         </aside>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <main id="main" tabIndex={-1} className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-6xl space-y-6">{children}</div>
-          </main>
-          {/* Footer art spans the content column only, so the sidebar stays plain to the bottom. */}
-          <PixelLandscape time={isDarkTheme(theme) ? "night" : "day"} className="mt-8 block h-40 w-full sm:h-56 lg:h-64 2xl:h-80" />
-        </div>
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-6xl space-y-6">{children}</div>
+        </main>
+      </div>
+      {/*
+        Backdrop behind the content column (the sidebar stays plain): the landscape at full width,
+        its sky stretched up to the top as a gradient. Fixed, so content scrolls over it.
+      */}
+      <div className="pointer-events-none fixed inset-0 -z-10 flex flex-col justify-end bg-gradient-to-b from-art-sky to-art-horizon md:left-56">
+        <PixelLandscape time={isDarkTheme(theme) ? "night" : "day"} className="block h-auto min-h-40 w-full" />
       </div>
     </div>
   );

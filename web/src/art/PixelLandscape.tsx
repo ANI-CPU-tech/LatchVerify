@@ -4,7 +4,8 @@ import { ART_COLORS, landscape, type ArtTime } from "./landscape";
 /**
  * The pixel-art landscape as inline SVG: one path per color, filled from the theme's --art-*
  * tokens, crisp edges at any scale. Decorative: hidden from assistive tech and never clickable.
- * It fills its box anchored at the bottom: wide boxes crop the empty sky, narrow ones the sides.
+ * Anchored at the bottom: shown whole at its own aspect ratio, or, in a box taller than that
+ * (narrow screens, with a min height), cropped at the sides.
  */
 export function PixelLandscape({ time = "day", className = "" }: { time?: ArtTime; className?: string }) {
   const { width, height, paths } = useMemo(() => {
