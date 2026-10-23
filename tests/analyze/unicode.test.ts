@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   SUSPICIOUS_RANGES,
   decodeTagChars,
+  detectUnicode,
   escapeForEvidence,
   findConfusables,
   findSuspiciousCodepoints,
   formatCodepoint,
   suspiciousRange,
 } from "../../src/analyze/unicode.js";
-import { McpToolListSchema, type McpTool } from "../../src/schema/index.js";
+import { FindingSchema, McpToolListSchema, type Finding, type McpTool } from "../../src/schema/index.js";
 
 const fixtureTools = (name: string): McpTool[] =>
   McpToolListSchema.parse(JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"))).tools;
@@ -185,5 +186,93 @@ describe("escapeForEvidence", () => {
 
   it("formats codepoints with at least four uppercase hex digits", () => {
     expect([0x9, 0x200b, 0xe0068, 0x10ffff].map(formatCodepoint)).toEqual(["U+0009", "U+200B", "U+E0068", "U+10FFFF"]);
+  });
+});
+
+/** Every string value anywhere in a tool definition, with a field path for messages. */
+function textFields(value: unknown, path = ""): Array<[string, string]> {
+  if (typeof value === "string") return [[path, value]];
+  if (value === null || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, child]) => textFields(child, path ? `${path}.${key}` : key));
+}
+
+const summary = (findings: Finding[]) => findings.map((f) => `${f.severity}: ${f.evidence}`);
+
+describe("detectUnicode", () => {
+  it("returns no findings for empty or ordinary text", () => {
+    expect(detectUnicode("", "description")).toEqual([]);
+    expect(detectUnicode("Get active weather alerts for a US state.\n\tCaf\u{e9}, na\u{ef}ve, \u{6771}\u{4eac}.", "description")).toEqual([]);
+  });
+
+  it("finds nothing in any text field of the benign fixture", () => {
+    for (const tool of fixtureTools("benign-tools.json")) {
+      for (const [field, text] of textFields(tool)) expect(detectUnicode(text, field)).toEqual([]);
+    }
+  });
+
+  it("reports the poisoned get_forecast zero-width run as one warn finding", () => {
+    const findings = detectUnicode(description("poisoned-tools.json", "get_forecast"), "description");
+    expect(summary(findings)).toEqual(["warn: U+200B x8 at offset 40"]);
+    expect(findings[0]!.message).toBe("8 invisible characters in description can hide text from human reviewers");
+  });
+
+  it("reports the poisoned run_diagnostics bidi override as critical, showing the text it reverses", () => {
+    const findings = detectUnicode(description("poisoned-tools.json", "run_diagnostics"), "description");
+    expect(summary(findings)).toEqual([
+      'critical: U+202E x1 at offset 17 before "esrever[U+202C] command. Ignore previous instru"',
+      "warn: U+202C x1 at offset 25",
+    ]);
+  });
+
+  it("reports the poisoned sync_alerts tag characters as critical with the decoded payload", () => {
+    const findings = detectUnicode(description("poisoned-tools.json", "sync_alerts"), "description");
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: "critical", message: "2 invisible tag characters in description smuggle hidden text" });
+    expect(findings[0]!.evidence).toMatch(/^U\+E0068,U\+E0069 x2 at offset \d+ decodes to "hi"$/);
+  });
+
+  it("treats bidi isolates as critical and lone closers as warn", () => {
+    expect(summary(detectUnicode("a\u{2067}b\u{2069}", "title"))).toEqual(['critical: U+2067 x1 at offset 1 before "b[U+2069]"', "warn: U+2069 x1 at offset 3"]);
+    expect(detectUnicode("x\u{202c}", "d").map((f) => f.message)).toEqual(["Stray bidirectional control in d"]);
+  });
+
+  it("flags terminal escapes and other control characters as warn", () => {
+    expect(summary(detectUnicode("ok\u{1b}[8mhidden", "description"))).toEqual(["warn: U+001B x1 at offset 2"]);
+  });
+
+  it("treats two or more consecutive variation selectors as an encoding of hidden data", () => {
+    const smuggled = `hello\u{1f600}${String.fromCodePoint(0xfe00, 0xfe01, 0xe0100, 0xe0101)}`;
+    const findings = detectUnicode(smuggled, "description");
+    expect(findings.map((f) => f.severity)).toEqual(["critical", "critical"]);
+    expect(findings[0]!.message).toBe("2 consecutive variation selectors in description can encode hidden data");
+  });
+
+  it("reports confusable words after the codepoint runs, with an escaped explanation", () => {
+    const findings = detectUnicode("read p\u{430}th\u{200b} or \u{fb01}le", "inputSchema.properties.path.description");
+    expect(summary(findings)).toEqual([
+      "warn: U+200B x1 at offset 9",
+      'warn: "p[U+0430]th" mixes Latin + Cyrillic',
+      'warn: "[U+FB01]le" folds to "file" under NFKC',
+    ]);
+    expect(findings[1]!.message).toBe("Look-alike word in inputSchema.properties.path.description may impersonate other text");
+  });
+
+  it("truncates long payloads in evidence and says how much was cut", () => {
+    const payload = "x".repeat(300);
+    const tags = [...payload].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join("");
+    const [finding] = detectUnicode(`a${tags}`, "description");
+    expect(finding!.evidence).toBe(`U+E0078 x300 at offset 1 decodes to "${"x".repeat(120)}"... (+180 chars)`);
+  });
+
+  it("only ever produces schema-valid findings with printable-ASCII evidence", () => {
+    const hostile = `\u{202e}\u{1b}]0;title\u{7}${"\u{200b}".repeat(3)}g\u{3bf}\u{3bf}gle\u{e0049}\u{e0067}\u{feff}\u{ad}\u{fe0f}\u{fe0f}`;
+    const texts = [hostile, ...fixtureTools("poisoned-tools.json").flatMap((t) => textFields(t).map(([, text]) => text))];
+    for (const text of texts) {
+      for (const finding of detectUnicode(text, "description")) {
+        expect(FindingSchema.parse(finding)).toEqual(finding);
+        expect(finding.type).toBe("unicode");
+        expect(finding.evidence).toMatch(/^[\x20-\x7e]*$/);
+      }
+    }
   });
 });

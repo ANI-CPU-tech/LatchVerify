@@ -180,12 +180,110 @@ export function formatCodepoint(codepoint: number): string {
   return `U+${codepoint.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
+/** Consecutive hits with the same label: one finding each. */
+interface HitRun {
+  label: string;
+  hits: UnicodeHit[];
+  /** UTF-16 offsets: first character and one past the last. */
+  start: number;
+  end: number;
+}
+
+/** UTF-16 length of one codepoint. */
+const unitLength = (codepoint: number): number => (codepoint > 0xffff ? 2 : 1);
+
+/** Groups hits that touch each other and share a label. */
+function groupRuns(hits: readonly UnicodeHit[]): HitRun[] {
+  const runs: HitRun[] = [];
+  for (const hit of hits) {
+    const last = runs.at(-1);
+    if (last && last.label === hit.label && last.end === hit.index) {
+      last.hits.push(hit);
+      last.end = hit.index + unitLength(hit.codepoint);
+    } else {
+      runs.push({ label: hit.label, hits: [hit], start: hit.index, end: hit.index + unitLength(hit.codepoint) });
+    }
+  }
+  return runs;
+}
+
+/** Bidi controls that start reordering. Their closers (U+202C, U+2069) do nothing alone. */
+const BIDI_OPENERS: ReadonlySet<number> = new Set([0x202a, 0x202b, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068]);
+
+const VARIATION_LABELS: ReadonlySet<string> = new Set(["variation-selector", "variation-selector-supplement"]);
+
+/** Longest decoded payload or affected text quoted in evidence before truncating. */
+const EVIDENCE_TEXT_LIMIT = 120;
+
+/** Escaped, quoted text for evidence, truncated with a count of what was cut. */
+function quoted(text: string): string {
+  const chars = [...text];
+  if (chars.length <= EVIDENCE_TEXT_LIMIT) return escapeForEvidence(text);
+  return `${escapeForEvidence(chars.slice(0, EVIDENCE_TEXT_LIMIT).join(""))}... (+${chars.length - EVIDENCE_TEXT_LIMIT} chars)`;
+}
+
+/** Severity and message for one run, before evidence. */
+function classifyRun(run: HitRun, field: string): Pick<Finding, "severity" | "message"> {
+  const count = run.hits.length;
+  const chars = count === 1 ? "character" : "characters";
+  switch (run.label) {
+    case "tag":
+      return { severity: "critical", message: `${count} invisible tag ${chars} in ${field} smuggle hidden text` };
+    case "bidi-embedding":
+    case "bidi-isolate":
+      return run.hits.some((h) => BIDI_OPENERS.has(h.codepoint))
+        ? { severity: "critical", message: `Bidirectional override in ${field} makes the text display differently from what the model reads` }
+        : { severity: "warn", message: `Stray bidirectional control in ${field}` };
+    case "bidi-mark":
+      return { severity: "warn", message: `Bidirectional mark in ${field} can change how the text displays` };
+    case "control":
+      return { severity: "warn", message: `${count} control ${chars} in ${field}; terminal escapes can hide or rewrite text` };
+    default:
+      if (VARIATION_LABELS.has(run.label)) {
+        return count > 1
+          ? { severity: "critical", message: `${count} consecutive variation selectors in ${field} can encode hidden data` }
+          : { severity: "warn", message: `Variation selector in ${field} without a character it applies to` };
+      }
+      return { severity: "warn", message: `${count} invisible ${chars} in ${field} can hide text from human reviewers` };
+  }
+}
+
+/** "U+200B x8 at offset 40", plus the decoded payload or the text a bidi control affects. */
+function runEvidence(run: HitRun, text: string): string {
+  const codepoints = [...new Set(run.hits.map((h) => formatCodepoint(h.codepoint)))].join(",");
+  const base = `${codepoints} x${run.hits.length} at offset ${run.start}`;
+  if (run.label === "tag") return `${base} decodes to ${quoted(decodeTagChars(text.slice(run.start, run.end)))}`;
+  if (run.hits.some((h) => BIDI_OPENERS.has(h.codepoint))) return `${base} before ${quoted(text.slice(run.end, run.end + 40))}`;
+  return base;
+}
+
 /**
- * Run all Unicode checks over one tool field.
- * TODO: emit "unicode" findings: critical for tag chars and bidi overrides (with the decoded
- * payload as evidence), warn for zero-width runs and confusables. `field` names the source,
- * e.g. "description" or "inputSchema.properties.path.description".
+ * Runs every Unicode check over one tool field and returns "unicode" findings: one per run of
+ * suspicious codepoints, in text order, then one per confusable word.
+ *
+ * Severity:
+ * - critical: tag characters (evidence shows the decoded payload), bidi openers (evidence shows
+ *   the text they reorder), and two or more consecutive variation selectors (a byte-smuggling
+ *   encoding). Critical unicode findings make a change tier 3.
+ * - warn: zero-width and other invisible characters, control characters, bidi marks and stray
+ *   closers, a single variation selector, and confusable words.
+ *
+ * `field` names the source in messages, e.g. "description" or
+ * "inputSchema.properties.path.description". Evidence is printable ASCII only.
  */
 export function detectUnicode(text: string, field: string): Finding[] {
-  throw new Error("not implemented");
+  const findings: Finding[] = groupRuns(findSuspiciousCodepoints(text)).map((run) => ({
+    type: "unicode",
+    ...classifyRun(run, field),
+    evidence: runEvidence(run, text),
+  }));
+  for (const word of findConfusables(text)) {
+    findings.push({
+      type: "unicode",
+      severity: "warn",
+      message: `Look-alike word in ${field} may impersonate other text`,
+      evidence: `${escapeForEvidence(word)} ${confusableReason(word)}`,
+    });
+  }
+  return findings;
 }
