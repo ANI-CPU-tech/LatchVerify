@@ -12,5 +12,6 @@ describe("plural", () => {
   it("adds an s for every count but one", () => {
     expect(plural(1, "tool")).toBe("1 tool");
     expect([0, 2, 10].map((n) => plural(n, "tool"))).toEqual(["0 tools", "2 tools", "10 tools"]);
+    expect([1, 3].map((n) => plural(n, "entry", "entries"))).toEqual(["1 entry", "3 entries"]);
   });
 });
