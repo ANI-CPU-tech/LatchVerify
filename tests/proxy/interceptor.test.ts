@@ -396,7 +396,7 @@ describe("onToolsListChanged", () => {
     expect(await fromServer(listChanged)).toEqual(FORWARD);
     expect(ctx.verified).toBe(false);
     expect(sent).toEqual([{ jsonrpc: "2.0", id: expect.stringMatching(/^latchverify-[0-9a-f-]{36}$/), method: "tools/list" }]);
-    expect([...ctx.ownRequests]).toEqual([[sent[0]!.id, 1]]);
+    expect([...ctx.ownRequests]).toEqual([[sent[0]!.id, { page: 1, tools: [], stale: false }]]);
     expect(await fromClient(call(6, "get_alerts"))).toMatchObject({ message: { error: { data: { reason: { kind: "unverified" } } } } });
     expect(await kinds()).toEqual(["tools_listed", "list_changed", "call_blocked"]);
   });
@@ -419,9 +419,57 @@ describe("onToolsListChanged", () => {
     await fromServer(listChanged);
     await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: [benign[0]], nextCursor: "p2" } });
     expect(sent[1]).toEqual({ jsonrpc: "2.0", id: expect.stringMatching(/^latchverify-/), method: "tools/list", params: { cursor: "p2" } });
-    expect(ctx.ownRequests.get(sent[1]!.id)).toBe(2);
+    expect(ctx.ownRequests.get(sent[1]!.id)).toMatchObject({ page: 2, tools: [benign[0]] });
     await fromServer({ jsonrpc: "2.0", id: sent[1]!.id, result: { tools: [poisoned[1]] } });
     expect(sent).toHaveLength(2);
+    expect(ctx.pending.map((c) => c.toolName)).toEqual(["read_config"]);
+  });
+
+  it("keeps calls blocked until the last page is analyzed, so a drifted tool on page 2 is never callable", async () => {
+    const { fromServer, fromClient, listTools, ctx, sent, kinds } = await setup();
+    await listTools(benign);
+    await fromServer(listChanged);
+    await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: [benign[1]], nextCursor: "p2" } });
+    expect(ctx.verified).toBe(false);
+    expect(ctx.pending).toEqual([]);
+    expect(await fromClient(call(6, "get_forecast"))).toMatchObject({ message: { error: { data: { reason: { kind: "unverified" } } } } });
+    await fromServer({ jsonrpc: "2.0", id: sent[1]!.id, result: { tools: [poisoned[0]] } });
+    expect(ctx.verified).toBe(true);
+    expect(ctx.pending.map((c) => [c.toolName, c.tier])).toEqual([["get_forecast", 3]]);
+    expect(await fromClient(call(7, "get_forecast"))).toMatchObject({ message: { error: { data: { reason: { kind: "hard_block" } } } } });
+    expect(await fromClient(call(8, "get_alerts"))).toEqual(FORWARD);
+    expect((await kinds()).filter((kind) => kind === "tools_listed")).toHaveLength(2);
+  });
+
+  it("treats an empty nextCursor as the last page", async () => {
+    const { fromServer, ctx, sent } = await setup();
+    await fromServer(listChanged);
+    await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: benign, nextCursor: "" } });
+    expect(sent).toHaveLength(1);
+    expect(ctx.verified).toBe(true);
+  });
+
+  it("drops a listing that was in progress when the server announced another change", async () => {
+    const { fromServer, ctx, sent } = await setup();
+    await fromServer(listChanged);
+    await fromServer({ jsonrpc: "2.0", id: sent[0]!.id, result: { tools: [benign[0]], nextCursor: "p2" } });
+    await fromServer(listChanged);
+    expect(await fromServer({ jsonrpc: "2.0", id: sent[1]!.id, result: { tools: [benign[1]] } })).toEqual({ action: "drop" });
+    expect(ctx.verified).toBe(false);
+    expect(sent).toHaveLength(3);
+    await fromServer({ jsonrpc: "2.0", id: sent[2]!.id, result: { tools: benign } });
+    expect(ctx.verified).toBe(true);
+  });
+
+  it("does not verify on a page of the client's own paged list", async () => {
+    const { fromServer, fromClient, ctx } = await setup();
+    await fromServer(listChanged);
+    await fromClient({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    expect(await fromServer({ jsonrpc: "2.0", id: 2, result: { tools: [benign[0]], nextCursor: "p2" } })).toEqual(FORWARD);
+    expect(ctx.verified).toBe(false);
+    await fromClient({ jsonrpc: "2.0", id: 3, method: "tools/list", params: { cursor: "p2" } });
+    expect(await fromServer({ jsonrpc: "2.0", id: 3, result: { tools: [poisoned[1]] } })).toEqual(FORWARD);
+    expect(ctx.verified).toBe(false);
     expect(ctx.pending.map((c) => c.toolName)).toEqual(["read_config"]);
   });
 
