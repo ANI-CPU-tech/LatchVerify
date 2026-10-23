@@ -707,3 +707,9 @@
     transform: translateY(8px);
   }
 }
+
+@keyframes ui-fade {
+  from {
+    opacity: 0;
+  }
+}

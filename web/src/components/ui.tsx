@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { Tone } from "../lib/format";
 import { describeError } from "../lib/data";
 import { AlertIcon, ArrowRightIcon } from "./icons";
@@ -193,7 +193,25 @@ export function Tabs({ tabs, label }: { tabs: TabSpec[]; label: string }) {
   const [active, setActive] = useState(tabs[0]?.id);
   const base = useId();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const list = useRef<HTMLDivElement>(null);
   const current = tabs.find((tab) => tab.id === active) ?? tabs[0];
+  const selectedIndex = tabs.findIndex((tab) => tab.id === current?.id);
+  // One underline that slides to the selected tab, measured from the DOM.
+  const [underline, setUnderline] = useState<{ left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const root = list.current;
+    if (!root) return;
+    const measure = () => {
+      const tab = refs.current[selectedIndex];
+      setUnderline(tab ? { left: tab.offsetLeft, width: tab.offsetWidth } : null);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    for (const tab of refs.current) if (tab) observer.observe(tab);
+    return () => observer.disconnect();
+  }, [selectedIndex, tabs.length]);
 
   const onKeyDown = (event: KeyboardEvent, index: number) => {
     const last = tabs.length - 1;
@@ -211,7 +229,14 @@ export function Tabs({ tabs, label }: { tabs: TabSpec[]; label: string }) {
 
   return (
     <div>
-      <div role="tablist" aria-label={label} className="flex gap-1 overflow-x-auto border-b [scrollbar-width:none]">
+      <div ref={list} role="tablist" aria-label={label} className="relative flex gap-1 overflow-x-auto border-b [scrollbar-width:none]">
+        {underline && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-full bg-primary transition-[transform,width] duration-300 ease-out motion-reduce:transition-none"
+            style={{ transform: `translateX(${underline.left}px)`, width: underline.width }}
+          />
+        )}
         {tabs.map((tab, i) => {
           const selected = tab.id === current?.id;
           return (
@@ -229,7 +254,7 @@ export function Tabs({ tabs, label }: { tabs: TabSpec[]; label: string }) {
               onClick={() => setActive(tab.id)}
               onKeyDown={(event) => onKeyDown(event, i)}
               className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                selected ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                selected ? `text-primary ${underline ? "border-transparent" : "border-primary"}` : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               {tab.label}
@@ -238,7 +263,14 @@ export function Tabs({ tabs, label }: { tabs: TabSpec[]; label: string }) {
         })}
       </div>
       {current && (
-        <div role="tabpanel" id={`${base}-panel-${current.id}`} aria-labelledby={`${base}-tab-${current.id}`} tabIndex={0} className="pt-4">
+        <div
+          key={current.id}
+          role="tabpanel"
+          id={`${base}-panel-${current.id}`}
+          aria-labelledby={`${base}-tab-${current.id}`}
+          tabIndex={0}
+          className="pt-4 motion-safe:animate-[ui-fade_0.25s_ease-out]"
+        >
           {current.content}
         </div>
       )}
