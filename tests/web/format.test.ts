@@ -187,6 +187,8 @@ describe("router", () => {
       { page: "audit" },
       { page: "ci" },
       { page: "settings" },
+      { page: "build", job: null },
+      { page: "build", job: "mvl72fl6-ae2f6a" },
     ] as const) {
       expect(parseRoute(href(route))).toEqual(route);
     }

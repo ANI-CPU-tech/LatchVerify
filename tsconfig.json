@@ -25,5 +25,5 @@
       "@schema/*": ["./src/schema/*"]
     }
   },
-  "include": ["src", "tests", "demo", "vitest.config.ts"]
+  "include": ["src", "tests", "demo", "scripts", "vitest.config.ts"]
 }

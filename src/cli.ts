@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { Command, Option } from "commander";
 import pc from "picocolors";
 import { SUPPORTED_CLIENTS } from "./config/clients.js";
@@ -24,10 +25,13 @@ async function run(command: (env: LatchEnv) => Promise<number>, failureCode = 1)
   }
 }
 
+/** This install's version: package.json sits one level above both src/cli.ts and dist/cli.js. */
+const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+
 const program = new Command()
   .name("latch")
   .description("Pin MCP tool capabilities in latch.lock and block unreviewed drift.")
-  .version("0.0.0")
+  .version(version)
   .enablePositionalOptions()
   .option("--lockfile <path>", "path to latch.lock (default: $LATCH_LOCKFILE_PATH or ./latch.lock)")
   .option("--state-dir <path>", "local state directory (default: $LATCH_STATE_DIR or .latch next to the lockfile)");

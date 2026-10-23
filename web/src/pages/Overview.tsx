@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
+import { PixelLandscape } from "../art/PixelLandscape";
 import { AlertIcon, ArrowRightIcon, LogIcon, QueueIcon, ServerIcon, ToolCheckIcon } from "../components/icons";
-import { SunsetArt } from "../components/SunsetArt";
 import { TierBadge } from "../components/TierBadge";
 import { Badge, EmptyState, ErrorState, LoadingState, Panel, PanelLink, StatusDot, TONE_TEXT, buttonClass } from "../components/ui";
 import { useData, type Resource } from "../lib/data";
@@ -42,7 +42,7 @@ export function Overview() {
           <h1 className="font-display text-3xl font-bold tracking-tight">Overview</h1>
           <p className="mt-1 text-sm text-muted-foreground">MCP tool definitions checked against latch.lock, from this machine's proxy state.</p>
         </div>
-        <SunsetArt className="hidden h-20 w-auto shrink-0 sm:block" />
+        <PixelLandscape variant="wide" className="hidden h-24 w-auto shrink-0 sm:block" />
       </header>
 
       {highRisk.length > 0 && (

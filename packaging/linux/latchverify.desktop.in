@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=LatchVerify
+GenericName=MCP Security Review
+Comment=Review capability changes in MCP tools against latch.lock
+Exec=latchverify-review
+Icon=@APP_ID@
+Terminal=true
+Categories=Development;
+Keywords=MCP;security;lockfile;review;proxy;
+StartupNotify=false

@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
+import { PixelLandscape } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
 import { href, type Page } from "../lib/router";
-import { GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
+import { GitIcon, HomeIcon, LockIcon, LogIcon, PackageIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
 
 export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon: ReactNode; href: string }> = [
@@ -12,6 +13,7 @@ export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon:
   { page: "audit", label: "Audit Log", icon: <LogIcon />, href: href({ page: "audit" }) },
   { page: "ci", label: "Git & CI", icon: <GitIcon />, href: href({ page: "ci" }) },
   { page: "settings", label: "Settings", icon: <SettingsIcon />, href: href({ page: "settings" }) },
+  { page: "build", label: "Build & Distribution", icon: <PackageIcon />, href: href({ page: "build", job: null }) },
 ];
 
 const API_STATUS = {
@@ -103,9 +105,15 @@ export function AppShell({ current, children }: { current: Page; children: React
 
       <div className="flex flex-1">
         <aside className="hidden w-56 shrink-0 border-r bg-sidebar md:block">
-          <nav aria-label="Sections" className="sticky top-14 p-3">
-            <NavLinks current={current} layout="sidebar" />
-          </nav>
+          <div className="sticky top-14 flex h-[calc(100vh-3.5rem)] flex-col">
+            <nav aria-label="Sections" className="p-3">
+              <NavLinks current={current} layout="sidebar" />
+            </nav>
+            {/* Below the nav, never over it; dropped on short windows. */}
+            <div className="mt-auto px-3 pb-3 [@media(max-height:620px)]:hidden">
+              <PixelLandscape variant="tall" className="w-full" />
+            </div>
+          </div>
         </aside>
         <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-6xl space-y-6">{children}</div>

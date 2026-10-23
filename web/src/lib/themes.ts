@@ -7,7 +7,7 @@ export const THEMES = [
   { id: "warm", label: "Warm Retro", description: "Ivory, muted orange, brown" },
   { id: "sunset", label: "Sunset", description: "Apricot, burnt orange" },
   { id: "terminal", label: "Terminal Dark", description: "Charcoal, cream text, orange" },
-  { id: "minimal", label: "Minimal", description: "Neutral, no decoration" },
+  { id: "minimal", label: "Minimal", description: "Neutral, muted artwork" },
   { id: "forest", label: "Forest Green", description: "Ivory, forest green, olive" },
 ] as const;
 

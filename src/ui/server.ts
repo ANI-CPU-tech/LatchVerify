@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createAdaptorServer } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import type { Hono } from "hono";
 import { loadDotEnv, loadEnv } from "../config/env.js";
 import { createRoutes, type RouteDeps } from "./routes.js";
 
@@ -17,6 +18,8 @@ export interface UiServerOptions extends RouteDeps {
   port: number;
   /** Directory of the built web/ bundle to serve as static files; omitted in dev (Vite serves it). */
   staticDir?: string;
+  /** Adds routes behind the same request guard. Only the development server uses it (build API). */
+  extend?: (app: Hono) => void;
 }
 
 export interface UiServerHandle {
@@ -37,6 +40,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServerH
     throw new RangeError(`startUiServer: port must be an integer from 0 to 65535, got ${options.port}`);
   }
   const app = createRoutes(options);
+  options.extend?.(app);
 
   if (options.staticDir !== undefined) {
     const root = resolve(options.staticDir);
@@ -87,12 +91,15 @@ export function defaultReviewer(env: NodeJS.ProcessEnv = process.env): string {
   return env.LATCH_REVIEWER?.trim() || gitUserEmail() || userInfo().username;
 }
 
-// `pnpm ui` runs this file directly; Vite proxies /api here.
-async function main(): Promise<void> {
+/**
+ * Starts the review API from the environment (./.env included) and stops it on SIGINT/SIGTERM.
+ * Run directly, or through scripts/dev-ui.ts (`pnpm ui`), which passes `extend`.
+ */
+export async function main(extend?: (app: Hono) => void): Promise<void> {
   loadDotEnv();
   const env = loadEnv();
   const reviewer = defaultReviewer();
-  const handle = await startUiServer({ port: env.uiPort, lockfilePath: env.lockfilePath, stateDir: env.stateDir, reviewer });
+  const handle = await startUiServer({ port: env.uiPort, lockfilePath: env.lockfilePath, stateDir: env.stateDir, reviewer, extend });
   console.error(`[latch ui] review API on ${handle.url} (approvals recorded as ${reviewer})`);
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => void handle.close().finally(() => process.exit(0)));
