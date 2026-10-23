@@ -142,3 +142,27 @@ export const FlaskIcon = (p: P) => (
     <path d="M9 3h6M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9" />
   </Icon>
 );
+
+export const PlayIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M7 5v14l11-7z" />
+  </Icon>
+);
+
+export const PauseIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M8 5v14M16 5v14" />
+  </Icon>
+);
+
+export const StepBackIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M6 5v14M18 6l-8 6 8 6z" />
+  </Icon>
+);
+
+export const StepForwardIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M18 5v14M6 6l8 6-8 6z" />
+  </Icon>
+);

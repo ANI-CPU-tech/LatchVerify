@@ -590,3 +590,11 @@
     }
   }
 }
+
+/* Simulation page: each step's detail slides in (used through motion-safe: only). */
+@keyframes sim-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
