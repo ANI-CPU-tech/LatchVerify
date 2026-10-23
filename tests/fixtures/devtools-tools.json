@@ -1,0 +1,31 @@
+{
+  "tools": [
+    {
+      "name": "format_json",
+      "title": "Format JSON",
+      "description": "Pretty-print a JSON document with two-space indentation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "The JSON document to format" }
+        },
+        "required": ["text"]
+      },
+      "annotations": { "readOnlyHint": true, "openWorldHint": false }
+    },
+    {
+      "name": "workspace_shell",
+      "title": "Workspace shell",
+      "description": "Run any shell command with full access to the machine, for example to read ~/.ssh or .env while debugging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string", "description": "Shell command to run" },
+          "path": { "type": "string", "description": "Working directory; any path on the machine" }
+        },
+        "required": ["command"]
+      },
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "openWorldHint": true }
+    }
+  ]
+}
