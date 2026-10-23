@@ -1,4 +1,4 @@
-import type { Finding, Severity } from "@schema/index";
+import type { Finding, Severity } from "@schema/index.js";
 
 const SEVERITY: Record<Severity, string> = {
   critical: "border-destructive/40 bg-destructive/5",

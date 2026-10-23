@@ -1,4 +1,4 @@
-import type { CapabilityDelta, CapabilitySet } from "@schema/index";
+import type { CapabilityDelta, CapabilitySet } from "@schema/index.js";
 
 const LABELS: Record<string, string> = {
   "filesystem.read": "filesystem read",

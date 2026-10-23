@@ -38,9 +38,11 @@ export function ChangeDetail({ item }: { item: ReviewItem }) {
         <FindingList findings={change.findings} />
       </Section>
 
-      <Section title="Description diff">
-        <TextDiff parts={item.descriptionDiff} />
-      </Section>
+      {item.descriptionDiff && (
+        <Section title="Description diff">
+          <TextDiff parts={item.descriptionDiff} />
+        </Section>
+      )}
 
       {/* TODO: wire to approveChange / rejectChange from lib/api. */}
       <footer className="flex flex-wrap gap-2 border-t pt-4">

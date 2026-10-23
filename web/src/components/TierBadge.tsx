@@ -1,4 +1,4 @@
-import type { Tier } from "@schema/index";
+import type { Tier } from "@schema/index.js";
 
 const STYLES: Record<Tier, { label: string; className: string }> = {
   0: { label: "Tier 0 · text only", className: "bg-muted text-muted-foreground" },

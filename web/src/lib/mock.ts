@@ -1,4 +1,4 @@
-import type { CapabilitySet, ToolRecord } from "@schema/index";
+import type { CapabilitySet, ToolRecord } from "@schema/index.js";
 import type { ReviewItem } from "./api";
 
 // Hardcoded review queue for the scaffold UI. Mirrors the docs/DEMO.md storyline.
