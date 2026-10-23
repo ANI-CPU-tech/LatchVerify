@@ -24,17 +24,25 @@ const API_STATUS = {
   unreachable: { tone: "destructive", label: "API unreachable", detail: "Start it with pnpm ui or latch review --ui" },
 } as const;
 
-/** Count for the Review Queue nav item; destructive when a tier-3 change is waiting. */
+/**
+ * Count for the Review Queue nav item; destructive when a tier-3 change is waiting, with a ping
+ * around it to draw the eye. It bumps when the count changes.
+ */
 function QueueCount() {
   const { pending } = useData();
   if (pending.status !== "ready" || pending.data.length === 0) return null;
+  const count = pending.data.length;
   const highRisk = pending.data.some((item) => item.change.tier === 3);
   return (
-    <span
-      className={`ml-auto rounded-sm px-1.5 font-mono text-xs ${highRisk ? "bg-destructive text-destructive-foreground" : "bg-muted text-foreground"}`}
-      aria-label={`${pending.data.length} pending`}
-    >
-      {pending.data.length}
+    <span className="relative ml-auto flex">
+      {highRisk && <span aria-hidden="true" className="absolute inset-0 rounded-sm bg-destructive opacity-60 motion-safe:animate-ping" />}
+      <span
+        key={count}
+        className={`relative rounded-sm px-1.5 font-mono text-xs motion-safe:animate-[nav-pop_0.4s_ease-out] ${highRisk ? "bg-destructive text-destructive-foreground" : "bg-muted text-foreground"}`}
+        aria-label={`${count} pending`}
+      >
+        {count}
+      </span>
     </span>
   );
 }
