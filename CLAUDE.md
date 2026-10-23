@@ -127,8 +127,10 @@ shows the last `tools_listed` event instead.
 seeded noise: a setting sun with dithered afterglow, clouds, a hazy distant range, a snowy
 far range and forested mid range (each with sunlit and shadowed faces), a lake that mirrors
 them with the sun's glitter path, a canoe, pine shores with a cabin, jetty, rocks and reeds,
-and birds. `AppShell` shows it as a footer across the content column below every page; the
-sidebar stays plain. `PixelLandscape.tsx` draws it as inline SVG with `crispEdges`, anchored at the bottom
+and birds. Dark themes (`dark: true` in `themes.ts`, matching `color-scheme: dark`) get the
+night scene: a cratered moon, stars and a moonlit path instead of the sun, no birds.
+`AppShell` shows it as a footer across the content column below every page; the sidebar
+stays plain. `PixelLandscape.tsx` draws it as inline SVG with `crispEdges`, anchored at the bottom
 (`xMidYMax slice`), colored by the `--art-*` tokens of each theme; Minimal uses muted greys.
 The art is decorative only: `aria-hidden`,
 `pointer-events-none`, and never placed over content. The favicon,
