@@ -1,8 +1,9 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PixelLandscape, StarrySky } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
 import { useTheme } from "../lib/theme";
 import { sceneFor } from "../lib/themes";
+import { navKeyTarget } from "../lib/nav";
 import { href, type Page } from "../lib/router";
 import { FlaskIcon, GitIcon, HomeIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
@@ -53,6 +54,8 @@ type Box = { x: number; y: number; width: number; height: number };
 /**
  * The section links. One highlight sits behind the active link and slides to the next one on
  * navigation; it is measured from the DOM, so it follows wrapping, zoom and font changes.
+ * From a focused link, the arrow keys along the list (Home and End too) move focus to another
+ * link and open its section, as tabs do: pages switch instantly and nothing is lost.
  */
 function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "strip" }) {
   const wrapper = useRef<HTMLDivElement>(null);
@@ -80,6 +83,16 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
     return () => observer.disconnect();
   }, [current, layout]);
 
+  const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const links = [...event.currentTarget.querySelectorAll<HTMLAnchorElement>("a[href]")];
+    const next = navKeyTarget(event.key, links.indexOf(event.target as HTMLAnchorElement), links.length, layout);
+    if (next === null || !links.includes(event.target as HTMLAnchorElement)) return;
+    event.preventDefault();
+    links[next]!.focus();
+    links[next]!.click();
+  };
+
   return (
     <div ref={wrapper} className="relative">
       {box && (
@@ -89,7 +102,7 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
           style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.width, height: box.height }}
         />
       )}
-      <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"}>
+      <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"} onKeyDown={onKeyDown}>
         {NAV.map((item, i) => {
           const active = item.page === current;
           return (
