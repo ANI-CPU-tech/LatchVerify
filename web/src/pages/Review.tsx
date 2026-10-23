@@ -62,8 +62,14 @@ export function Review({ selectedId }: { selectedId: string | null }) {
         description="Tool definitions that differ from latch.lock, highest tier first. The proxy blocks tier 2 and 3 until you decide."
       />
 
+      {/*
+        The live region stays mounted so screen readers announce each decision; each new message
+        rises in inside it (keyed, so it replays per decision).
+      */}
       <p aria-live="polite" className={announcement ? "rounded-md border border-success/30 bg-success/10 px-3 py-2 text-sm text-success" : "sr-only"}>
-        {announcement}
+        <span key={announcement} className="block motion-safe:animate-[ui-rise_0.3s_ease-out]">
+          {announcement}
+        </span>
       </p>
 
       {sample && (
