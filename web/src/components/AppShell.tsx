@@ -78,8 +78,11 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
       const smooth = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
       link.scrollIntoView({ block: "nearest", inline: "center", behavior: smooth ? "smooth" : "auto" });
     }
+    // Watch every link too: when one grows (the queue count arriving), the links after it move
+    // while the wrapper keeps its size.
     const observer = new ResizeObserver(measure);
     observer.observe(root);
+    for (const anchor of root.querySelectorAll("a")) observer.observe(anchor);
     return () => observer.disconnect();
   }, [current, layout]);
 
