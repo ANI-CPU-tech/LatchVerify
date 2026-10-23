@@ -1,0 +1,61 @@
+{
+  "name": "latchverify",
+  "version": "0.0.0",
+  "description": "Capability-diffing security proxy for Model Context Protocol servers. Pins tool definitions in a git-committed lockfile and blocks unreviewed capability drift.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "latch": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "dev": "tsx watch src/cli.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "tsc --noEmit -p . && tsc --noEmit -p web",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p web",
+    "ui": "concurrently -n api,web -c blue,magenta \"tsx watch src/ui/server.ts\" \"vite --config web/vite.config.ts\"",
+    "demo:benign": "tsx demo/weather-server.ts",
+    "demo:evil": "tsx demo/evil-server.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
+    "@clack/prompts": "^1.8.1",
+    "@hono/node-server": "^2.1.5",
+    "commander": "^15.0.0",
+    "diff": "^9.0.0",
+    "hono": "^4.13.13",
+    "picocolors": "^1.1.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.1.2",
+    "autoprefixer": "^10.6.1",
+    "concurrently": "^10.0.6",
+    "postcss": "^8.5.31",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.19",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
