@@ -4,6 +4,7 @@ import {
   DEFAULT_PREFERENCE,
   THEMES,
   THEME_STORAGE_KEY,
+  isDarkTheme,
   parsePreference,
   readPreference,
   resolveTheme,
@@ -50,6 +51,14 @@ const blend = (top: Rgb, bottom: Rgb, alpha: number): Rgb => top.map((c, i) => c
 describe("theme tokens in index.css", () => {
   it("has a block for every registered theme, and no unregistered ones", () => {
     expect([...blocks.keys()].sort()).toEqual(THEMES.map((theme) => theme.id).sort());
+  });
+
+  it("marks a theme dark exactly when its block sets color-scheme: dark", () => {
+    for (const { id } of THEMES) {
+      const body = new RegExp(`\\[data-theme="${id}"\\]\\s*\\{([^}]*)\\}`).exec(css)![1]!;
+      expect(isDarkTheme(id), id).toBe(/color-scheme:\s*dark/.test(body));
+    }
+    expect(isDarkTheme("terminal")).toBe(true);
   });
 
   it("defines the same tokens in every theme", () => {

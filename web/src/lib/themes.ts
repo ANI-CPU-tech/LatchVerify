@@ -3,12 +3,12 @@
  * A theme changes colors, never behaviour: nothing here is read by review or approval code.
  */
 export const THEMES = [
-  { id: "light", label: "Default Light", description: "Cream, off-white, orange" },
-  { id: "warm", label: "Warm Retro", description: "Ivory, muted orange, brown" },
-  { id: "sunset", label: "Sunset", description: "Apricot, burnt orange" },
-  { id: "terminal", label: "Terminal Dark", description: "Charcoal, cream text, orange" },
-  { id: "minimal", label: "Minimal", description: "Neutral, muted artwork" },
-  { id: "forest", label: "Forest Green", description: "Ivory, forest green, olive" },
+  { id: "light", label: "Default Light", description: "Cream, off-white, orange", dark: false },
+  { id: "warm", label: "Warm Retro", description: "Ivory, muted orange, brown", dark: false },
+  { id: "sunset", label: "Sunset", description: "Apricot, burnt orange", dark: false },
+  { id: "terminal", label: "Terminal Dark", description: "Charcoal, cream text, orange", dark: true },
+  { id: "minimal", label: "Minimal", description: "Neutral, muted artwork", dark: false },
+  { id: "forest", label: "Forest Green", description: "Ivory, forest green, olive", dark: false },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]["id"];
@@ -23,6 +23,9 @@ export const SYSTEM_THEMES = { light: "light", dark: "terminal" } as const satis
 export const THEME_STORAGE_KEY = "latch.theme";
 
 const THEME_IDS: ReadonlySet<string> = new Set(THEMES.map((theme) => theme.id));
+
+/** Dark themes (color-scheme: dark in index.css) show the landscape at night. */
+export const isDarkTheme = (id: ThemeId): boolean => THEMES.some((theme) => theme.id === id && theme.dark);
 
 export const isThemeId = (value: unknown): value is ThemeId => typeof value === "string" && THEME_IDS.has(value);
 
