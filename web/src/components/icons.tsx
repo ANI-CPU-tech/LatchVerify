@@ -135,10 +135,3 @@ export const TerminalIcon = (p: P) => (
     <path d="m7 9 3 3-3 3M13 15h4" />
   </Icon>
 );
-
-export const PackageIcon = (p: P) => (
-  <Icon {...p}>
-    <path d="M12 3 3.5 7.5v9L12 21l8.5-4.5v-9z" />
-    <path d="M3.5 7.5 12 12l8.5-4.5M12 12v9M7.75 5.25l8.5 4.5" />
-  </Icon>
-);

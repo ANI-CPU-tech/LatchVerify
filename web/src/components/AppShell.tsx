@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { PixelLandscape } from "../art/PixelLandscape";
 import { useData } from "../lib/data";
 import { href, type Page } from "../lib/router";
-import { GitIcon, HomeIcon, LockIcon, LogIcon, PackageIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
+import { GitIcon, HomeIcon, LockIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
 
 export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon: ReactNode; href: string }> = [
@@ -13,7 +13,6 @@ export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon:
   { page: "audit", label: "Audit Log", icon: <LogIcon />, href: href({ page: "audit" }) },
   { page: "ci", label: "Git & CI", icon: <GitIcon />, href: href({ page: "ci" }) },
   { page: "settings", label: "Settings", icon: <SettingsIcon />, href: href({ page: "settings" }) },
-  { page: "build", label: "Build & Distribution", icon: <PackageIcon />, href: href({ page: "build", job: null }) },
 ];
 
 const API_STATUS = {

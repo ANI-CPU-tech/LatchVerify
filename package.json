@@ -28,8 +28,7 @@
     "test": "vitest run",
     "lint": "tsc --noEmit -p . && tsc --noEmit -p web",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p web",
-    "ui": "concurrently -n api,web -c blue,magenta \"tsx watch scripts/dev-ui.ts\" \"vite --config web/vite.config.ts\"",
-    "package": "tsx scripts/package/cli.ts",
+    "ui": "concurrently -n api,web -c blue,magenta \"tsx watch src/ui/server.ts\" \"vite --config web/vite.config.ts\"",
     "demo:benign": "tsx demo/weather-server.ts",
     "demo:evil": "tsx demo/evil-server.ts"
   },

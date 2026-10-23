@@ -14,7 +14,6 @@ Commands are written for bash or zsh; fish equivalents are noted where they diff
 | Approve or reject queued changes | `latch review` (terminal) | works |
 | Browser review screen | `latch review --ui`, or `pnpm ui` for development | works |
 | Demo servers (benign and rug pull) | `pnpm demo:benign`, `pnpm demo:evil` | works |
-| Windows and Linux packages, launchers | `pnpm package --list`, or Build & Distribution in `pnpm ui` | tarball, Windows zip, Arch: built here; deb, Flatpak, Windows installer: need their tools ([packaging/README.md](packaging/README.md)) |
 | LLM advisory pass | — | built in `src/analyze/llm.ts`, **not wired in yet** |
 
 ## 1. Install (once)

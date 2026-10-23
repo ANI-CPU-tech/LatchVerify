@@ -107,21 +107,8 @@ export function toReviewItem(change: PendingChange): ReviewItem {
  * GETs `path` and validates the JSON body with `schema`. A malformed or invalid reply is an
  * ApiError naming `what`, never rendered as is.
  */
-export async function getJson<T>(path: string, schema: z.ZodType<T>, what: string, signal?: AbortSignal): Promise<T> {
-  return readJson(await call(path, { signal }), schema, what);
-}
-
-/** POSTs `payload` as JSON with the client header writes need, and validates the reply like getJson. */
-export async function postJson<T>(path: string, payload: unknown, schema: z.ZodType<T>, what: string): Promise<T> {
-  const response = await call(path, {
-    method: "POST",
-    headers: { [CLIENT_HEADER]: CLIENT_NAME, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return readJson(response, schema, what);
-}
-
-async function readJson<T>(response: Response, schema: z.ZodType<T>, what: string): Promise<T> {
+async function getJson<T>(path: string, schema: z.ZodType<T>, what: string, signal?: AbortSignal): Promise<T> {
+  const response = await call(path, { signal });
   if (!isJson(response)) throw new ApiUnreachableError("The review API did not answer with JSON; is it running?");
   let body: unknown;
   try {
