@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   LockfileError,
@@ -57,7 +58,7 @@ describe("emptyLockfile", () => {
 
 describe("readLockfile", () => {
   it("reads and validates latch.lock.example", async () => {
-    const lock = await readLockfile(EXAMPLE_PATH.pathname);
+    const lock = await readLockfile(fileURLToPath(EXAMPLE_PATH));
     expect(lock).toEqual(await loadExample());
     expect(lock.servers.weather?.tools.map((t) => t.name)).toEqual(["get_alerts", "get_forecast"]);
   });
@@ -135,7 +136,7 @@ const twoServers = async (): Promise<LockFile> => {
 describe("writeLockfile", () => {
   it("round-trips latch.lock.example byte for byte", async () => {
     const out = join(dir, "latch.lock");
-    await writeLockfile(out, await readLockfile(EXAMPLE_PATH.pathname));
+    await writeLockfile(out, await readLockfile(fileURLToPath(EXAMPLE_PATH)));
     expect(await readFile(out, "utf8")).toBe(await readFile(EXAMPLE_PATH, "utf8"));
   });
 
