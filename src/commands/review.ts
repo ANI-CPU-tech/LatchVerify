@@ -293,11 +293,12 @@ export function renderChange(change: PendingChange, lock: LockFile): string {
 
   const { gained, lost, loosened } = change.capabilityDelta;
   const delta = [
-    gained.length > 0 ? pc.red(`gained ${gained.join(", ")}`) : "",
-    loosened.length > 0 ? pc.yellow(`loosened ${loosened.join(", ")}`) : "",
-    lost.length > 0 ? pc.green(`lost ${lost.join(", ")}`) : "",
+    // Escape the names before colouring: printable() would turn the colour codes into text.
+    gained.length > 0 ? pc.red(`gained ${printable(gained.join(", "))}`) : "",
+    loosened.length > 0 ? pc.yellow(`loosened ${printable(loosened.join(", "))}`) : "",
+    lost.length > 0 ? pc.green(`lost ${printable(lost.join(", "))}`) : "",
   ].filter(Boolean);
-  lines.push(`  delta     ${delta.length > 0 ? printable(delta.join("; ")) : pc.dim("no capability change")}`);
+  lines.push(`  delta     ${delta.length > 0 ? delta.join("; ") : pc.dim("no capability change")}`);
 
   if (change.findings.length === 0) {
     lines.push(`  findings  ${pc.dim("none")}`);
