@@ -75,7 +75,16 @@ that blocks on every reword gets disabled by its users.
   differ, tiers, llm).
 - State: `src/store/` (`lockfile.ts` for `latch.lock`; `pending.ts` and
   `events.ts` for `.latch/`).
-- CLI: `src/cli.ts` wires `src/commands/*`.
+- CLI: `src/cli.ts` wires `src/commands/*`. `latch setup` (`commands/setup.ts`) is
+  `latch init` for one client with no questions, plus `--remove` to unwrap; installers run it.
+- Per-user lockfile: `src/config/paths.ts` `userLockfilePath()` (`%APPDATA%\LatchVerify`,
+  `~/.config/latchverify`, `~/Library/Application Support/LatchVerify`). `statePaths` falls
+  back to it only when no flag or env names a lockfile and `./latch.lock` is absent.
+- Installers: `packaging/` (see `packaging/README.md`) and
+  `.github/workflows/build-installers.yml`, which builds and smoke-tests each installer on Windows
+  and Linux and publishes on `v*` tags. Every package bundles Node.js 22, so wrapped entries
+  point at the install directory by absolute path. `tests/packaging/` checks the scripts and the
+  workflow against each other.
 - Review UI: `src/ui/` (hono API, loopback only) and `web/` (Vite app). See
   "Review UI" below.
 - Fixtures: `tests/fixtures/benign-tools.json` and `poisoned-tools.json`, which
@@ -215,6 +224,9 @@ pnpm build      # CLI into dist/, web UI into dist/web (latch review --ui)
 pnpm ui         # API on 7777, Vite on 5173; set LATCH_LOCKFILE_PATH / LATCH_STATE_DIR
 ```
 
+In the workflow and packaging scripts, use `pnpm -s exec`: pnpm 11 prints its install check on
+stdout, which corrupts `$(...)` captures and redirected files.
+
 There is no browser test runner. To check the UI visually, serve the built bundle and use
 `firefox --headless --screenshot`.
 
@@ -223,3 +235,6 @@ There is no browser test runner. To check the UI visually, serve the built bundl
 - CI results are not stored, so the Git & CI page documents `latch verify` rather than
   showing CI runs, and no page shows live proxy connections.
 - On Windows, MCP clients that spawn `latch` without a shell may not resolve `latch.cmd`.
+  Entries written by `init`, `add` and `setup` avoid this by starting node by absolute path.
+- The Windows installer and its smoke test run only in CI (no Inno Setup or PowerShell here).
+- There is no macOS package; `latch setup` from source works there.
