@@ -168,7 +168,7 @@ describe("runInspect with a live server", () => {
   });
 
   it("writes nothing to disk", async () => {
-    const script = `import { runInspect } from ${JSON.stringify(join(root, "src/commands/inspect.ts"))};
+    const script = `import { runInspect } from ${JSON.stringify(pathToFileURL(join(root, "src/commands/inspect.ts")).href)};
 await runInspect({ file: ${JSON.stringify(fixture("poisoned-tools.json"))}, json: false });
 process.exitCode = await runInspect({ server: ${JSON.stringify(weather)}, json: false });`;
     const child = spawn(process.execPath, ["--import", tsx, "--input-type=module", "-e", script], { cwd: dir, stdio: "ignore" });

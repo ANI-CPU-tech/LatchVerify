@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLIENT_HEADER, DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, MAX_SIMULATION_BYTES, createRoutes, type RouteDeps } from "../../src/ui/routes.js";
 import { EVENTS_FILE, appendEvent, readEvents, type LatchEvent } from "../../src/store/events.js";
@@ -28,7 +29,7 @@ afterEach(async () => {
 
 /** The example lockfile's record for a weather tool, or undefined when it is not pinned. */
 const pinned = async (name: string): Promise<ToolRecord | undefined> => {
-  const lock = await readLockfile(EXAMPLE_LOCK.pathname);
+  const lock = await readLockfile(fileURLToPath(EXAMPLE_LOCK));
   return structuredClone(lock.servers.weather!.tools.find((t) => t.name === name));
 };
 
@@ -134,7 +135,7 @@ describe("GET /api/events", () => {
 
 describe("GET /api/lockfile", () => {
   it("returns the approved state", async () => {
-    expect(await json(await request("/api/lockfile"))).toEqual(await readLockfile(EXAMPLE_LOCK.pathname));
+    expect(await json(await request("/api/lockfile"))).toEqual(await readLockfile(fileURLToPath(EXAMPLE_LOCK)));
   });
 
   it("reports an invalid lockfile as a 500 naming the file", async () => {

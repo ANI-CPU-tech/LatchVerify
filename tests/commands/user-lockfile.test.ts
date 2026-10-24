@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const tsx = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
-const cli = new URL("../../src/cli.ts", import.meta.url).pathname;
+const cli = fileURLToPath(new URL("../../src/cli.ts", import.meta.url));
 const empty = { version: "1", generatedAt: "1970-01-01T00:00:00.000Z", servers: {} };
 
 /** `latch verify` from `cwd`, with the per-user config directory at `xdg`. Returns output and exit code. */

@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { posix, win32 } from "node:path";
+import { isAbsolute, posix, win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 import { appDataDir, userLockfilePath } from "../../src/config/paths.js";
 
@@ -24,8 +24,8 @@ describe("userLockfilePath", () => {
     expect(userLockfilePath("linux", { XDG_CONFIG_HOME: "/xdg" })).toBe("/xdg/latchverify/latch.lock");
   });
 
-  it("is absolute on every platform", () => {
-    expect(win32.isAbsolute(userLockfilePath("win32", {}))).toBe(true);
-    expect(posix.isAbsolute(userLockfilePath("linux", {}))).toBe(true);
+  it("is absolute with no environment, from the home directory", () => {
+    // homedir() is this machine's, so only this platform's default can be checked for real.
+    expect(isAbsolute(userLockfilePath(process.platform, {}))).toBe(true);
   });
 });

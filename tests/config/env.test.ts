@@ -67,7 +67,7 @@ describe("loadEnv", () => {
       llmBaseUrl: "https://openrouter.ai/api/v1",
       llmModel: "some/model",
       uiPort: 8080,
-      lockfilePath: "/srv/repo/latch.lock",
+      lockfilePath: resolve("/srv/repo/latch.lock"),
       stateDir: resolve("state"),
       logLevel: "debug",
     });
@@ -147,19 +147,19 @@ describe("loadEnv", () => {
 describe("statePaths", () => {
   it("puts the state directory next to the lockfile by default, wherever the command runs", () => {
     expect(statePaths({})).toEqual({ lockfilePath: resolve("latch.lock"), stateDir: resolve(".latch") });
-    expect(statePaths({ lockfile: "/srv/repo/latch.lock" })).toEqual({ lockfilePath: "/srv/repo/latch.lock", stateDir: "/srv/repo/.latch" });
-    expect(statePaths({}, { LATCH_LOCKFILE_PATH: " /srv/repo/latch.lock " }).stateDir).toBe("/srv/repo/.latch");
-    expect(loadEnv({ LATCH_LOCKFILE_PATH: "/srv/repo/latch.lock" }).stateDir).toBe("/srv/repo/.latch");
+    expect(statePaths({ lockfile: "/srv/repo/latch.lock" })).toEqual({ lockfilePath: resolve("/srv/repo/latch.lock"), stateDir: resolve("/srv/repo/.latch") });
+    expect(statePaths({}, { LATCH_LOCKFILE_PATH: " /srv/repo/latch.lock " }).stateDir).toBe(resolve("/srv/repo/.latch"));
+    expect(loadEnv({ LATCH_LOCKFILE_PATH: "/srv/repo/latch.lock" }).stateDir).toBe(resolve("/srv/repo/.latch"));
   });
 
   it("lets a flag win over the environment, and the environment over the default", () => {
     const env = { LATCH_LOCKFILE_PATH: "/env/latch.lock", LATCH_STATE_DIR: "/env/state" };
-    expect(statePaths({}, env)).toEqual({ lockfilePath: "/env/latch.lock", stateDir: "/env/state" });
+    expect(statePaths({}, env)).toEqual({ lockfilePath: resolve("/env/latch.lock"), stateDir: resolve("/env/state") });
     expect(statePaths({ lockfile: "/flag/latch.lock", stateDir: "/flag/state" }, env)).toEqual({
-      lockfilePath: "/flag/latch.lock",
-      stateDir: "/flag/state",
+      lockfilePath: resolve("/flag/latch.lock"),
+      stateDir: resolve("/flag/state"),
     });
-    expect(statePaths({ lockfile: "/flag/latch.lock" }, { LATCH_STATE_DIR: " " }).stateDir).toBe("/flag/.latch");
+    expect(statePaths({ lockfile: "/flag/latch.lock" }, { LATCH_STATE_DIR: " " }).stateDir).toBe(resolve("/flag/.latch"));
   });
 });
 
@@ -169,8 +169,8 @@ describe("statePaths with a fallback lockfile", () => {
 
   it("uses the fallback when ./latch.lock is missing and the fallback exists", () => {
     expect(statePaths({}, {}, { fallbackLockfile: user, exists: existing(user) })).toEqual({
-      lockfilePath: user,
-      stateDir: "/home/dev/.config/latchverify/.latch",
+      lockfilePath: resolve(user),
+      stateDir: resolve("/home/dev/.config/latchverify/.latch"),
     });
   });
 
@@ -181,8 +181,8 @@ describe("statePaths with a fallback lockfile", () => {
 
   it("never overrides a flag or the environment", () => {
     const opts = { fallbackLockfile: user, exists: existing(user) };
-    expect(statePaths({ lockfile: "/flag/latch.lock" }, {}, opts).lockfilePath).toBe("/flag/latch.lock");
-    expect(statePaths({}, { LATCH_LOCKFILE_PATH: "/env/latch.lock" }, opts).lockfilePath).toBe("/env/latch.lock");
+    expect(statePaths({ lockfile: "/flag/latch.lock" }, {}, opts).lockfilePath).toBe(resolve("/flag/latch.lock"));
+    expect(statePaths({}, { LATCH_LOCKFILE_PATH: "/env/latch.lock" }, opts).lockfilePath).toBe(resolve("/env/latch.lock"));
   });
 });
 
