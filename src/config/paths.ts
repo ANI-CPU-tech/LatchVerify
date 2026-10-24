@@ -23,3 +23,20 @@ export function appDataDir(platform: NodeJS.Platform = process.platform, env: No
 function absoluteOrUndefined(value: string | undefined, path: PlatformPath): string | undefined {
   return value !== undefined && path.isAbsolute(value) ? value : undefined;
 }
+
+/**
+ * The per-user latch.lock that `latch setup` creates and links clients to, so an installed latch
+ * protects the user's own MCP servers without a project checkout:
+ *
+ * | Platform | Path                                                        |
+ * |----------|-------------------------------------------------------------|
+ * | Windows  | %APPDATA%\LatchVerify\latch.lock                            |
+ * | macOS    | ~/Library/Application Support/LatchVerify/latch.lock        |
+ * | Linux    | $XDG_CONFIG_HOME/latchverify/latch.lock (~/.config/...)     |
+ *
+ * Its state directory is the usual .latch next to it.
+ */
+export function userLockfilePath(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): string {
+  const folder = platform === "win32" || platform === "darwin" ? "LatchVerify" : "latchverify";
+  return platformPath(platform).join(appDataDir(platform, env), folder, "latch.lock");
+}
