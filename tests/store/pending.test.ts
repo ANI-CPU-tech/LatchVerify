@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -74,8 +74,10 @@ describe("readPending", () => {
   });
 
   it("surfaces read errors other than a missing file", async () => {
-    await writeFile(join(dir, "file"), "");
-    await expect(readPending(join(dir, "file"))).rejects.toMatchObject({ code: "ENOTDIR" });
+    // A directory in its place fails the same way everywhere (a file as the parent directory
+    // is ENOTDIR on POSIX but ENOENT, "no queue yet", on Windows).
+    await mkdir(join(dir, PENDING_FILE));
+    await expect(readPending(dir)).rejects.toMatchObject({ code: "EISDIR" });
   });
 });
 
