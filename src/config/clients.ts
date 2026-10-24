@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, posix, win32, type PlatformPath } from "node:path";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { appDataDir, platformPath } from "./paths.js";
 
 /** MCP clients whose config files `latch init` knows how to rewrite. */
 export const SUPPORTED_CLIENTS = ["claude-desktop", "claude-code", "cursor", "vscode"] as const;
@@ -41,14 +42,9 @@ export interface ClientConfig {
  * keep it. ~ is os.homedir(), so HOME (USERPROFILE on Windows) redirects every path.
  */
 export function clientConfigPath(client: ClientId, platform: NodeJS.Platform = process.platform): string {
-  const path = platform === "win32" ? win32 : posix;
+  const path = platformPath(platform);
   const home = homedir();
-  const appData = (): string => {
-    if (platform === "darwin") return path.join(home, "Library", "Application Support");
-    if (platform === "win32") return absoluteOrUndefined(process.env.APPDATA, path) ?? path.join(home, "AppData", "Roaming");
-    // The XDG spec says to ignore a relative XDG_CONFIG_HOME.
-    return absoluteOrUndefined(process.env.XDG_CONFIG_HOME, path) ?? path.join(home, ".config");
-  };
+  const appData = (): string => appDataDir(platform);
   switch (client) {
     case "claude-desktop":
       return path.join(appData(), "Claude", "claude_desktop_config.json");
@@ -61,10 +57,6 @@ export function clientConfigPath(client: ClientId, platform: NodeJS.Platform = p
     default:
       throw new TypeError(`unknown MCP client ${JSON.stringify(client)}; expected one of ${SUPPORTED_CLIENTS.join(", ")}`);
   }
-}
-
-function absoluteOrUndefined(value: string | undefined, path: PlatformPath): string | undefined {
-  return value !== undefined && path.isAbsolute(value) ? value : undefined;
 }
 
 /** Top-level key holding the server map: VS Code's mcp.json uses "servers", the others "mcpServers". */
