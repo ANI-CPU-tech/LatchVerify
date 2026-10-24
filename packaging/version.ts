@@ -36,3 +36,25 @@ export function archVersion(version: string): string {
 export function windowsVersion(version: string): string {
   return `${parseVersion(version).core}.0`;
 }
+
+const FORMATS = { semver: (v: string) => (parseVersion(v), v), deb: debVersion, arch: archVersion, windows: windowsVersion } as const;
+
+/**
+ * Command line, for the build scripts: `tsx packaging/version.ts <format> [version]` prints
+ * package.json's version (or the one given) in that format: semver, deb, arch or windows.
+ */
+if (process.argv[1]?.endsWith("version.ts")) {
+  const [format, given] = process.argv.slice(2);
+  if (format === undefined || !Object.hasOwn(FORMATS, format)) {
+    console.error(`usage: version.ts ${Object.keys(FORMATS).join("|")} [version]`);
+    process.exit(2);
+  }
+  const { readFileSync } = await import("node:fs");
+  const version = given ?? (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+  try {
+    console.log(FORMATS[format as keyof typeof FORMATS](version));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
