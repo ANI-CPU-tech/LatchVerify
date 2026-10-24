@@ -1,5 +1,7 @@
 # Line endings that must hold wherever the repository is checked out (Windows runners convert
 # text to CRLF by default): Windows command scripts need CRLF, shell and maintainer scripts LF.
+# Everything else is LF too, so tests that read repository files see the same bytes everywhere.
+* text=auto eol=lf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 *.iss text eol=crlf
