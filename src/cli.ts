@@ -10,6 +10,7 @@ import { runInit } from "./commands/init.js";
 import { runInspect } from "./commands/inspect.js";
 import { runProxy } from "./commands/proxy.js";
 import { runReview } from "./commands/review.js";
+import { runSetup } from "./commands/setup.js";
 import { VERIFY_EXIT, runVerify } from "./commands/verify.js";
 
 /**
@@ -53,6 +54,23 @@ program
   .action((opts: { client?: (typeof SUPPORTED_CLIENTS)[number]; dryRun: boolean }) =>
     run(() => runInit({ ...opts, ...globals() })),
   );
+
+/**
+ * For latch setup: the per-user lockfile unless --lockfile or LATCH_LOCKFILE_PATH names another.
+ * Never ./latch.lock, so where an installer happens to run it does not matter.
+ */
+const setupGlobals = () => {
+  const flags = program.opts<{ lockfile?: string; stateDir?: string }>();
+  const fromEnv = process.env.LATCH_LOCKFILE_PATH?.trim();
+  return statePaths({ ...flags, lockfile: flags.lockfile ?? (fromEnv ? undefined : userLockfilePath()) });
+};
+
+program
+  .command("setup")
+  .description("link Claude Code to latch with no questions: wrap its MCP servers and create the per-user latch.lock (installers run this)")
+  .addOption(new Option("--client <id>", "client to link").choices(SUPPORTED_CLIENTS).default("claude-code"))
+  .option("--dry-run", "show what would change without writing", false)
+  .action((opts: { client: (typeof SUPPORTED_CLIENTS)[number]; dryRun: boolean }) => run(() => runSetup({ ...opts, ...setupGlobals() })));
 
 program
   .command("add")

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,5 +50,15 @@ describe.skipIf(process.platform === "win32")("the per-user lockfile from latch 
     await writeFile(join(dir, "xdg", "latchverify", "latch.lock"), JSON.stringify(empty));
     await writeFile(join(dir, "anywhere", "latch.lock"), JSON.stringify(empty));
     expect(verify(join(dir, "anywhere"), join(dir, "xdg")).output).toContain(join(dir, "anywhere", "latch.lock"));
+  });
+
+  it("is where latch setup links and creates the lockfile, wherever the installer runs it", async () => {
+    const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: join(dir, "xdg"), LATCH_LOCKFILE_PATH: "", LATCH_STATE_DIR: "", NO_COLOR: "1" };
+    const output = execFileSync(process.execPath, ["--import", tsx, cli, "setup"], { cwd: join(dir, "anywhere"), encoding: "utf8", env });
+    const user = join(dir, "xdg", "latchverify", "latch.lock");
+    expect(output).toContain(`linking Claude Code to ${user}`);
+    expect(output).toContain(`created ${user}`);
+    await expect(readFile(join(dir, "anywhere", "latch.lock"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(JSON.parse(await readFile(user, "utf8"))).toMatchObject({ servers: {} });
   });
 });
