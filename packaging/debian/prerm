@@ -1,0 +1,10 @@
+#!/bin/sh
+# Give Claude Code its original server commands back before latch is removed. Not on upgrades:
+# the new version keeps using the same install path, so the links stay valid.
+set -e
+case "$1" in
+  remove)
+    /usr/lib/latchverify/link-user remove || true
+    ;;
+esac
+exit 0
