@@ -4,6 +4,7 @@ import { Command, Option } from "commander";
 import pc from "picocolors";
 import { SUPPORTED_CLIENTS } from "./config/clients.js";
 import { loadDotEnv, loadEnv, statePaths, type LatchEnv } from "./config/env.js";
+import { userLockfilePath } from "./config/paths.js";
 import { runAdd } from "./commands/add.js";
 import { runInit } from "./commands/init.js";
 import { runInspect } from "./commands/inspect.js";
@@ -34,10 +35,15 @@ const program = new Command()
   .description("Pin MCP tool capabilities in latch.lock and block unreviewed drift.")
   .version(version)
   .enablePositionalOptions()
-  .option("--lockfile <path>", "path to latch.lock (default: $LATCH_LOCKFILE_PATH or ./latch.lock)")
+  .option("--lockfile <path>", "path to latch.lock (default: $LATCH_LOCKFILE_PATH or ./latch.lock; review and verify fall back to the per-user lockfile from `latch setup`)")
   .option("--state-dir <path>", "local state directory (default: $LATCH_STATE_DIR or .latch next to the lockfile)");
 
 const globals = () => statePaths(program.opts<{ lockfile?: string; stateDir?: string }>());
+/**
+ * For commands that read or review pins: outside a project (no ./latch.lock) they open the
+ * per-user lockfile `latch setup` created, so an installed latch never has to ask where it is.
+ */
+const readingGlobals = () => statePaths(program.opts<{ lockfile?: string; stateDir?: string }>(), process.env, { fallbackLockfile: userLockfilePath() });
 
 program
   .command("init")
@@ -73,7 +79,7 @@ program
         port: opts.port ?? env.uiPort,
         // Only the built-in default may move to a free port; a port the user chose must not.
         portFallback: opts.port === undefined && !process.env.LATCH_UI_PORT?.trim(),
-        ...globals(),
+        ...readingGlobals(),
       }),
     ),
   );
@@ -83,7 +89,7 @@ program
   .description("CI check: exit non-zero if any server drifted from latch.lock")
   .option("--json", "machine-readable output", false)
   // An unexpected failure is an error (3), never drift (1): CI must tell the two apart.
-  .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: globals().lockfilePath }), VERIFY_EXIT.error));
+  .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: readingGlobals().lockfilePath }), VERIFY_EXIT.error));
 
 program
   .command("inspect")
