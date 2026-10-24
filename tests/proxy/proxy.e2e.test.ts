@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startProxy, type ProxyOptions } from "../../src/proxy/index.js";
 import { readEvents } from "../../src/store/events.js";
@@ -214,7 +214,7 @@ describe("startProxy", () => {
 
 describe("latch proxy process", () => {
   it("writes nothing but JSON-RPC to stdout", async () => {
-    const script = `import { startProxy } from ${JSON.stringify(join(root, "src/proxy/index.ts"))};
+    const script = `import { startProxy } from ${JSON.stringify(pathToFileURL(join(root, "src/proxy/index.ts")).href)};
 startProxy({ serverId: "weather", command: process.execPath, args: ["--import", "tsx", ${JSON.stringify(join(root, "demo/weather-server.ts"))}],
   lockfilePath: ${JSON.stringify(lockfilePath)}, stateDir: ${JSON.stringify(stateDir)} }).then((code) => process.exit(code));`;
     const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { cwd: root });
