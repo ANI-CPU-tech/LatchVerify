@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LatchVerify Review
+GenericName=MCP tool review
+Comment=Review MCP tool changes that LatchVerify blocked
+Exec=latchverify-review
+Icon=io.github.vinayakkam.LatchVerify
+Terminal=true
+Categories=Development;Security;
+Keywords=MCP;Claude;security;proxy;review;
