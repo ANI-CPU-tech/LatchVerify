@@ -71,7 +71,12 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
 
 ## Install
 
-Requires Node 22+ and pnpm.
+**Installers** for Windows, Debian/Ubuntu, Arch/CachyOS and other Linux come with each
+[release](https://github.com/vinayakkam/LatchVerify/releases). They bring their own Node.js
+and link Claude Code as they install: its servers go behind the proxy and their tools are
+pinned in your own `latch.lock`, created for you. See [INSTALL.md](INSTALL.md).
+
+**From source** (requires Node 22+ and pnpm):
 
 ```sh
 pnpm install
@@ -84,6 +89,7 @@ pnpm link --global   # puts `latch` on your PATH
 | Command | What it does |
 |---|---|
 | `latch init` | Detect MCP client configs (Claude Desktop, Claude Code, Cursor, VS Code), wrap the chosen servers with the proxy, and pin their current tools in `latch.lock`. |
+| `latch setup` | Link Claude Code (or `--client <id>`) with no questions, as the installers do: wrap its servers and pin their tools in the per-user `latch.lock`, created if needed. `--remove` restores the original entries. |
 | `latch add` | Put one server behind latch: pin its tools and add it, wrapped, to one client config (Claude Desktop by default). `latch add github --env GITHUB_PERSONAL_ACCESS_TOKEN -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server` |
 | `latch review` | Walk the pending queue in the terminal, or with `--ui` open the web review screen. Approving rewrites `latch.lock` for you to commit. |
 | `latch verify` | CI check. Spawns every server in `latch.lock`, diffs live tools against pinned ones, and exits non-zero on tier 2+ drift. |
@@ -120,11 +126,12 @@ src/schema/    zod schemas: the shared contract
 src/proxy/     stdio JSON-RPC proxy and the three interception points
 src/analyze/   capability extraction, Unicode/pattern detectors, differ, tiers, LLM pass
 src/store/     latch.lock, the .latch/ pending queue and event log
-src/commands/  init, review, verify, inspect, proxy
+src/commands/  init, setup, add, review, verify, inspect, proxy
 src/ui/        hono review API
 web/           Vite + React review UI (falls back to mock data when the API is down)
 demo/          benign and evil demo servers
 docs/          design docs
+packaging/     installers: Windows (Inno Setup), deb, Arch, portable tar.gz
 ```
 
 ## License
