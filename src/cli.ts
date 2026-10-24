@@ -10,7 +10,7 @@ import { runInit } from "./commands/init.js";
 import { runInspect } from "./commands/inspect.js";
 import { runProxy } from "./commands/proxy.js";
 import { runReview } from "./commands/review.js";
-import { runSetup } from "./commands/setup.js";
+import { runSetup, runUnlink } from "./commands/setup.js";
 import { VERIFY_EXIT, runVerify } from "./commands/verify.js";
 
 /**
@@ -69,8 +69,11 @@ program
   .command("setup")
   .description("link Claude Code to latch with no questions: wrap its MCP servers and create the per-user latch.lock (installers run this)")
   .addOption(new Option("--client <id>", "client to link").choices(SUPPORTED_CLIENTS).default("claude-code"))
+  .option("--remove", "unlink instead: give the client's servers their original commands back (latch.lock is kept)", false)
   .option("--dry-run", "show what would change without writing", false)
-  .action((opts: { client: (typeof SUPPORTED_CLIENTS)[number]; dryRun: boolean }) => run(() => runSetup({ ...opts, ...setupGlobals() })));
+  .action((opts: { client: (typeof SUPPORTED_CLIENTS)[number]; remove: boolean; dryRun: boolean }) =>
+    run(() => (opts.remove ? runUnlink(opts) : runSetup({ ...opts, ...setupGlobals() }))),
+  );
 
 program
   .command("add")

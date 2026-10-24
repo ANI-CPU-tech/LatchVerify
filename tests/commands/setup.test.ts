@@ -5,7 +5,7 @@ import { PassThrough } from "node:stream";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runSetup, type SetupOptions } from "../../src/commands/setup.js";
+import { runSetup, runUnlink, type SetupOptions } from "../../src/commands/setup.js";
 import { INSTALL_LAUNCH, clientConfigPath, wrapWithProxy } from "../../src/config/clients.js";
 import { LockFileSchema } from "../../src/schema/index.js";
 
@@ -100,5 +100,52 @@ describe.skipIf(process.platform === "win32")("runSetup", () => {
     expect(text).toContain("would pin 2 tools");
     expect(await readFile(config, "utf8")).toBe(before);
     await expect(readFile(lockfilePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  describe("--remove", () => {
+    async function unlink(dryRun = false) {
+      const output = new PassThrough();
+      let text = "";
+      output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+      const code = await runUnlink({ client: "claude-code", dryRun, output });
+      return { code, text: text.replace(/\x1b\[[0-9;]*m/g, "") };
+    }
+
+    it("restores the original entries, keeps their own env and other servers, and keeps latch.lock", async () => {
+      const keyed = { ...weather, env: { WEATHER_KEY: "abc" } };
+      const plain = { command: "some-http-bridge", args: ["--port", "1"] };
+      const original = { mcpServers: { weather: keyed }, numStartups: 3 };
+      const config = await claudeConfig(original);
+      expect((await setup()).code).toBe(0);
+      // A server added after setup is not wrapped, and must come through unlink untouched.
+      const linked = JSON.parse(await readFile(config, "utf8"));
+      await writeFile(config, JSON.stringify({ ...linked, mcpServers: { ...linked.mcpServers, plain } }));
+      const lockBefore = await readFile(lockfilePath, "utf8");
+
+      const { code, text } = await unlink();
+      expect(code).toBe(0);
+      expect(text).toContain("✔ restored 1 server");
+      expect(JSON.parse(await readFile(config, "utf8"))).toEqual({ ...original, mcpServers: { weather: keyed, plain } });
+      expect(await readFile(lockfilePath, "utf8")).toBe(lockBefore);
+    });
+
+    it("drops an env that only held latch's variables", async () => {
+      const config = await claudeConfig({ mcpServers: { weather } });
+      await setup();
+      await unlink();
+      expect(JSON.parse(await readFile(config, "utf8")).mcpServers.weather).toEqual(weather);
+    });
+
+    it("succeeds with nothing to do, and writes nothing on a dry run", async () => {
+      expect((await unlink()).text).toContain("is not set up on this machine");
+      const config = await claudeConfig({ mcpServers: { weather } });
+      expect((await unlink()).text).toContain("no server in");
+      await setup();
+      const linked = await readFile(config, "utf8");
+      const dry = await unlink(true);
+      expect(dry.code).toBe(0);
+      expect(dry.text).toContain("would restore 1 server");
+      expect(await readFile(config, "utf8")).toBe(linked);
+    });
   });
 });
