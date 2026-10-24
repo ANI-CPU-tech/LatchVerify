@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import { PendingChangeSchema, type PendingChange } from "../schema/index.js";
+import { replaceFile } from "./replace.js";
 
 /** File name of the review queue inside LATCH_STATE_DIR. */
 export const PENDING_FILE = "pending.json";
@@ -148,7 +149,7 @@ async function writeFileAtomic(path: string, data: string): Promise<void> {
     } finally {
       await handle.close();
     }
-    await rename(temp, path);
+    await replaceFile(temp, path);
   } catch (error) {
     await rm(temp, { force: true });
     throw error;

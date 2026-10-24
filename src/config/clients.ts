@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { replaceFile } from "../store/replace.js";
 import { appDataDir, platformPath } from "./paths.js";
 
 /** MCP clients whose config files `latch init` knows how to rewrite. */
@@ -309,7 +310,7 @@ async function writeFileAtomic(path: string, text: string, mode: number): Promis
     } finally {
       await handle.close();
     }
-    await rename(temp, path);
+    await replaceFile(temp, path);
   } catch (error) {
     await rm(temp, { force: true });
     throw error;
