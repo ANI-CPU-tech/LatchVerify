@@ -11,6 +11,8 @@ Commands are written for bash or zsh; fish equivalents are noted where they diff
 | CI check against `latch.lock` | `latch verify` (`--json`) | works |
 | Read-only analysis of a tool list | `latch inspect` (`--json`) | works |
 | Wrap client configs and pin tools | `latch init` (`--dry-run`) | works |
+| Link Claude Code with no questions, per-user lockfile | `latch setup` (`--dry-run`, `--remove`) | works |
+| Installers (Windows, deb, Arch, tar.gz) | Build installers workflow, see `INSTALL.md` | built and smoke-tested in CI |
 | Add one server and pin its tools | `latch add <name> -- <command>` (`--dry-run`) | works |
 | Approve or reject queued changes | `latch review` (terminal) | works |
 | Browser review screen | `latch review --ui`, or `pnpm ui` for development | works |
@@ -19,7 +21,8 @@ Commands are written for bash or zsh; fish equivalents are noted where they diff
 
 ## 1. Install (once)
 
-Requires Node 22+ and pnpm 11.
+To install a release instead of building from source, see [INSTALL.md](INSTALL.md).
+The steps below build from source and require Node 22+ and pnpm 11.
 
 ```sh
 npm i -g pnpm@11.20.0          # or: corepack enable
@@ -157,6 +160,17 @@ timestamped `.bak` next to every config it rewrites, and puts `LATCH_LOCKFILE_PA
 `LATCH_STATE_DIR` into each wrapped entry so the proxy finds the lockfile wherever the
 client starts it. Restart the client afterwards, then commit `latch.lock`. To undo,
 restore the `.bak` copy.
+
+Without a project, `latch setup` does the same for Claude Code in one step, with a
+per-user lockfile instead of `./latch.lock` (`~/.config/latchverify/latch.lock` on Linux):
+
+```sh
+latch setup --dry-run   # preview: writes nothing
+latch setup             # creates the per-user latch.lock, pins tools, wraps ~/.claude.json
+latch setup --remove    # gives Claude Code its original server entries back; keeps latch.lock
+```
+
+`latch review` and `latch verify` open that lockfile from any directory without `./latch.lock`.
 
 ## Troubleshooting
 

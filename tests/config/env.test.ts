@@ -163,6 +163,29 @@ describe("statePaths", () => {
   });
 });
 
+describe("statePaths with a fallback lockfile", () => {
+  const user = "/home/dev/.config/latchverify/latch.lock";
+  const existing = (...paths: string[]) => (path: string) => paths.includes(path);
+
+  it("uses the fallback when ./latch.lock is missing and the fallback exists", () => {
+    expect(statePaths({}, {}, { fallbackLockfile: user, exists: existing(user) })).toEqual({
+      lockfilePath: user,
+      stateDir: "/home/dev/.config/latchverify/.latch",
+    });
+  });
+
+  it("keeps ./latch.lock when it exists, and when the fallback does not", () => {
+    expect(statePaths({}, {}, { fallbackLockfile: user, exists: existing(resolve("latch.lock"), user) }).lockfilePath).toBe(resolve("latch.lock"));
+    expect(statePaths({}, {}, { fallbackLockfile: user, exists: existing() }).lockfilePath).toBe(resolve("latch.lock"));
+  });
+
+  it("never overrides a flag or the environment", () => {
+    const opts = { fallbackLockfile: user, exists: existing(user) };
+    expect(statePaths({ lockfile: "/flag/latch.lock" }, {}, opts).lockfilePath).toBe("/flag/latch.lock");
+    expect(statePaths({}, { LATCH_LOCKFILE_PATH: "/env/latch.lock" }, opts).lockfilePath).toBe("/env/latch.lock");
+  });
+});
+
 describe("loadDotEnv", () => {
   it("loads a .env file into process.env without overriding variables already set", async () => {
     const dir = await mkdtemp(join(tmpdir(), "latch-env-"));

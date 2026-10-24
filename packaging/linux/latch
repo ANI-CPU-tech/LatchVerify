@@ -1,0 +1,8 @@
+#!/bin/sh
+# LatchVerify's `latch` command. Runs the Node.js the package ships (node/bin/node next to this
+# script) when there is one, else node from PATH (the Arch package uses the system's). Works
+# through a symlink such as /usr/bin/latch: readlink -f finds the install directory.
+here=$(dirname "$(readlink -f "$0")")
+node="$here/node/bin/node"
+[ -x "$node" ] || node=node
+exec "$node" "$here/app/dist/cli.js" "$@"

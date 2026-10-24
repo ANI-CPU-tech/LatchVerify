@@ -1,0 +1,256 @@
+# Builds the LatchVerify installers on real Windows and Linux machines, installs each one on that
+# machine and checks it linked Claude Code, then uninstalls it and checks Claude Code was restored.
+# Run it from the Actions tab ("Run workflow"), or push a tag like v0.2.0 to also publish a GitHub
+# Release. The tag must match the version in package.json.
+#
+# Every package carries its own Node.js 22 (checksum-checked from nodejs.org), so users install
+# nothing else. Installing runs `latch setup`: Claude Code's MCP servers start behind the latch
+# proxy and their tools are pinned in a per-user latch.lock it creates. See INSTALL.md.
+#
+# Optional repository secrets:
+#   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD  → Authenticode-signed Windows installer
+#                                                         (base64 .pfx; see docs/CODE_SIGNING.md)
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows (setup EXE)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Unit tests (Windows has not been verified before; failures are reported but don't block the installer)
+        continue-on-error: true
+        run: pnpm test
+      - run: pnpm build
+      - name: Read the version
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Add-Content -Path $env:GITHUB_ENV -Value "VERSION=$(pnpm -s exec tsx packaging/version.ts semver)"
+          Add-Content -Path $env:GITHUB_ENV -Value "FILE_VERSION=$(pnpm -s exec tsx packaging/version.ts windows)"
+      - name: Stage the app and a verified Node.js 22
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm -s exec tsx packaging/stage.ts build/stage
+          ./packaging/windows/fetch-node.ps1 -Destination "$env:GITHUB_WORKSPACE\build\stage" -Arch x64
+      - name: Inno Setup 6.3 or newer
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          # ArchitecturesAllowed=x64compatible needs Inno Setup 6.3.
+          if (-not (Test-Path $iscc) -or [version](Get-Item $iscc).VersionInfo.ProductVersion -lt [version]"6.3") {
+            choco upgrade innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          Write-Host "Inno Setup $((Get-Item $iscc).VersionInfo.ProductVersion)"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISCC=$iscc"
+      - name: Build the installer
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $isccArgs = @(
+            "/DAppVersion=$env:VERSION",
+            "/DFileVersion=$env:FILE_VERSION",
+            "/DStageDir=$env:GITHUB_WORKSPACE\build\stage",
+            "/DOutputDir=$env:GITHUB_WORKSPACE\build\out"
+          )
+          if ($env:WINDOWS_CERTIFICATE) {
+            $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+            $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            Remove-Item $pfx
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+              Sort-Object { [version]$_.Directory.Parent.Name } -Descending | Select-Object -First 1
+            if (-not $signtool) { throw "signtool.exe was not found in the Windows SDK" }
+            # Inno Setup runs this for the installer and the uninstaller: $q is a quote, $f the file.
+            $isccArgs += "/DSignTool=1"
+            $isccArgs += "/Slatchsign=`$q$($signtool.FullName)`$q sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /sha1 $($cert.Thumbprint) `$f"
+            Write-Host "Signing the installer with certificate $($cert.Subject)"
+          } else {
+            Write-Host "::warning::No code-signing certificate configured, so the installer is unsigned (SmartScreen will warn). See docs/CODE_SIGNING.md."
+          }
+          & $env:ISCC @isccArgs packaging\windows\latchverify.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: "Smoke test: installing links Claude Code, uninstalling restores it"
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $check = "packaging/test/check-link.ts"
+          $config = Join-Path $env:USERPROFILE ".claude.json"
+          $lock = Join-Path $env:APPDATA "LatchVerify\latch.lock"
+          $app = Join-Path $env:LOCALAPPDATA "Programs\LatchVerify"
+          pnpm -s exec tsx $check client --config $config --server stub
+
+          $setup = Get-Item "build\out\latchverify-$env:VERSION-windows-x64-setup.exe"
+          $log = Join-Path $env:RUNNER_TEMP "install.log"
+          $run = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$app", "/LOG=$log" -Wait -PassThru
+          if ($run.ExitCode -ne 0) { Get-Content $log; throw "The installer exited with $($run.ExitCode)" }
+          Get-Content "$app\setup.log"
+          & "$app\latch.cmd" --version
+          pnpm -s exec tsx $check linked --config $config --lockfile $lock --server stub
+          pnpm -s exec tsx $check probe --config $config --server stub --tool echo
+
+          Start-Process -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          # The uninstaller hands over to a copy of itself in %TEMP% and returns before it is done.
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Test-Path "$app\latch.cmd") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          if (Test-Path "$app\latch.cmd") { throw "The uninstaller left $app\latch.cmd behind" }
+          Get-Content (Join-Path $env:TEMP "latchverify-unlink.log")
+          pnpm -s exec tsx $check unlinked --config $config --lockfile $lock --server stub
+          $path = (Get-ItemProperty -Path HKCU:\Environment).Path
+          if ($path -and ($path.Split(";") -contains $app)) { throw "The uninstaller left $app in PATH" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latchverify-windows
+          path: build/out/latchverify-*-windows-x64-setup.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux (deb, Arch/CachyOS, tar.gz)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pacman-package-manager libarchive-tools zstd fakeroot
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck && pnpm test
+      - run: pnpm build
+      - name: Read the version
+        run: |
+          {
+            echo "VERSION=$(pnpm -s exec tsx packaging/version.ts semver)"
+            echo "DEB_VERSION=$(pnpm -s exec tsx packaging/version.ts deb)"
+            echo "ARCH_VERSION=$(pnpm -s exec tsx packaging/version.ts arch)"
+          } >> "$GITHUB_ENV"
+      - name: Stage the app and a verified Node.js 22
+        run: |
+          pnpm -s exec tsx packaging/stage.ts build/stage
+          sh packaging/linux/fetch-node.sh build/stage x64
+      - name: Build the deb and the portable archive
+        run: |
+          sh packaging/linux/build-deb.sh build/stage build/out "$DEB_VERSION" amd64
+          sh packaging/linux/build-tarball.sh build/stage build/out "$VERSION" x64
+      - name: Build Arch/CachyOS package
+        run: |
+          mkdir -p build/arch
+          cp packaging/arch/PKGBUILD packaging/arch/latchverify.install LICENSE "build/out/latchverify_${DEB_VERSION}_amd64.deb" build/arch/
+          cd build/arch
+          sed -i -e "s/^pkgver=.*/pkgver=${ARCH_VERSION}/" -e "s/^_debver=.*/_debver=${DEB_VERSION}/" PKGBUILD
+          PKGDEST="$GITHUB_WORKSPACE/build/out" PKGEXT='.pkg.tar.zst' makepkg --nodeps --noconfirm -f
+      - name: "Smoke test: the deb links Claude Code on install and restores it on removal"
+        run: |
+          check="pnpm -s exec tsx packaging/test/check-link.ts"
+          lock="$HOME/.config/latchverify/latch.lock"
+          $check client --config ~/.claude.json --server stub
+          sudo apt-get install -y "./build/out/latchverify_${DEB_VERSION}_amd64.deb"
+          latch --version
+          $check linked --config ~/.claude.json --lockfile "$lock" --server stub
+          $check probe --config ~/.claude.json --server stub --tool echo
+          sudo apt-get remove -y latchverify
+          test ! -e /usr/lib/latchverify
+          $check unlinked --config ~/.claude.json --lockfile "$lock" --server stub
+      - name: "Smoke test: the portable archive installs for one user and uninstalls cleanly"
+        run: |
+          check="pnpm -s exec tsx packaging/test/check-link.ts"
+          home=$(mktemp -d)
+          $check client --config "$home/.claude.json" --server stub
+          tar -xzf "build/out/latchverify-${VERSION}-linux-x64.tar.gz" -C "$RUNNER_TEMP"
+          as_user() { env -u XDG_CONFIG_HOME -u XDG_DATA_HOME HOME="$home" "$@"; }
+          as_user "$RUNNER_TEMP/latchverify-${VERSION}-linux-x64/install.sh"
+          "$home/.local/bin/latch" --version
+          $check linked --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
+          $check probe --config "$home/.claude.json" --server stub --tool echo
+          as_user "$RUNNER_TEMP/latchverify-${VERSION}-linux-x64/uninstall.sh"
+          test ! -e "$home/.local/lib/latchverify" && test ! -e "$home/.local/bin/latch"
+          $check unlinked --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latchverify-linux
+          path: |
+            build/out/*.deb
+            build/out/*.tar.gz
+            build/out/*.pkg.tar.zst
+          if-no-files-found: error
+
+  checksums:
+    name: Checksums (SHA256SUMS)
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Hash every package
+        working-directory: packages
+        run: |
+          sha256sum -- * > ../SHA256SUMS
+          cat ../SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latchverify-checksums
+          path: SHA256SUMS
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, checksums]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches the package version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match version ${VERSION} in package.json"
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Release notes from CHANGELOG.md
+        run: pnpm -s exec tsx packaging/release-notes.ts "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      # A version with a pre-release part (1.2.0-rc.1) is published as a pre-release.
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: ${{ runner.temp }}/release-notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            packages/*.exe
+            packages/*.deb
+            packages/*.tar.gz
+            packages/*.pkg.tar.zst
+            packages/SHA256SUMS
+          fail_on_unmatched_files: true

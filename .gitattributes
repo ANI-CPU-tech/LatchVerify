@@ -1,0 +1,14 @@
+# Line endings that must hold wherever the repository is checked out (Windows runners convert
+# text to CRLF by default): Windows command scripts need CRLF, shell and maintainer scripts LF.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+*.sh text eol=lf
+packaging/linux/latch text eol=lf
+packaging/linux/latchverify-review text eol=lf
+packaging/linux/link-user text eol=lf
+packaging/debian/postinst text eol=lf
+packaging/debian/prerm text eol=lf
+packaging/arch/PKGBUILD text eol=lf
+packaging/arch/*.install text eol=lf
+*.ico binary

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Desktop launcher: opens the LatchVerify review UI. Outside a project it opens the per-user
+# latch.lock that `latch setup` created, so it never asks where the lockfile is.
+here=$(dirname "$(readlink -f "$0")")
+exec "$here/latch" review --ui "$@"

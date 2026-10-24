@@ -1,0 +1,14 @@
+# pacman runs these as root; link-user does the Claude Code work as the user behind sudo.
+# LATCH_SKIP_SETUP=1 leaves Claude Code alone.
+
+post_install() {
+  /usr/lib/latchverify/link-user setup || true
+}
+
+post_upgrade() {
+  post_install
+}
+
+pre_remove() {
+  /usr/lib/latchverify/link-user remove || true
+}

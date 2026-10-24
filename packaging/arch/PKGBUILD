@@ -1,0 +1,33 @@
+# Maintainer: LatchVerify maintainers <latchverify@users.noreply.github.com>
+# Repackages the LatchVerify .deb for Arch Linux / CachyOS / Manjaro / EndeavourOS.
+#
+# Build: put latchverify_<version>_amd64.deb and LICENSE next to this file, set pkgver and
+# _debver to that version (the build workflow does both), then run `makepkg -si`.
+# The checksums are SKIP because the .deb is built fresh for each release; run `updpkgsums`
+# to pin the files you have.
+pkgname=latchverify-bin
+pkgver=0.0.0
+_debver=0.0.0
+pkgrel=1
+pkgdesc="Capability-diffing security proxy for MCP servers; links Claude Code on install"
+arch=('x86_64')
+url="https://github.com/vinayakkam/LatchVerify"
+license=('MIT')
+# What the bundled Node.js links against.
+depends=('glibc' 'gcc-libs' 'hicolor-icon-theme')
+optdepends=('git: approvals are recorded under your git user.email')
+provides=('latchverify')
+conflicts=('latchverify')
+# The bundled Node.js is an upstream release binary: keep it as published.
+options=('!strip' '!debug')
+install=latchverify.install
+source=("latchverify_${_debver}_amd64.deb" "LICENSE")
+sha256sums=('SKIP' 'SKIP')
+
+package() {
+  # makepkg has unpacked the .deb (an ar archive) into data.tar.* and control.tar.*.
+  bsdtar -xf "${srcdir}"/data.tar.* -C "${pkgdir}"
+  # Arch keeps licenses in /usr/share/licenses, not /usr/share/doc.
+  rm -rf "${pkgdir}/usr/share/doc"
+  install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

@@ -47,6 +47,8 @@ export interface InitOptions {
   input?: Readable;
   /** How wrapped entries start latch. Defaults to INSTALL_LAUNCH (this install, by absolute path). */
   launch?: ProxyLaunch;
+  /** Print the closing "next:" hints (commit latch.lock, restart the client). Defaults to true. */
+  hints?: boolean;
 }
 
 /** One server latch init can wrap, as configured in one or more clients. */
@@ -344,8 +346,10 @@ export async function runInit(options: InitOptions): Promise<number> {
   }
   if (!lockChanged && rewrites.length === 0) say("nothing to change");
 
-  if (lockChanged) say(`next: commit ${printable(lockfilePath)} so the pins are reviewed like code`);
-  if (rewrites.length > 0) say(`next: restart ${[...new Set(rewrites.map((r) => r.config.client))].join(", ")} to start the wrapped servers`);
+  if (options.hints !== false) {
+    if (lockChanged) say(`next: commit ${printable(lockfilePath)} so the pins are reviewed like code`);
+    if (rewrites.length > 0) say(`next: restart ${[...new Set(rewrites.map((r) => r.config.client))].join(", ")} to start the wrapped servers`);
+  }
   return failed ? 1 : 0;
 }
 

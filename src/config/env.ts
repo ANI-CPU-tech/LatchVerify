@@ -104,13 +104,21 @@ export function loadDotEnv(path = ".env"): void {
  * LATCH_LOCKFILE_PATH / LATCH_STATE_DIR (trimmed, blank is unset), then ./latch.lock and the
  * `.latch` directory next to the lockfile. One default for all, so the proxy (started by a client
  * in any directory), `latch review` and the UI read and write the same queue.
+ *
+ * With `fallbackLockfile` (the per-user latch.lock, for commands that only read or review it),
+ * that file is used instead of the default when ./latch.lock does not exist and it does: an
+ * installed latch opens the user's pins from any directory, while a project's own latch.lock
+ * still wins inside the project.
  */
 export function statePaths(
   flags: { lockfile?: string; stateDir?: string },
   env: NodeJS.ProcessEnv = process.env,
+  { fallbackLockfile, exists = existsSync }: { fallbackLockfile?: string; exists?: (path: string) => boolean } = {},
 ): { lockfilePath: string; stateDir: string } {
   const read = (name: string) => env[name]?.trim() || undefined;
-  const lockfilePath = resolve(flags.lockfile ?? read("LATCH_LOCKFILE_PATH") ?? "./latch.lock");
+  const local = resolve("./latch.lock");
+  const fallback = fallbackLockfile !== undefined && !exists(local) && exists(fallbackLockfile) ? fallbackLockfile : undefined;
+  const lockfilePath = resolve(flags.lockfile ?? read("LATCH_LOCKFILE_PATH") ?? fallback ?? local);
   return { lockfilePath, stateDir: resolve(flags.stateDir ?? read("LATCH_STATE_DIR") ?? join(dirname(lockfilePath), ".latch")) };
 }
 

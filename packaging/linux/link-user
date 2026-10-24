@@ -1,0 +1,42 @@
+#!/bin/sh
+# Links (or, with "remove", unlinks) Claude Code for the user who installed the package.
+#
+# Package manager scripts run as root, but Claude Code's config (~/.claude.json) and the per-user
+# latch.lock belong to a person. This runs `latch setup` as the user behind sudo or pkexec, with
+# their home directory, so the files it writes are theirs. It never fails: the package is
+# installed either way, and anyone can run `latch setup` (or `latch setup --remove`) themselves.
+# Set LATCH_SKIP_SETUP=1 to leave Claude Code alone.
+#
+# Usage: link-user setup | link-user remove
+case "${1:-}" in
+  setup) args="setup" ;;
+  remove) args="setup --remove" ;;
+  *) echo "usage: $0 setup|remove" >&2; exit 2 ;;
+esac
+
+if [ "${LATCH_SKIP_SETUP:-}" = 1 ]; then
+  echo "LatchVerify: LATCH_SKIP_SETUP=1, so Claude Code was left alone. Run 'latch $args' yourself."
+  exit 0
+fi
+
+user=${SUDO_USER:-}
+if [ -z "$user" ] && [ -n "${PKEXEC_UID:-}" ]; then user=$(id -nu "$PKEXEC_UID" 2>/dev/null || true); fi
+if [ -z "$user" ] || [ "$user" = root ]; then
+  echo "LatchVerify: could not tell which user installed it. Run 'latch $args' as your own user to update Claude Code."
+  exit 0
+fi
+home=$(getent passwd "$user" | cut -d: -f6)
+if [ -z "$home" ] || [ ! -d "$home" ]; then
+  echo "LatchVerify: $user has no home directory. Run 'latch $args' as that user."
+  exit 0
+fi
+
+here=$(dirname "$(readlink -f "$0")")
+# A clean user environment: root's XDG_CONFIG_HOME must not decide where the user's lockfile goes.
+# shellcheck disable=SC2086 # $args is two words on purpose
+if command -v runuser >/dev/null 2>&1; then
+  runuser -u "$user" -- env -u XDG_CONFIG_HOME HOME="$home" USER="$user" LOGNAME="$user" "$here/latch" $args
+else
+  su -s /bin/sh "$user" -c "env -u XDG_CONFIG_HOME HOME='$home' USER='$user' LOGNAME='$user' '$here/latch' $args"
+fi || echo "LatchVerify: 'latch $args' did not finish for $user. It can be run again at any time."
+exit 0
