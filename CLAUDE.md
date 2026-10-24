@@ -74,7 +74,8 @@ that blocks on every reword gets disabled by its users.
 - Analysis pipeline: `src/analyze/` (hash, capabilities, unicode, patterns,
   differ, tiers, llm).
 - State: `src/store/` (`lockfile.ts` for `latch.lock`; `pending.ts` and
-  `events.ts` for `.latch/`).
+  `events.ts` for `.latch/`). Atomic writes end with `replace.ts` `replaceFile`, which retries
+  the rename on Windows while another process holds the target.
 - CLI: `src/cli.ts` wires `src/commands/*`. `latch setup` (`commands/setup.ts`) is
   `latch init` for one client with no questions, plus `--remove` to unwrap; installers run it.
 - Per-user lockfile: `src/config/paths.ts` `userLockfilePath()` (`%APPDATA%\LatchVerify`,

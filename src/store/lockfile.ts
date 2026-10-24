@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 import { LOCKFILE_VERSION, LockFileSchema, type LockFile, type PendingChange, type ToolRecord } from "../schema/index.js";
+import { replaceFile } from "./replace.js";
 
 /** Any failure to read, validate or write latch.lock. The message always names the file. */
 export class LockfileError extends Error {
@@ -119,7 +120,7 @@ export async function writeLockfile(path: string, lock: LockFile): Promise<void>
     } finally {
       await handle.close();
     }
-    await rename(temp, path);
+    await replaceFile(temp, path);
   } catch (error) {
     await rm(temp, { force: true });
     throw new LockfileError(path, `cannot write lockfile (${error instanceof Error ? error.message : String(error)})`, { cause: error });

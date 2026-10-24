@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -176,8 +176,10 @@ describe("readEvents", () => {
   });
 
   it("surfaces read errors other than a missing log", async () => {
-    await writeFile(join(dir, "file"), "");
-    await expect(readEvents(join(dir, "file"))).rejects.toMatchObject({ code: "ENOTDIR" });
+    // A directory in its place fails the same way everywhere (a file as the parent directory
+    // is ENOTDIR on POSIX but ENOENT, "no log yet", on Windows).
+    await mkdir(join(dir, EVENTS_FILE));
+    await expect(readEvents(dir)).rejects.toMatchObject({ code: "EISDIR" });
   });
 
   it("keeps the event before a garbage line (task Verify scenario)", async () => {
