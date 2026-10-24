@@ -1,5 +1,6 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { checkLinked, checkUnlinked } from "../../packaging/test/check-link.js";
+import { checkLinked, checkUnlinked, stubClientConfig } from "../../packaging/test/check-link.js";
 
 const lockfile = "/home/dev/.config/latchverify/latch.lock";
 const linked = {
@@ -27,5 +28,15 @@ describe("checkUnlinked", () => {
     expect(checkUnlinked({ mcpServers: { stub: { command: "node", args: ["stub.mjs"] } } }, "stub")).toBeNull();
     expect(checkUnlinked(linked, "stub")).toMatch(/still starts latch proxy/);
     expect(checkUnlinked({ mcpServers: { stub: { command: "node", env: { LATCH_STATE_DIR: "/x" } } } }, "stub")).toMatch(/LATCH_STATE_DIR/);
+  });
+});
+
+describe("stubClientConfig", () => {
+  it("runs the stub server with this Node.js, by absolute paths", () => {
+    const entry = stubClientConfig("stub").mcpServers.stub!;
+    expect(entry.command).toBe(process.execPath);
+    expect(entry.args).toHaveLength(1);
+    expect(entry.args![0]).toMatch(/stub-server\.mjs$/);
+    expect(existsSync(entry.args![0]!)).toBe(true);
   });
 });

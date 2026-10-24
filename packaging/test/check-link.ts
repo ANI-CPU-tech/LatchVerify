@@ -1,6 +1,11 @@
 /**
  * Installer smoke-test assertion: is a Claude Code server linked to latch, or restored?
  *
+ *   tsx packaging/test/check-link.ts client   --config <~/.claude.json> --server <id>
+ *
+ * client: writes a Claude Code config whose only server, <id>, runs stub-server.mjs with this
+ * Node.js, by absolute paths, as an installer finds it on a fresh machine.
+ *
  *   tsx packaging/test/check-link.ts linked   --config <~/.claude.json> --lockfile <latch.lock> --server <id>
  *   tsx packaging/test/check-link.ts unlinked --config <~/.claude.json> --lockfile <latch.lock> --server <id>
  *
@@ -18,14 +23,20 @@
  * Exits 0 when the check holds, 1 with the reason when it does not.
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 interface Entry {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+}
+
+/** A Claude Code config with one stdio server, `serverId`, running stub-server.mjs with this Node.js. */
+export function stubClientConfig(serverId: string): { mcpServers: Record<string, Entry> } {
+  return { mcpServers: { [serverId]: { command: process.execPath, args: [fileURLToPath(new URL("stub-server.mjs", import.meta.url))] } } };
 }
 
 export function checkLinked(config: unknown, lock: unknown, serverId: string, lockfilePath: string): string | null {
@@ -98,10 +109,16 @@ if (process.argv[1]?.endsWith("check-link.ts")) {
   });
   const [mode] = positionals;
   const { config, lockfile, server, tool } = values;
-  const usable = mode === "probe" ? config && server && tool : (mode === "linked" || mode === "unlinked") && config && lockfile && server;
+  const usable =
+    mode === "client" ? config && server : mode === "probe" ? config && server && tool : (mode === "linked" || mode === "unlinked") && config && lockfile && server;
   if (!usable) {
-    console.error("usage: check-link.ts linked|unlinked --config <path> --lockfile <path> --server <id>\n       check-link.ts probe --config <path> --server <id> --tool <name>");
+    console.error("usage: check-link.ts client --config <path> --server <id>\n       check-link.ts linked|unlinked --config <path> --lockfile <path> --server <id>\n       check-link.ts probe --config <path> --server <id> --tool <name>");
     process.exit(2);
+  }
+  if (mode === "client") {
+    writeFileSync(config!, `${JSON.stringify(stubClientConfig(server!), null, 2)}\n`);
+    console.log(`✔ wrote ${config} with the stub server "${server}"`);
+    process.exit(0);
   }
   const read = (path: string): unknown => JSON.parse(readFileSync(path, "utf8").replace(/^﻿/, ""));
   let problem: string | null;
