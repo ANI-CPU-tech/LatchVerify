@@ -147,6 +147,8 @@ describe.skipIf(process.platform === "win32")("runSetup", () => {
       expect(code).toBe(1);
       expect(text).toContain(`! cursor: ${broken} is not valid JSON`);
       expect(JSON.parse(await readFile(claude, "utf8")).mcpServers.weather.args).toContain("proxy");
+      // Claude Code was linked all the same, so it must be restarted.
+      expect(text).toContain("next: restart Claude Code so its MCP servers start behind latch");
       expect(await readFile(broken, "utf8")).toBe("{ broken");
     });
   });

@@ -73,12 +73,14 @@ export async function runSetup(options: SetupOptions): Promise<number> {
   const linked = [...new Set(detection.configs.filter(mine).map((config) => config.client))];
   const problems = detection.problems.filter(mine);
   let code = 0;
+  let initRan = false;
   if (client !== undefined && problems.length > 0) {
     for (const problem of problems) say(pc.yellow(problemWarning(problem)));
     say(`  Fix the file, or let ${name} rewrite it, then run \`latch setup\` again.`);
     code = 1;
   } else if (linked.length > 0 || problems.length > 0) {
     // init reports the problems of --all itself, and links every config it can read.
+    initRan = true;
     code = await runInit({
       ...(client === undefined ? {} : { client }),
       dryRun: options.dryRun,
@@ -111,7 +113,8 @@ export async function runSetup(options: SetupOptions): Promise<number> {
   }
 
   say();
-  if (linked.length > 0 && !options.dryRun && code === 0) {
+  // Even when some server or config failed, the clients init could link must be restarted.
+  if (initRan && linked.length > 0 && !options.dryRun) {
     say(`next: restart ${listOf(linked.map((id) => CLIENT_NAMES[id]))} so ${linked.length === 1 ? "its" : "their"} MCP servers start behind latch`);
   }
   say(`next: review tool changes with \`latch review --ui\` (it opens ${printable(lockfilePath)} from any directory)`);
