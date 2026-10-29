@@ -154,7 +154,10 @@ Delete the entry from `rejected.json` to take a rejection back.
   it may load only its own server's origin, opens no other window, and the preload exposes only
   the version and the two update calls. Closing it keeps the app in the tray. An installed app
   starts at login: an XDG autostart entry on Linux, a Run value named after the AppUserModelID on
-  Windows; Settings turns it off. Only one instance runs.
+  Windows; Settings turns it off. Only one instance runs. When a client starts a protected server
+  and the installed app is not running (its `app.pid` is not alive), the proxy starts it hidden in
+  the tray, with only the desktop session's variables: the server's env, keys included, stays in
+  the proxy. A copy started while one runs exits, and a hidden start never shows the window.
 - **Updates** (`src/update/`). Each release publishes `latest.json`: the version, notes and, per
   install kind (`windows-x86_64-inno`, `linux-x86_64-deb`, `linux-x86_64-pacman`,
   `linux-x86_64-tarball`), the installer's https URL, sha256 and an ed25519 signature over

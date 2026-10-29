@@ -122,6 +122,9 @@ that blocks on every reword gets disabled by its users.
 - Desktop app: `src/desktop/` (`main.ts` Electron main process: window, tray, login start; `shell.ts`
   pure helpers; `preload.cts`; `updates.ts` the update dialogs). `pnpm desktop` runs it from a
   checkout; `--smoke` starts the services, prints and quits. It opens no browser, and nothing else does.
+  The app records its pid in `app.pid` beside the per-user lockfile; `launch.ts` (no Electron import)
+  lets `latch proxy` start an installed app hidden when that pid is not alive, with `appEnvironment`
+  (session variables only, never the server's env).
 - Updates: `src/update/` (`manifest.ts` schema and signed message, `index.ts` check, download,
   install per kind, `key.ts` the public key). The private key is the release workflow's
   `LATCH_UPDATE_SIGNING_KEY` secret, never in the repo. `latch update` (`commands/update.ts`).

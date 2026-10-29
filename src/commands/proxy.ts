@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import type { LlmOptions } from "../analyze/llm.js";
 import type { LogLevel } from "../config/env.js";
+import { startAppIfStopped } from "../desktop/launch.js";
 import { startProxy } from "../proxy/index.js";
 
 export interface ProxyCommandOptions {
@@ -40,6 +41,8 @@ export async function runProxy(options: ProxyCommandOptions): Promise<number> {
   if (command === undefined || command === "") {
     throw new Error("latch proxy: give the real server command after --, e.g. latch proxy --server weather -- npx my-server");
   }
+  // An installed LatchVerify comes up with the client, in the tray (a no-op from a checkout).
+  startAppIfStopped();
   return startProxy({
     serverId: options.serverId,
     command,

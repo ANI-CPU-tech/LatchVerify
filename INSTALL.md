@@ -54,7 +54,8 @@ that has its own committed `latch.lock`, they use the project's file instead.
 No MCP client installed yet? The installer still succeeds and says so. Install your client,
 then run `latch setup` once, or connect it on the app's MCP Servers page.
 
-**The LatchVerify app** sits in your tray and starts at login (Settings can turn that off). It keeps
+**The LatchVerify app** sits in your tray and starts at login (Settings can turn that off). If it is
+not running when an MCP client starts a protected server, that server's proxy starts it in the tray. It keeps
 connected clients linked in the background (new servers included) and tells you on the desktop
 when a tool waits for review, when a call was blocked, and when it finds a client you have not
 answered about. On a machine without a desktop, `latch watch` does the same in a terminal.

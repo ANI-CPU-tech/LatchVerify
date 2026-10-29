@@ -2,7 +2,7 @@
 // icon, the background watcher with native notifications, and start at login. It runs the same
 // review server and watcher as `latch review --ui` and `latch watch`, in one process; the proxies
 // stay plain Node processes started by the MCP clients.
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -19,6 +19,7 @@ import { readPending } from "../store/pending.js";
 import { readSettings, settingsPath } from "../store/settings.js";
 import { startUiServer, type UiServerHandle } from "../ui/server.js";
 import { VERSION } from "../version.js";
+import { appPidPath } from "./launch.js";
 import { REVIEW_ROUTE, autostartEntry, autostartPath, navigationAllowed, parseFlags, trayMenu, trayTooltip, type TrayAction } from "./shell.js";
 import { updateHandlers } from "./updates.js";
 
@@ -49,6 +50,12 @@ async function main(): Promise<void> {
   if (!existsSync(lockfilePath)) {
     await mkdir(dirname(lockfilePath), { recursive: true });
     await writeLockfile(lockfilePath, emptyLockfile());
+  }
+
+  // Proxies read this to start the app when a client starts a server (launch.ts).
+  if (!flags.smoke) {
+    await writeFile(appPidPath(), `${process.pid}\n`);
+    process.once("exit", () => rmSync(appPidPath(), { force: true }));
   }
 
   await app.whenReady();
@@ -156,7 +163,10 @@ async function main(): Promise<void> {
   refreshTray();
   updates.schedule(refreshTray);
 
-  app.on("second-instance", () => showWindow());
+  // A proxy starting the app again (--hidden) must not pop the window up; a user launching it does.
+  app.on("second-instance", (_event, argv) => {
+    if (!parseFlags(argv).hidden) showWindow();
+  });
   // Stay in the tray when the window closes.
   app.on("window-all-closed", () => undefined);
   app.on("before-quit", () => {
