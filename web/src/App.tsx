@@ -4,7 +4,7 @@ import { PageTransition } from "./components/PageTransition";
 import { EmptyState, LoadingState, Panel, buttonClass } from "./components/ui";
 import { DataProvider, useData } from "./lib/data";
 import { href, type Route } from "./lib/router";
-import { useRoute } from "./lib/useRoute";
+import { navigate, useRoute } from "./lib/useRoute";
 import { ThemeProvider } from "./lib/theme";
 import { Audit } from "./pages/Audit";
 import { GitCi } from "./pages/GitCi";
@@ -35,11 +35,17 @@ function NotFound({ path }: { path: string }) {
   );
 }
 
-/** The Simulation page when the API says development mode is on; otherwise it does not exist. */
+/**
+ * The Simulation page when the API says development mode is on. In normal mode it leaves no
+ * trace: a #/simulation link goes to Overview, replacing the history entry.
+ */
 function DevSimulation() {
   const { info, dev } = useData();
-  if (info.status === "loading") return <LoadingState label="Loading..." />;
-  if (!dev) return <NotFound path={href({ page: "simulation" }).slice(1)} />;
+  const hidden = info.status !== "loading" && !dev;
+  useEffect(() => {
+    if (hidden) navigate({ page: "overview" }, { replace: true });
+  }, [hidden]);
+  if (!dev) return info.status === "loading" ? <LoadingState label="Loading..." /> : null;
   return (
     <Suspense fallback={<LoadingState label="Loading the simulation..." />}>
       <Simulation />
