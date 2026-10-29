@@ -69,6 +69,8 @@ const LockfileGitStatusSchema = z.discriminatedUnion("available", [
   }),
 ]);
 
+const ApiInfoSchema = z.object({ version: z.string(), dev: z.boolean() });
+
 const isJson = (response: Response): boolean => (response.headers.get("content-type") ?? "").includes("application/json");
 
 const isAbort = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
@@ -142,6 +144,14 @@ export const MAX_EVENTS = 1_000;
 /** The newest `limit` events from .latch/events.jsonl, oldest first. */
 export async function fetchEvents(limit: number = MAX_EVENTS, signal?: AbortSignal): Promise<LatchEvent[]> {
   return getJson(`/api/events?limit=${limit}`, EventLogSchema, "event log", signal);
+}
+
+/** What GET /api/info reports: the LatchVerify version, and whether development mode is on. */
+export type ApiInfo = z.infer<typeof ApiInfoSchema>;
+
+/** The serving LatchVerify's version and mode (LATCH_DEV). */
+export async function fetchInfo(signal?: AbortSignal): Promise<ApiInfo> {
+  return getJson("/api/info", ApiInfoSchema, "info", signal);
 }
 
 /** The approved state in latch.lock. */

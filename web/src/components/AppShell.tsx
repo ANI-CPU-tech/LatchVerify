@@ -8,21 +8,22 @@ import { href, type Page } from "../lib/router";
 import { FlaskIcon, GitIcon, HomeIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
 
-export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon: ReactNode; href: string }> = [
+/** The sections. `devOnly` ones show only in development mode (GET /api/info). */
+export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon: ReactNode; href: string; devOnly?: true }> = [
   { page: "overview", label: "Overview", icon: <HomeIcon />, href: href({ page: "overview" }) },
   { page: "servers", label: "MCP Servers", icon: <ServerIcon />, href: href({ page: "servers" }) },
   { page: "review", label: "Review Queue", icon: <QueueIcon />, href: href({ page: "review", id: null }) },
   { page: "tools", label: "Approved Tools", icon: <ToolCheckIcon />, href: href({ page: "tools", server: null }) },
   { page: "audit", label: "Audit Log", icon: <LogIcon />, href: href({ page: "audit" }) },
   { page: "ci", label: "Git & CI", icon: <GitIcon />, href: href({ page: "ci" }) },
-  { page: "simulation", label: "Simulation", icon: <FlaskIcon />, href: href({ page: "simulation" }) },
+  { page: "simulation", label: "Simulation", icon: <FlaskIcon />, href: href({ page: "simulation" }), devOnly: true },
   { page: "settings", label: "Settings", icon: <SettingsIcon />, href: href({ page: "settings" }) },
 ];
 
 const API_STATUS = {
   checking: { tone: "neutral", label: "Checking API", detail: "Contacting the review API" },
   connected: { tone: "success", label: "API connected", detail: "Reading latch.lock and .latch/ on this machine" },
-  unreachable: { tone: "destructive", label: "API unreachable", detail: "Start it with pnpm ui or latch review --ui" },
+  unreachable: { tone: "destructive", label: "API unreachable", detail: `Start it with ${import.meta.env.MODE === "development" ? "pnpm ui" : "latch review --ui"}` },
 } as const;
 
 /**
@@ -58,6 +59,8 @@ type Box = { x: number; y: number; width: number; height: number };
  * link at once and open its section when the keys pause (NAV_OPEN_DELAY_MS).
  */
 function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "strip" }) {
+  const { dev } = useData();
+  const items = NAV.filter((item) => dev || !item.devOnly);
   const wrapper = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<Box | null>(null);
 
@@ -84,7 +87,7 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
     observer.observe(root);
     for (const anchor of root.querySelectorAll("a")) observer.observe(anchor);
     return () => observer.disconnect();
-  }, [current, layout]);
+  }, [current, layout, items.length]);
 
   const opening = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(opening.current), []);
@@ -111,7 +114,7 @@ function NavLinks({ current, layout }: { current: Page; layout: "sidebar" | "str
         />
       )}
       <ul className={layout === "sidebar" ? "space-y-1" : "flex gap-1"} onKeyDown={onKeyDown}>
-        {NAV.map((item, i) => {
+        {items.map((item, i) => {
           const active = item.page === current;
           return (
             // Links arrive one after another on first load; keys are stable, so navigation does not replay it.
