@@ -13,7 +13,8 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 const tsx = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
 const weather = { command: process.execPath, args: ["--import", tsx, join(root, "demo/weather-server.ts")] };
 
-describe.skipIf(process.platform === "win32")("runSetup", () => {
+// Every test here starts demo servers through tsx, which takes seconds when the whole suite runs at once.
+describe.skipIf(process.platform === "win32")("runSetup", { timeout: 30_000 }, () => {
   let home: string;
   let lockfilePath: string;
 

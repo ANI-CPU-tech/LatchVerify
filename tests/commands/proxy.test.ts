@@ -123,7 +123,7 @@ describe("latch proxy (CLI)", () => {
     );
     expect(code).toBe(7);
     expect(stdout).toBe("");
-  });
+  }, 30_000);
 
   it("fails on stderr only when the server cannot start or the lockfile is malformed", async () => {
     const missing = await latch(
@@ -140,7 +140,7 @@ describe("latch proxy (CLI)", () => {
     expect(malformed.code).toBe(1);
     expect(malformed.stdout).toBe("");
     expect(malformed.stderr).toContain(bad);
-  });
+  }, 30_000);
 });
 
 describe("latch proxy paths from the environment", () => {
