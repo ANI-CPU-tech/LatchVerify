@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from "../analyze/llm.js";
 
@@ -94,9 +95,16 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): LatchEnv {
   };
 }
 
-/** Load `path` (./.env) into process.env when it exists. Variables already set win over the file. */
+/**
+ * Load the LATCH_* variables of `path` (./.env) into process.env when it exists. Variables already
+ * set win over the file. Every other line is ignored: the proxy starts in whatever directory the
+ * client chose, and a project's own secrets in its .env are none of LatchVerify's business.
+ */
 export function loadDotEnv(path = ".env"): void {
-  if (existsSync(path)) process.loadEnvFile(path);
+  if (!existsSync(path)) return;
+  for (const [name, value] of Object.entries(parseEnv(readFileSync(path, "utf8")))) {
+    if (name.startsWith("LATCH_") && value !== undefined && process.env[name] === undefined) process.env[name] = value;
+  }
 }
 
 /**

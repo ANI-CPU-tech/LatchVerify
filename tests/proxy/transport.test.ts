@@ -9,6 +9,7 @@ import {
   parseLine,
   readFrames,
   serialize,
+  serverEnvironment,
   spawnUpstream,
   writeLine,
   type Frame,
@@ -369,6 +370,18 @@ async function runNode(script: string, args: string[] = [], env?: NodeJS.Process
   return { child, raws, code };
 }
 
+describe("serverEnvironment", () => {
+  it("merges env over the base and drops LATCH_* variables in any case", () => {
+    const base = { PATH: "/bin", LATCH_LLM_API_KEY: "k", Latch_State_Dir: "/s", HOME: "/h" };
+    expect(serverEnvironment(base, { API_TOKEN: "t", LATCH_LOCKFILE_PATH: "/l", HOME: undefined })).toEqual({ PATH: "/bin", API_TOKEN: "t" });
+    expect(base).toHaveProperty("LATCH_LLM_API_KEY", "k");
+  });
+
+  it("copies the base when no env is given", () => {
+    expect(serverEnvironment({ PATH: "/bin" })).toEqual({ PATH: "/bin" });
+  });
+});
+
 describe("spawnUpstream", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -409,20 +422,32 @@ describe("spawnUpstream", () => {
   });
 
   it("inherits our environment when env is omitted", async () => {
-    vi.stubEnv("LATCH_TEST_INHERITED", "yes");
-    const { raws } = await runNode("console.log(process.env.LATCH_TEST_INHERITED)");
+    vi.stubEnv("MCP_TEST_INHERITED", "yes");
+    const { raws } = await runNode("console.log(process.env.MCP_TEST_INHERITED)");
     expect(raws).toEqual(["yes"]);
   });
 
   it("merges env over our environment, and undefined removes a variable", async () => {
-    vi.stubEnv("LATCH_TEST_INHERITED", "yes");
-    vi.stubEnv("LATCH_TEST_REMOVED", "yes");
+    vi.stubEnv("MCP_TEST_INHERITED", "yes");
+    vi.stubEnv("MCP_TEST_REMOVED", "yes");
     const { raws } = await runNode(
-      "const e = process.env; console.log(JSON.stringify([e.LATCH_TEST_INHERITED, e.LATCH_TEST_ADDED, e.LATCH_TEST_REMOVED ?? null]))",
+      "const e = process.env; console.log(JSON.stringify([e.MCP_TEST_INHERITED, e.MCP_TEST_ADDED, e.MCP_TEST_REMOVED ?? null]))",
       [],
-      { LATCH_TEST_ADDED: "1", LATCH_TEST_REMOVED: undefined },
+      { MCP_TEST_ADDED: "1", MCP_TEST_REMOVED: undefined },
     );
     expect(JSON.parse(raws[0]!)).toEqual(["yes", "1", null]);
+  });
+
+  it("keeps LatchVerify's own LATCH_* variables from the server, inherited or given", async () => {
+    vi.stubEnv("LATCH_LLM_API_KEY", "secret-key");
+    vi.stubEnv("LATCH_LOCKFILE_PATH", "/home/user/latch.lock");
+    vi.stubEnv("MCP_TEST_INHERITED", "yes");
+    const { raws } = await runNode(
+      "console.log(JSON.stringify(Object.keys(process.env).filter((k) => /^latch_|^MCP_TEST_/i.test(k)).sort()))",
+      [],
+      { LATCH_STATE_DIR: "/home/user/.latch", latch_lower: "x", MCP_TEST_ADDED: "1" },
+    );
+    expect(JSON.parse(raws[0]!)).toEqual(["MCP_TEST_ADDED", "MCP_TEST_INHERITED"]);
   });
 
   it("reports a missing command as an error event instead of throwing", async () => {

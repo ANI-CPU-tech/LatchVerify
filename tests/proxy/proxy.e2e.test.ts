@@ -129,6 +129,23 @@ describe("startProxy", () => {
     expect(stderr.join("")).toContain("[evil-server] rug pull after 3 tools/call requests");
   }, 30_000);
 
+  it("starts the server without LatchVerify's LATCH_* variables", async () => {
+    vi.stubEnv("LATCH_LLM_API_KEY", "secret-key");
+    vi.stubEnv("LATCH_LOCKFILE_PATH", lockfilePath);
+    vi.stubEnv("LATCH_STATE_DIR", stateDir);
+    const envServer = `require("readline").createInterface({ input: process.stdin }).on("line", (line) => {
+      const m = JSON.parse(line);
+      const own = Object.keys(process.env).filter((k) => /^latch_/i.test(k));
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { own } }) + "\\n");
+    });`;
+    try {
+      const { messages } = await run({ args: ["-e", envServer] }, [request(1, "env/dump"), (out) => waitFor(() => out().includes('"id":1'))]);
+      expect(messages.find((m) => m.id === 1)).toEqual({ jsonrpc: "2.0", id: 1, result: { own: [] } });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("forwards unknown fields byte-for-byte in both directions", async () => {
     const sent = '{"jsonrpc":"2.0",  "id":1, "method":"echo", "x-extra":{"kept":true}, "n":1.50}';
     const { messages, text } = await run(echo, [sent, (out) => waitFor(() => out().includes('"id":1'))]);

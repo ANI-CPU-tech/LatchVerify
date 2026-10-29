@@ -106,8 +106,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
   });
 
   it("passes extra environment to the server", async () => {
-    const result = await capture(stub(`reply({ tools: [{ name: process.env.LATCH_CAPTURE_TEST, inputSchema: { type: "object" } }] })`), {
-      env: { LATCH_CAPTURE_TEST: "from-env" },
+    const result = await capture(stub(`reply({ tools: [{ name: process.env.MCP_CAPTURE_TEST, inputSchema: { type: "object" } }] })`), {
+      env: { MCP_CAPTURE_TEST: "from-env" },
     });
     expect(result.tools).toEqual([{ name: "from-env", inputSchema: { type: "object" } }]);
   });

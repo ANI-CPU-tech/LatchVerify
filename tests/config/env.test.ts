@@ -201,4 +201,19 @@ describe("loadDotEnv", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("loads only LATCH_* variables, leaving a project's other secrets out of process.env", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "latch-env-"));
+    try {
+      const path = join(dir, ".env");
+      await writeFile(path, "OPENAI_API_KEY=sk-project\nLATCH_REVIEWER=alice\n");
+      vi.stubEnv("OPENAI_API_KEY", undefined);
+      vi.stubEnv("LATCH_REVIEWER", undefined);
+      loadDotEnv(path);
+      expect(process.env.OPENAI_API_KEY).toBeUndefined();
+      expect(process.env.LATCH_REVIEWER).toBe("alice");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

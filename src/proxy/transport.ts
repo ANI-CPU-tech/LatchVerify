@@ -129,14 +129,31 @@ export async function writeLine(output: Writable, line: string): Promise<void> {
   });
 }
 
+/** Prefix of every variable LatchVerify itself reads. None of them is meant for the server. */
+const OWN_ENV_PREFIX = "LATCH_";
+
+/**
+ * The environment a guarded server is started with: `env` merged over `base` (as MCP clients do
+ * with a server's `env` block, a key set to undefined removes that variable), minus every
+ * LATCH_* variable from either. Those carry the LLM API key and the paths of latch.lock and the
+ * review queue, and a server that knows where its own approvals live could edit them.
+ */
+export function serverEnvironment(base: NodeJS.ProcessEnv, env?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const merged: NodeJS.ProcessEnv = env === undefined ? { ...base } : { ...base, ...env };
+  for (const name of Object.keys(merged)) {
+    if (merged[name] === undefined || name.toUpperCase().startsWith(OWN_ENV_PREFIX)) delete merged[name];
+  }
+  return merged;
+}
+
 /**
  * Spawn the real server with piped stdio. Its stderr is copied to our stderr untouched (and our
  * stderr stays open when it exits); stdout is the protocol channel, so the caller wires the
  * child's stdout and stdin to readFrames and writeLine.
  *
  * No shell is involved: `command` is resolved on PATH and `args` reach the server literally.
- * `env` is merged over process.env, as MCP clients do with a server's `env` block; a key set to
- * undefined removes that variable.
+ * The environment is serverEnvironment(process.env, env): LatchVerify's own LATCH_* variables
+ * never reach the server.
  *
  * Never throws for a bad command: spawn failures (ENOENT, EACCES) arrive as the child's "error"
  * event, which the caller must handle.
@@ -150,7 +167,7 @@ export function spawnUpstream(
 ): ChildProcessWithoutNullStreams {
   const child = spawn(command, args, {
     stdio: "pipe",
-    env: env === undefined ? process.env : { ...process.env, ...env },
+    env: serverEnvironment(process.env, env),
     windowsHide: true,
   });
   child.stderr.pipe(process.stderr, { end: false });
