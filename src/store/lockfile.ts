@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 import { LOCKFILE_VERSION, LockFileSchema, type LockFile, type PendingChange, type ToolRecord } from "../schema/index.js";
+import { LockIntegrity } from "./integrity.js";
 import { replaceFile } from "./replace.js";
 
 /** Any failure to read, validate or write latch.lock. The message always names the file. */
@@ -49,14 +50,27 @@ function validateLockfile(path: string, data: unknown): LockFile {
  * file: a lockfile that cannot be trusted must never be treated as empty.
  */
 export async function readLockfile(path: string): Promise<LockFile> {
-  let text: string;
+  const text = await readLockfileText(path);
+  return text === undefined ? emptyLockfile() : parseLockfile(path, text);
+}
+
+/**
+ * The raw text of latch.lock, or undefined when the file does not exist, for callers that check
+ * the exact bytes (tamper detection) before parsing them with parseLockfile.
+ *
+ * @throws LockfileError when the file exists but cannot be read.
+ */
+export async function readLockfileText(path: string): Promise<string | undefined> {
   try {
-    text = await readFile(path, "utf8");
+    return await readFile(path, "utf8");
   } catch (error) {
-    if (errorCode(error) === "ENOENT") return emptyLockfile();
+    if (errorCode(error) === "ENOENT") return undefined;
     throw new LockfileError(path, `cannot read lockfile (${error instanceof Error ? error.message : String(error)})`, { cause: error });
   }
+}
 
+/** Parse and validate lockfile text read from `path`, as readLockfile does. */
+export function parseLockfile(path: string, text: string): LockFile {
   let data: unknown;
   try {
     data = JSON.parse(text.startsWith("\ufeff") ? text.slice(1) : text);
@@ -104,13 +118,22 @@ async function syncDirectory(dir: string): Promise<void> {
  * Validates `lock` and writes it atomically: the serialized text goes to a new temporary file in
  * the same directory, is flushed to disk, then renamed over `path`. Readers and crashes see
  * either the old lockfile or the new one, never a partial write. Parent directories are created.
- * Throws LockfileError, leaving any existing file untouched, when `lock` is invalid or the write
- * fails.
+ *
+ * Before the rename, the new content is recorded as trusted (LockIntegrity.trustContent), so
+ * proxies accept it and treat any edit made outside LatchVerify as tampering.
+ *
+ * Throws LockfileError, leaving any existing file untouched, when `lock` is invalid, its
+ * integrity cannot be recorded, or the write fails.
  */
 export async function writeLockfile(path: string, lock: LockFile): Promise<void> {
   const text = serializeLockfile(validateLockfile(path, lock));
   const dir = dirname(path);
   const temp = join(dir, `.${basename(path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+  try {
+    await new LockIntegrity(path).trustContent(text);
+  } catch (error) {
+    throw new LockfileError(path, `cannot record the lockfile's integrity (${error instanceof Error ? error.message : String(error)})`, { cause: error });
+  }
   try {
     await mkdir(dir, { recursive: true });
     const handle = await open(temp, "wx");
