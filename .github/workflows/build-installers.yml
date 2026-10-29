@@ -1,11 +1,12 @@
 # Builds the LatchVerify installers on real Windows and Linux machines, installs each one on that
-# machine and checks it linked Claude Code, then uninstalls it and checks Claude Code was restored.
+# machine and checks it linked the MCP clients (the smoke tests set up Claude Code), then
+# uninstalls it and checks the client was restored.
 # Run it from the Actions tab ("Run workflow"), or push a tag like v0.2.0 to also publish a GitHub
 # Release. The tag must match the version in package.json.
 #
 # Every package carries its own Node.js 22 (checksum-checked from nodejs.org), so users install
-# nothing else. Installing runs `latch setup`: Claude Code's MCP servers start behind the latch
-# proxy and their tools are pinned in a per-user latch.lock it creates. See INSTALL.md.
+# nothing else. Installing runs `latch setup --all`: every MCP client's servers start behind the
+# latch proxy and their tools are pinned in a per-user latch.lock it creates. See INSTALL.md.
 #
 # Optional repository secrets:
 #   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD  → Authenticode-signed Windows installer

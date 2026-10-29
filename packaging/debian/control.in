@@ -12,7 +12,7 @@ Description: capability-diffing security proxy for MCP servers
  LatchVerify pins Model Context Protocol tool definitions in latch.lock and
  blocks tools/call when a tool gains capabilities without review.
  .
- Installing it links Claude Code for the installing user: their MCP servers
+ Installing it links every MCP client of the installing user: their MCP servers
  start behind the latch proxy and their tools are pinned in a per-user
- latch.lock. Set LATCH_SKIP_SETUP=1 to skip that, or run `latch setup` later.
+ latch.lock. Set LATCH_SKIP_SETUP=1 to skip that, or run `latch setup --all` later.
  Includes its own Node.js runtime and a desktop launcher for the review UI.

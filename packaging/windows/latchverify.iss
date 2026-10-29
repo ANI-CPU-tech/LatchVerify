@@ -6,10 +6,10 @@
 ; /Slatchsign=<command> to Authenticode-sign the installer and uninstaller.
 ;
 ; Per-user install: no administrator rights, nothing written outside the user's profile. After
-; installing it links Claude Code (`latch setup`): Claude Code's MCP servers start behind the latch
-; proxy and their tools are pinned in %APPDATA%\LatchVerify\latch.lock, created on the spot. Before
-; uninstalling it unlinks (`latch setup --remove`); latch.lock is kept, so a reinstall keeps the
-; approvals.
+; installing it links every MCP client found (`latch setup --all`): their MCP servers start behind
+; the latch proxy and their tools are pinned in %APPDATA%\LatchVerify\latch.lock, created on the
+; spot. Before uninstalling it unlinks them all (`latch setup --remove --all`); latch.lock is kept,
+; so a reinstall keeps the approvals.
 
 #ifndef AppVersion
   #error Pass /DAppVersion=x.y.z (package.json's version)
@@ -64,7 +64,7 @@ SignedUninstaller=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: linkclaude; Description: "Link Claude Code now: its MCP servers start behind latch and their tools are pinned in your latch.lock (recommended)"
+Name: linkclients; Description: "Link your MCP clients now (Claude Code, Cursor, VS Code and others found): their servers start behind latch and their tools are pinned in your latch.lock (recommended)"
 Name: addtopath; Description: "Add latch to PATH for new terminals"
 
 [InstallDelete]
@@ -138,14 +138,14 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   LogFile: string;
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('linkclaude') then
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('linkclients') then
   begin
-    WizardForm.StatusLabel.Caption := 'Linking Claude Code to LatchVerify...';
+    WizardForm.StatusLabel.Caption := 'Linking your MCP clients to LatchVerify...';
     LogFile := ExpandConstant('{app}\setup.log');
-    if not RunLatch('setup', LogFile) and not WizardSilent then
-      MsgBox('LatchVerify is installed, but linking Claude Code did not finish.' + #13#10#13#10 +
+    if not RunLatch('setup --all', LogFile) and not WizardSilent then
+      MsgBox('LatchVerify is installed, but linking your MCP clients did not finish.' + #13#10#13#10 +
         'Details are in ' + LogFile + '.' + #13#10 +
-        'Run "latch setup" in a new terminal to try again.', mbInformation, MB_OK);
+        'Run "latch setup --all" in a new terminal to try again.', mbInformation, MB_OK);
   end;
 end;
 
@@ -153,8 +153,8 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
   begin
-    { Before the files go: give Claude Code its original server commands back. latch.lock stays. }
-    RunLatch('setup --remove', ExpandConstant('{%TEMP}\latchverify-unlink.log'));
+    { Before the files go: give every MCP client its original server commands back. latch.lock stays. }
+    RunLatch('setup --remove --all', ExpandConstant('{%TEMP}\latchverify-unlink.log'));
     RemoveFromPath(ExpandConstant('{app}'));
   end;
 end;

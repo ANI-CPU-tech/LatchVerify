@@ -1,5 +1,5 @@
-# pacman runs these as root; link-user does the Claude Code work as the user behind sudo.
-# LATCH_SKIP_SETUP=1 leaves Claude Code alone.
+# pacman runs these as root; link-user links or unlinks the MCP clients as the user behind sudo.
+# LATCH_SKIP_SETUP=1 leaves the clients alone.
 
 post_install() {
   /usr/lib/latchverify/link-user setup || true

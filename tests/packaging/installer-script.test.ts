@@ -27,9 +27,28 @@ describe("the Inno Setup script", () => {
     expect(iss).toContain("OutputBaseFilename=latchverify-{#AppVersion}-windows-x64-setup");
   });
 
-  it("links Claude Code after installing and unlinks before the files are removed", () => {
-    expect(iss).toMatch(/CurStep = ssPostInstall\) and WizardIsTaskSelected\('linkclaude'\)/);
-    expect(iss).toMatch(/RunLatch\('setup', LogFile\)/);
-    expect(iss).toMatch(/CurUninstallStep = usUninstall[\s\S]*RunLatch\('setup --remove'/);
+  it("links every MCP client after installing and unlinks them all before the files are removed", () => {
+    expect(iss).toMatch(/CurStep = ssPostInstall\) and WizardIsTaskSelected\('linkclients'\)/);
+    expect(iss).toMatch(/RunLatch\('setup --all', LogFile\)/);
+    expect(iss).toMatch(/CurUninstallStep = usUninstall[\s\S]*RunLatch\('setup --remove --all'/);
+  });
+});
+
+describe("the Linux install hooks", () => {
+  const read = (path: string) => readFileSync(new URL(`packaging/${path}`, root), "utf8");
+
+  it("link and unlink every MCP client, as the installing user", () => {
+    const linkUser = read("linux/link-user");
+    expect(linkUser).toContain('setup) args="setup --all" ;;');
+    expect(linkUser).toContain('remove) args="setup --remove --all" ;;');
+    expect(read("debian/postinst")).toContain("/usr/lib/latchverify/link-user setup");
+    expect(read("debian/prerm")).toContain("/usr/lib/latchverify/link-user remove");
+    expect(read("arch/latchverify.install")).toMatch(/post_install\(\) \{\n {2}\/usr\/lib\/latchverify\/link-user setup/);
+    expect(read("arch/latchverify.install")).toMatch(/pre_remove\(\) \{\n {2}\/usr\/lib\/latchverify\/link-user remove/);
+  });
+
+  it("link every client from the tarball's install.sh and unlink them in uninstall.sh", () => {
+    expect(read("linux/install.sh")).toContain('"$lib/latch" setup --all ||');
+    expect(read("linux/uninstall.sh")).toContain('"$lib/latch" setup --remove --all ||');
   });
 });
