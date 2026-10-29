@@ -201,6 +201,6 @@ describe("latch proxy paths from the environment", () => {
     });
     // No latch.lock in the working directory: the server is unpinned, so the call is blocked.
     expect(blockedId2(stdout)).toBe(true);
-    expect(await readFile(join(dir, ".latch", "events.jsonl"), "utf8")).toContain('"toolName":"get_alerts","reason":"unpinned"');
+    expect(await readFile(join(dir, ".latch", "events.jsonl"), "utf8")).toContain('"toolName":"get_alerts","reason":"server_unpinned"');
   }, 30_000);
 });

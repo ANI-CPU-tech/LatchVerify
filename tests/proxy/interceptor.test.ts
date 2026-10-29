@@ -304,7 +304,9 @@ describe("onToolsList", () => {
     expect(ctx.verified).toBe(true);
     expect(logs).toEqual(["stranger: not in latch.lock, so its tools are blocked as unpinned; run `latch init` to pin them"]);
     await expect(readFile(join(stateDir, "pending.json"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(await fromClient(call(5, "get_forecast"))).toMatchObject({ message: { error: { data: { reason: { kind: "unpinned" } } } } });
+    expect(await fromClient(call(5, "get_forecast"))).toMatchObject({
+      message: { error: { message: expect.stringContaining("run `latch init`"), data: { reason: { kind: "server_unpinned" } } } },
+    });
     expect(await kinds()).toEqual(["tools_listed", "call_blocked"]);
   });
 
