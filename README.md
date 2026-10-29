@@ -72,8 +72,8 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
 
 **Installers** for Windows, Debian/Ubuntu, Arch/CachyOS and other Linux come with each
 [release](https://github.com/vinayakkam/LatchVerify/releases). They bring their own Node.js
-and link Claude Code as they install: its servers go behind the proxy and their tools are
-pinned in your own `latch.lock`, created for you. See [INSTALL.md](INSTALL.md).
+and link every MCP client they find as they install: the servers go behind the proxy and their
+tools are pinned in your own `latch.lock`, created for you. See [INSTALL.md](INSTALL.md).
 
 **From source** (requires Node 22+ and pnpm):
 
@@ -87,8 +87,8 @@ pnpm link --global   # puts `latch` on your PATH
 
 | Command | What it does |
 |---|---|
-| `latch init` | Detect MCP client configs (Claude Desktop, Claude Code, Cursor, VS Code), wrap the chosen servers with the proxy, and pin their current tools in `latch.lock`. |
-| `latch setup` | Link Claude Code (or `--client <id>`) with no questions, as the installers do: wrap its servers and pin their tools in the per-user `latch.lock`, created if needed. `--remove` restores the original entries. |
+| `latch init` | Detect MCP client configs (Claude Desktop, Claude Code and its projects, Cursor, VS Code, VS Code Insiders, VSCodium, Cline, Cline CLI, Gemini CLI, Zed, LM Studio, Amazon Q), wrap the chosen servers with the proxy, and pin their current tools in `latch.lock`. Configs with comments are edited in place; a config that cannot be read is reported and left alone. |
+| `latch setup` | Link Claude Code (or `--client <id>`, or `--all` clients) with no questions, as the installers do (`--all`): wrap the servers and pin their tools in the per-user `latch.lock`, created if needed. `--remove` restores the original entries. |
 | `latch add` | Put one server behind latch: pin its tools and add it, wrapped, to one client config (Claude Desktop by default). `latch add github --env GITHUB_PERSONAL_ACCESS_TOKEN -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server` |
 | `latch review` | Walk the pending queue in the terminal, or with `--ui` open the web review screen. Approving rewrites `latch.lock` for you to commit; rejecting keeps that definition blocked, even after a restart. |
 | `latch lock status` / `accept` / `restore` | Check `latch.lock` for edits made outside LatchVerify (a server tampering with its own approvals, or a `git pull`). Proxies ignore such an edit until you `accept` it; `restore` puts back the last version LatchVerify wrote. |

@@ -37,6 +37,7 @@ a regression test first.
 | Frontend | Vite + React 18 + Tailwind 3, shadcn/ui conventions (hand-written, no shadcn CLI) |
 | Diff | `diff` (jsdiff) |
 | Spawning servers | `cross-spawn` (Windows `.cmd` shims such as `npx` need cmd.exe and its escaping) |
+| Client configs | `jsonc-parser` (read and edit JSONC configs without losing comments; `src/config/jsonc.ts`) |
 | Tests | `vitest` |
 | Package manager | `pnpm` (single package, no workspaces; `pnpm-workspace.yaml` only holds pnpm 11 settings) |
 | Optional LLM pass | any OpenAI-compatible chat-completions API via `fetch` (Groq, OpenRouter); no SDK |
@@ -91,7 +92,16 @@ that blocks on every reword gets disabled by its users.
   `LATCH_INTEGRITY_DIR` at a temp dir (`tests/setup.ts`).
 - Logging: `src/log.ts` `createLogger`, leveled by `LATCH_LOG_LEVEL`, stderr only.
 - CLI: `src/cli.ts` wires `src/commands/*`. `latch setup` (`commands/setup.ts`) is
-  `latch init` for one client with no questions, plus `--remove` to unwrap; installers run it.
+  `latch init` for one client (or `--all`) with no questions, plus `--remove` to unwrap; installers
+  run `setup --all` and `setup --remove --all`.
+- Client configs: `src/config/clients.ts`. `clientLocations(client)` lists each client's files with
+  the key path to its server map, each with the doc or source it was checked against (add a client
+  only after checking its docs, with a fixture in `tests/fixtures/clients/<client>/<file>`; a test
+  fails without one). `detectClients()` returns `{ configs, problems }`: a config that exists but
+  cannot be used is a problem, reported and never rewritten. Claude Code's per-project servers in
+  `~/.claude.json` are extra configs with a `scope`; project `.mcp.json` files are never written
+  (shared through git). `writeClientConfig` edits changed entries in place with `setJsonc` and keeps
+  the 5 newest `.bak` copies.
 - Per-user lockfile: `src/config/paths.ts` `userLockfilePath()` (`%APPDATA%\LatchVerify`,
   `~/.config/latchverify`, `~/Library/Application Support/LatchVerify`). `statePaths` falls
   back to it only when no flag or env names a lockfile and `./latch.lock` is absent.

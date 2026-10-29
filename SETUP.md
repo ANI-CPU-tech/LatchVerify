@@ -150,13 +150,16 @@ latch --lockfile "$PWD/latch.lock" init --dry-run   # preview: writes nothing
 latch --lockfile "$PWD/latch.lock" init             # pins tools, wraps client configs
 ```
 
-`init` detects Claude Desktop, Claude Code, Cursor and VS Code configs, keeps a
-timestamped `.bak` next to every config it rewrites, and puts `LATCH_LOCKFILE_PATH` and
-`LATCH_STATE_DIR` into each wrapped entry so the proxy finds the lockfile wherever the
-client starts it. Restart the client afterwards, then commit `latch.lock`. To undo,
-restore the `.bak` copy.
+`init` detects the configs of every supported client (the list and paths are in
+[INSTALL.md](INSTALL.md#what-installing-does)), edits only the entries it wraps (comments in the
+file survive), keeps a timestamped `.bak` next to every config it rewrites (the 5 newest), and
+puts `LATCH_LOCKFILE_PATH` and `LATCH_STATE_DIR` into each wrapped entry so the proxy finds the
+lockfile wherever the client starts it. A config it cannot read is reported and left alone.
+Restart the client afterwards, then commit `latch.lock`. To undo, restore the `.bak` copy or
+run `latch setup --remove --all`.
 
-Without a project, `latch setup` does the same for Claude Code in one step, with a
+Without a project, `latch setup` does the same for Claude Code in one step (`--all` for every
+client), with a
 per-user lockfile instead of `./latch.lock` (`~/.config/latchverify/latch.lock` on Linux):
 
 ```sh
