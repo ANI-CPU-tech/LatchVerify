@@ -3,10 +3,10 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { Writable } from "node:stream";
 import pc from "picocolors";
-import { clientConfigPath, detectClients, unwrapProxy, withoutLatchEnv, writeClientConfig, type ClientId, type ClientServerEntry, type ProxyLaunch } from "../config/clients.js";
+import { clientConfigPath, detectClients, findOldBackups, unwrapProxy, withoutLatchEnv, writeClientConfig, type ClientId, type ClientServerEntry, type ProxyLaunch } from "../config/clients.js";
 import { emptyLockfile, writeLockfile } from "../store/lockfile.js";
 import { runInit } from "./init.js";
-import { configPlace, plural, printable, problemWarning } from "./text.js";
+import { configPlace, oldBackupWarning, plural, printable, problemWarning } from "./text.js";
 
 /** How each client is named to people. */
 export const CLIENT_NAMES: Record<ClientId, string> = {
@@ -105,6 +105,8 @@ export async function runSetup(options: SetupOptions): Promise<number> {
       say(`${pc.green("✔")} created ${printable(lockfilePath)}`);
     }
   }
+
+  for (const line of oldBackupWarning(await findOldBackups())) say(pc.yellow(line));
 
   say();
   // Even when some server or config failed, the clients init could link must be restarted.

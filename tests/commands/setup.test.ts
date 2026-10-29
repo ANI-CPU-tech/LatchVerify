@@ -218,6 +218,17 @@ describe.skipIf(process.platform === "win32")("runSetup", { timeout: 30_000 }, (
     expect(await readFile(path, "utf8")).toBe("{ broken");
   });
 
+  it("tells the user to delete the backups earlier versions left, without reading or deleting them", async () => {
+    const config = await claudeConfig({ mcpServers: { weather } });
+    const old = `${config}.2026-10-23T09-00-00-000Z.bak`;
+    await writeFile(old, '{"mcpServers":{"weather":{"env":{"API_KEY":"sk-CANARY-backup"}}}}');
+    const { text } = await setup();
+    expect(text).toContain("! 1 copy of your client configs, made by an earlier LatchVerify version, still holds your API keys. LatchVerify no longer makes them; delete it:");
+    expect(text).toContain(`    ${old}`);
+    expect(text).not.toContain("sk-CANARY-backup");
+    expect(await readFile(old, "utf8")).toContain("sk-CANARY-backup");
+  });
+
   it("writes nothing on a dry run", async () => {
     const config = await claudeConfig({ mcpServers: { weather } });
     const before = await readFile(config, "utf8");

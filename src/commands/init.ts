@@ -8,6 +8,7 @@ import {
   SUPPORTED_CLIENTS,
   clientConfigPath,
   detectClients,
+  findOldBackups,
   proxyLaunchOf,
   replacesLaunch,
   unwrapProxy,
@@ -23,7 +24,7 @@ import type { LockFile } from "../schema/index.js";
 import { programName } from "../analyze/hash.js";
 import { launchesAs, linkServer, mergeServers, readLockfile, serializeLockfile, writeLockfile } from "../store/lockfile.js";
 import { withStateLock } from "../store/pending.js";
-import { configPlace, plural, printable, problemWarning } from "./text.js";
+import { configPlace, oldBackupWarning, plural, printable, problemWarning } from "./text.js";
 
 export interface InitOptions {
   /** Restrict to one client; default is every detected client. */
@@ -282,6 +283,8 @@ export async function runInit(options: InitOptions): Promise<number> {
   }
   if (!lockChanged && rewrites.length === 0) say("nothing to change");
 
+  // setup (hints off) gives this warning itself.
+  if (options.hints !== false) for (const line of oldBackupWarning(await findOldBackups())) say(pc.yellow(line));
   if (options.hints !== false) {
     if (lockChanged) say(`next: commit ${printable(lockfilePath)} so the pins are reviewed like code`);
     if (rewrites.length > 0) say(`next: restart ${[...new Set(rewrites.map((r) => r.config.client))].join(", ")} to start the wrapped servers`);

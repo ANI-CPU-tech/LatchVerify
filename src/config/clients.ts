@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, open, readFile, realpath, rm, stat } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { replaceFile } from "../store/replace.js";
@@ -226,6 +226,26 @@ async function readClientConfig(client: ClientId, { path, serversPath }: ClientL
   if (map !== undefined && !isPlainObject(map)) return [{ client, path, message: `keeps "${serversPath.join(".")}" as something other than an object` }];
   const config: ClientConfig = { client, path, serversPath, servers: stdioServers(map), serverIds: isPlainObject(map) ? Object.keys(map) : [] };
   return client === "claude-code" ? [config, ...claudeCodeProjects(config, parsed.value)] : [config];
+}
+
+/** How earlier versions named the copy they kept of a config before rewriting it: <config>.<UTC stamp>[-N].bak. */
+const OLD_BACKUP = /^\.\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z(?:-\d+)?\.bak$/;
+
+/**
+ * The backup copies earlier LatchVerify versions left beside client configs. Each is a whole copy
+ * of a config, keys included, so the user is told to delete them; LatchVerify never reads or
+ * deletes them itself. Found by file name only, sorted.
+ */
+export async function findOldBackups(platform: NodeJS.Platform = process.platform): Promise<string[]> {
+  const found = new Set<string>();
+  for (const client of SUPPORTED_CLIENTS) {
+    for (const { path } of clientLocations(client, platform)) {
+      const name = basename(path);
+      const names = await readdir(dirname(path)).catch((): string[] => []);
+      for (const file of names) if (file.startsWith(name) && OLD_BACKUP.test(file.slice(name.length))) found.add(join(dirname(path), file));
+    }
+  }
+  return [...found].sort();
 }
 
 /** Keys under which MCP configs keep their server maps, across clients and project files. */
