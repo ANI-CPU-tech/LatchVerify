@@ -1,4 +1,5 @@
-import { rename } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { open, rename, rm } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 
 /** What Windows answers while another process is replacing or holding the target. */
@@ -31,5 +32,23 @@ export async function replaceFile(
       if (platform !== "win32" || code === undefined || !BUSY_CODES.has(code) || Date.now() + pause > deadline) throw error;
       await sleep(pause);
     }
+  }
+}
+
+/** Temp file, fsync, rename: the target holds either the old or the new content, never a mix. */
+export async function writeFileAtomic(path: string, data: string): Promise<void> {
+  const temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    const handle = await open(temp, "wx");
+    try {
+      await handle.writeFile(data, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await replaceFile(temp, path);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
   }
 }

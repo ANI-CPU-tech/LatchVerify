@@ -5,6 +5,7 @@ import type { Readable, Writable } from "node:stream";
 import { runAdvisory, type LlmOptions } from "../analyze/llm.js";
 import { readLockfile } from "../store/lockfile.js";
 import { PENDING_FILE, readPending } from "../store/pending.js";
+import { REJECTED_FILE, readRejected } from "../store/rejected.js";
 import { buildBlockError } from "./blocker.js";
 import { routeFrame, type InterceptDecision, type InterceptorContext } from "./interceptor.js";
 import {
@@ -53,8 +54,8 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
  * Run the stdio proxy until the real server exits. Resolves with its exit code (128 + the signal
  * number when a signal ended it).
  *
- * Loads latch.lock and the pending queue (a malformed file rejects: the proxy fails closed
- * rather than run without its state), spawns the server, and routes every line from both sides
+ * Loads latch.lock, the pending queue and the rejections (a malformed file rejects: the proxy
+ * fails closed rather than run without its state), spawns the server, and routes every line from both sides
  * through routeFrame(), then applies the decision: forward the raw line, write a rewritten
  * message, reply to the sender, or drop. Messages the interceptor sends on its own follow the
  * frame that caused them.
@@ -72,8 +73,9 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
  * its tools. Server frames keep flowing too. After `holdTimeoutMs` the held frames are routed
  * anyway, and calls still unverified are blocked.
  *
- * latch.lock and the queue are re-read whenever they change on disk, so an approval or rejection
- * made with `latch review` applies to the next tools/call without restarting the proxy.
+ * latch.lock, the queue and the rejections are re-read whenever they change on disk, so an
+ * approval or rejection made with `latch review` applies to the next tools/call without
+ * restarting the proxy.
  *
  * When the client closes its input, the server's stdin is closed once everything queued for
  * it is written; when the client stops reading, or either side sends a line longer than
@@ -96,6 +98,9 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
   const lockfile = await readLockfile(options.lockfilePath);
   let pendingStamp = await fileStamp(pendingPath);
   const pending = await readPending(options.stateDir);
+  const rejectedPath = join(options.stateDir, REJECTED_FILE);
+  let rejectedStamp = await fileStamp(rejectedPath);
+  const rejected = await readRejected(options.stateDir);
   if (!Object.hasOwn(lockfile.servers, options.serverId)) {
     log(`server "${options.serverId}" is not in ${options.lockfilePath}; its tool calls stay blocked until it is pinned`);
   }
@@ -144,6 +149,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     serverId: options.serverId,
     lockfile,
     pending,
+    rejected,
     inflight: new Map(),
     specVersion: null,
     stateDir: options.stateDir,
@@ -170,6 +176,15 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
           ctx.pending = await readPending(options.stateDir);
         } catch (error) {
           log(`kept the previous pending queue: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      const nextRejected = await fileStamp(rejectedPath).catch(() => rejectedStamp);
+      if (nextRejected !== rejectedStamp) {
+        rejectedStamp = nextRejected;
+        try {
+          ctx.rejected = await readRejected(options.stateDir);
+        } catch (error) {
+          log(`kept the previous rejections: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     },

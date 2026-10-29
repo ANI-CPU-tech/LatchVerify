@@ -114,6 +114,11 @@ proxy detects tier-2 change ─► .latch/pending.json ─► latch review (term
       ─► merge ─► every machine's proxy now allows the new definition
 ```
 
+Rejecting a change instead records its definition (server, tool and composite hash) in
+`.latch/rejected.json`. The proxy blocks calls to the tool, whatever the tier, for as long as
+the server serves that exact definition, and does not queue it again, even after a restart.
+Delete the entry from `rejected.json` to take a rejection back.
+
 `latch verify` runs the same capture → tier pipeline in CI against every server in
 `latch.lock` and exits non-zero on tier-2+ drift. See [LOCKFILE.md](LOCKFILE.md).
 

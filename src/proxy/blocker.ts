@@ -13,6 +13,8 @@ export type BlockReason =
   | { kind: "server_unpinned" }
   | { kind: "pending_review"; changeId: string; tier: Tier }
   | { kind: "hard_block"; changeId: string }
+  /** Set by the interceptor: a reviewer rejected the definition the server serves now. */
+  | { kind: "rejected"; changeId: string }
   /** Set by the interceptor, not shouldBlock: no tools/list analyzed since start or list_changed. */
   | { kind: "unverified" }
   /** Set by startProxy when routing the call itself failed: it is refused rather than forwarded unchecked. */
@@ -110,6 +112,8 @@ function blockMessage(name: string, reason: BlockReason): string {
       return `LatchVerify blocked ${name}: this server's tools have not been verified yet — retry in a moment, or run \`latch review\` if it stays blocked`;
     case "internal_error":
       return `LatchVerify could not check ${name} because of an internal error; see the proxy's stderr`;
+    case "rejected":
+      return `LatchVerify blocked ${name}: a reviewer rejected the definition this server now serves; it stays blocked until the server changes it`;
     case "pending_review":
     case "hard_block":
       return `LatchVerify blocked ${name} pending review — run \`latch review\``;

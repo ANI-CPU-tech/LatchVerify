@@ -11,6 +11,7 @@ import { LockFileSchema, type LockFile, type McpTool } from "../../src/schema/in
 import { readEvents } from "../../src/store/events.js";
 import { applyApproval } from "../../src/store/lockfile.js";
 import { readPending } from "../../src/store/pending.js";
+import { addRejection } from "../../src/store/rejected.js";
 
 const exampleLock = (): LockFile =>
   LockFileSchema.parse(JSON.parse(readFileSync(new URL("../../latch.lock.example", import.meta.url), "utf8")));
@@ -38,6 +39,7 @@ async function setup(overrides: Partial<InterceptorContext> = {}) {
     serverId: "weather",
     lockfile: exampleLock(),
     pending: [],
+    rejected: [],
     inflight: new Map(),
     specVersion: null,
     stateDir,
@@ -364,6 +366,41 @@ const blocked = (id: number | string, message: string, reason: unknown) => ({
 });
 
 describe("onToolsCall", () => {
+  it("keeps a rejected definition blocked after a restart, without queueing it again, whatever its tier", async () => {
+    const reworded = [{ ...benign[0]!, description: "Fetch the forecast for a location." }, benign[1]!];
+    const [tier0] = analyzeToolList("weather", { tools: reworded }, exampleLock(), null, new Date())!.changes;
+    const [, readConfig] = analyzeToolList("weather", { tools: poisoned }, exampleLock(), null, new Date())!.changes;
+    expect([tier0!.change.tier, readConfig!.change.tier]).toEqual([0, 2]);
+    const rejected = addRejection(addRejection([], tier0!.change, new Date()), readConfig!.change, new Date());
+
+    const { ctx, listTools, fromClient, logs, kinds } = await setup({ rejected });
+    await listTools(reworded);
+    expect(ctx.pending).toEqual([]);
+    expect(logs).toContain(`weather/get_forecast: serves the definition rejected in ${tier0!.change.id}; its calls stay blocked`);
+    expect(await fromClient(call(5, "get_forecast"))).toEqual(
+      blocked(
+        5,
+        'LatchVerify blocked "get_forecast": a reviewer rejected the definition this server now serves; it stays blocked until the server changes it',
+        { kind: "rejected", changeId: tier0!.change.id },
+      ),
+    );
+    expect(await fromClient(call(6, "get_alerts"))).toEqual(FORWARD);
+
+    await listTools(poisoned, 3);
+    expect(ctx.pending.map((c) => c.toolName)).toEqual(["get_forecast", "run_diagnostics", "sync_alerts"]);
+    expect(await fromClient(call(7, "read_config"))).toMatchObject({ message: { error: { data: { reason: { kind: "rejected" } } } } });
+    expect((await kinds()).filter((k) => k === "call_blocked")).toHaveLength(2);
+  });
+
+  it("lets a rejected tool through again once the server serves its approved definition", async () => {
+    const reworded = [{ ...benign[0]!, description: "Fetch the forecast for a location." }, benign[1]!];
+    const [tier0] = analyzeToolList("weather", { tools: reworded }, exampleLock(), null, new Date())!.changes;
+    const { listTools, fromClient } = await setup({ rejected: addRejection([], tier0!.change, new Date()) });
+    await listTools(reworded);
+    await listTools(benign, 3);
+    expect(await fromClient(call(5, "get_forecast"))).toEqual(FORWARD);
+  });
+
   it("blocks every call until a tool list has been verified", async () => {
     const { fromClient, kinds, logs } = await setup();
     expect(await fromClient(call(5, "get_forecast"))).toEqual(

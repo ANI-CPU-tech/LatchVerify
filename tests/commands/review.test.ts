@@ -12,6 +12,7 @@ import { LockFileSchema, type LockFile, type McpTool, type PendingChange } from 
 import { readEvents } from "../../src/store/events.js";
 import { applyApproval, findRecord, readLockfile } from "../../src/store/lockfile.js";
 import { readPending, reviewOrder, writePending } from "../../src/store/pending.js";
+import { readRejected } from "../../src/store/rejected.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const example = (): LockFile => LockFileSchema.parse(JSON.parse(readFileSync(join(root, "latch.lock.example"), "utf8")));
@@ -218,6 +219,10 @@ describe("runReview in a terminal", () => {
     expect(readFileSync(lockfilePath, "utf8")).toBe(lockBefore);
     expect(await queueIds()).toEqual(["read_config", "run_diagnostics", "sync_alerts"]);
     expect((await readEvents(dir)).map((e) => e.kind)).toEqual(["rejected"]);
+    const forecast = rugPull()[0]!;
+    expect(await readRejected(dir)).toEqual([
+      expect.objectContaining({ serverId: "weather", toolName: "get_forecast", composite: forecast.after.hashes.composite, tier: 3 }),
+    ]);
   });
 
   it("does not approve a hard block when the confirmation is declined", async () => {

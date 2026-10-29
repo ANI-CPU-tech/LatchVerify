@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { FindingSchema } from "./capability.js";
-import { ToolRecordSchema } from "./tool.js";
+import { Sha256HexSchema, ToolRecordSchema } from "./tool.js";
 
 /**
  * Change tiers.
@@ -44,3 +44,18 @@ export const PendingChangeSchema = z.object({
   description: z.string().max(MAX_SERVED_DESCRIPTION + 100).optional(),
 });
 export type PendingChange = z.infer<typeof PendingChangeSchema>;
+
+/**
+ * A definition a reviewer rejected: the served tool whose composite hash it was. Kept in
+ * .latch/rejected.json so the rejection outlives the proxy session, and a call to the tool stays
+ * blocked for as long as the server serves exactly that definition.
+ */
+export const RejectionSchema = z.object({
+  serverId: z.string().min(1),
+  toolName: z.string().min(1),
+  composite: Sha256HexSchema,
+  tier: TierSchema,
+  changeId: z.string().min(1),
+  rejectedAt: z.iso.datetime(),
+});
+export type Rejection = z.infer<typeof RejectionSchema>;

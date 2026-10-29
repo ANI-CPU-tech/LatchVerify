@@ -10,6 +10,7 @@ import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
+import { addRejection, readRejected, writeRejected } from "../store/rejected.js";
 import { defaultReviewer, startUiServer } from "../ui/server.js";
 import { plural, printable } from "./text.js";
 
@@ -51,8 +52,9 @@ const BUILT_UI_DIRS = [new URL("../web/", import.meta.url), new URL("../../dist/
  * - Approve: applyApproval, write latch.lock, then drop the change from the queue and log it.
  *   latch.lock goes first, as in the review API: a crash in between leaves the change queued
  *   and approving again is idempotent. A tier-3 approval needs a second confirmation.
- * - Reject: drop the change from the queue and log it. latch.lock is untouched, so the tool
- *   stays blocked until a definition is approved.
+ * - Reject: record the definition in rejected.json, drop the change from the queue and log it.
+ *   latch.lock is untouched, and the proxy blocks calls to the tool, across restarts, for as long
+ *   as the server serves that definition.
  * - Skip leaves it queued; Quit (or Ctrl+C) stops, keeping every decision made so far.
  *
  * Each decision re-reads latch.lock and the queue first, because a running proxy or the review
@@ -106,7 +108,7 @@ export async function runReview(options: ReviewOptions): Promise<number> {
       message: `Decide on ${printable(`${change.serverId}/${change.toolName}`)}`,
       options: [
         { value: "approve", label: "Approve", hint: "pin this definition in latch.lock" },
-        { value: "reject", label: "Reject", hint: "drop it from the queue; the tool stays blocked" },
+        { value: "reject", label: "Reject", hint: "the tool stays blocked while the server serves this definition" },
         { value: "skip", label: "Skip", hint: "decide later" },
         { value: "quit", label: "Quit" },
       ],
@@ -251,16 +253,23 @@ async function approve(lockfilePath: string, stateDir: string, id: string, revie
   return "done";
 }
 
-/** Reject change `id`; "gone" when it is no longer in the queue. */
+/**
+ * Reject change `id`: record its definition in rejected.json, so calls stay blocked after the
+ * proxy restarts, then drop it from the queue. "gone" when it is no longer in the queue.
+ */
 async function reject(stateDir: string, id: string): Promise<"done" | "gone"> {
+  const now = new Date();
   const found: { change?: PendingChange } = {};
-  await updatePending(stateDir, (queue) => {
+  await updatePending(stateDir, async (queue) => {
     found.change = queue.find((entry) => entry.id === id);
-    return found.change === undefined ? queue : dequeue(queue, id);
+    if (found.change === undefined) return queue;
+    // The rejection first: a crash in between leaves the change queued, and rejecting it again is idempotent.
+    await writeRejected(stateDir, addRejection(await readRejected(stateDir), found.change, now));
+    return dequeue(queue, id);
   });
   const { change } = found;
   if (change === undefined) return "gone";
-  await logEvent(stateDir, { kind: "rejected", at: new Date().toISOString(), serverId: change.serverId, toolName: change.toolName, changeId: id });
+  await logEvent(stateDir, { kind: "rejected", at: now.toISOString(), serverId: change.serverId, toolName: change.toolName, changeId: id });
   return "done";
 }
 

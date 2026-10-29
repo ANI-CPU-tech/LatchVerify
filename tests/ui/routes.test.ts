@@ -8,6 +8,7 @@ import { CLIENT_HEADER, DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, MAX_SIMULATION_BYT
 import { EVENTS_FILE, appendEvent, readEvents, type LatchEvent } from "../../src/store/events.js";
 import { findRecord, readLockfile } from "../../src/store/lockfile.js";
 import { readPending, writePending } from "../../src/store/pending.js";
+import { readRejected } from "../../src/store/rejected.js";
 import { SimulationResultSchema, type PendingChange, type ToolRecord } from "../../src/schema/index.js";
 
 const EXAMPLE_LOCK = new URL("../../latch.lock.example", import.meta.url);
@@ -273,6 +274,16 @@ describe("POST /api/pending/:id/reject", () => {
     expect(await readPending(deps.stateDir)).toEqual([]);
     expect(await readEvents(deps.stateDir)).toEqual([
       { kind: "rejected", at: NOW.toISOString(), serverId: "weather", toolName: "get_forecast", changeId: "chg_1" },
+    ]);
+    expect(await readRejected(deps.stateDir)).toEqual([
+      {
+        serverId: "weather",
+        toolName: "get_forecast",
+        composite: change.after.hashes.composite,
+        tier: 3,
+        changeId: "chg_1",
+        rejectedAt: NOW.toISOString(),
+      },
     ]);
   });
 

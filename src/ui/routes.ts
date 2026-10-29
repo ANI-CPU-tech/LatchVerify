@@ -5,6 +5,7 @@ import { SimulationRequestSchema, type LockFile, type PendingChange } from "../s
 import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
+import { addRejection, readRejected, writeRejected } from "../store/rejected.js";
 import { lockfileGitStatus } from "./git.js";
 import { SimulationInputError, simulateRugPull } from "./simulation.js";
 
@@ -149,18 +150,21 @@ export function createRoutes(deps: RouteDeps): Hono {
     return c.json(findRecord(done.approved!, change.serverId, change.toolName));
   });
 
-  // Reject: drop the change from the queue and log it. latch.lock is untouched, so the tool stays
-  // blocked until a definition is approved. Returns 204.
+  // Reject: record the definition in rejected.json, drop the change from the queue and log it.
+  // latch.lock is untouched, and the proxies keep blocking calls to the tool for as long as the
+  // server serves this definition, across restarts. Returns 204.
   app.post("/api/pending/:id/reject", async (c) => {
+    const at = now();
     const done: { change?: PendingChange } = {};
-    await updatePending(deps.stateDir, (queue) => {
+    await updatePending(deps.stateDir, async (queue) => {
       done.change = pendingById(queue, c.req.param("id"));
+      await writeRejected(deps.stateDir, addRejection(await readRejected(deps.stateDir), done.change, at));
       return dequeue(queue, done.change.id);
     });
     const change = done.change!;
     await logEvent(deps.stateDir, {
       kind: "rejected",
-      at: now().toISOString(),
+      at: at.toISOString(),
       serverId: change.serverId,
       toolName: change.toolName,
       changeId: change.id,

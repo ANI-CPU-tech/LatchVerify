@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { isAutoPass } from "../analyze/tiers.js";
-import type { LlmAdvisory, LockFile, McpTool, PendingChange } from "../schema/index.js";
+import type { LlmAdvisory, LockFile, McpTool, PendingChange, Rejection } from "../schema/index.js";
 import { appendEvent, type LatchEvent } from "../store/events.js";
 import { enqueue, updatePending } from "../store/pending.js";
+import { findRejection } from "../store/rejected.js";
 import { analyzeToolList, type DetectedChange, type ListAnalysis } from "./analysis.js";
 import { buildBlockError, shouldBlock, type BlockReason, type BlockVerdict } from "./blocker.js";
 import {
@@ -35,6 +36,8 @@ export interface InterceptorContext {
   lockfile: LockFile;
   /** The pending queue as last read from or written to <stateDir>/pending.json. */
   pending: PendingChange[];
+  /** Definitions reviewers rejected, as last read from <stateDir>/rejected.json. */
+  rejected: Rejection[];
   /** Client request ids awaiting a server response, mapped to their method. */
   inflight: Map<JsonRpcId, string>;
   /** MCP protocol revision negotiated in `initialize`. */
@@ -58,7 +61,7 @@ export interface InterceptorContext {
   advise?: (tool: McpTool, cached: LlmAdvisory | undefined) => Promise<LlmAdvisory>;
   /** Queue a request to the server. It is written after the frame being routed is handled. */
   sendToServer(message: JsonRpcRequest): void;
-  /** Re-read latch.lock and the pending queue if they changed on disk (approvals, rejections). */
+  /** Re-read latch.lock, the pending queue and the rejections if they changed on disk. */
   refresh(): Promise<void>;
   /** Write one diagnostic line to stderr. stdout is the protocol. */
   log(message: string): void;
@@ -262,6 +265,12 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
     );
     ctx.observed.set(toolName, queued ?? change);
     if (queued !== undefined) continue;
+    const rejection = findRejection(ctx.rejected, serverId, toolName, composite);
+    if (rejection !== undefined) {
+      // Not queued again: a reviewer already said no to exactly this definition.
+      ctx.log(`${serverId}/${toolName}: serves the definition rejected in ${rejection.changeId}; its calls stay blocked`);
+      continue;
+    }
 
     ctx.pending = enqueue(ctx.pending, change);
     added.push(detected);
@@ -318,9 +327,10 @@ async function attachAdvisory(ctx: InterceptorContext, change: PendingChange, to
  * Blocked when no tools/list has been analyzed since start or the last list_changed
  * ("unverified": the server may be serving definitions nobody has checked; startProxy holds such
  * calls until a list is analyzed, so this only answers calls whose hold timed out), or when
+ * the definition it serves now was rejected (rejected.json, whatever its tier), or when
  * shouldBlock() objects given the queue and this session's observed changes. The observed
- * changes keep a definition blocked after `latch review` rejects it, and after a failed state
- * write. Every block is logged and recorded as a call_blocked event.
+ * changes keep a definition blocked after a failed state write. Every block is logged and
+ * recorded as a call_blocked event.
  *
  * A call without a string tool name cannot be checked, so it is answered with -32602 instead
  * of forwarded.
@@ -333,9 +343,13 @@ export async function onToolsCall(ctx: InterceptorContext, request: JsonRpcReque
   }
   const toolName = params.name;
   await ctx.refresh();
-  const verdict: BlockVerdict = ctx.verified
-    ? shouldBlock(ctx.serverId, toolName, ctx.lockfile, [...ctx.pending, ...ctx.observed.values()])
-    : { blocked: true, reason: { kind: "unverified" } };
+  const served = ctx.observed.get(toolName);
+  const rejection = served === undefined ? undefined : findRejection(ctx.rejected, ctx.serverId, toolName, served.after.hashes.composite);
+  const verdict: BlockVerdict = !ctx.verified
+    ? { blocked: true, reason: { kind: "unverified" } }
+    : rejection !== undefined
+      ? { blocked: true, reason: { kind: "rejected", changeId: rejection.changeId } }
+      : shouldBlock(ctx.serverId, toolName, ctx.lockfile, [...ctx.pending, ...ctx.observed.values()]);
   if (!verdict.blocked) return FORWARD;
 
   const reason = describeReason(verdict.reason);

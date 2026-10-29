@@ -1,10 +1,9 @@
-import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import { PendingChangeSchema, type PendingChange } from "../schema/index.js";
-import { replaceFile } from "./replace.js";
+import { writeFileAtomic } from "./replace.js";
 
 /** File name of the review queue inside LATCH_STATE_DIR. */
 export const PENDING_FILE = "pending.json";
@@ -136,24 +135,6 @@ export function reviewOrder(a: PendingChange, b: PendingChange): number {
 /** The queue without the change whose id matches; unchanged contents when none does. Pure. */
 export function dequeue(queue: readonly PendingChange[], id: string): PendingChange[] {
   return queue.filter((entry) => entry.id !== id);
-}
-
-/** Temp file, fsync, rename: the target holds either the old or the new content, never a mix. */
-async function writeFileAtomic(path: string, data: string): Promise<void> {
-  const temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    const handle = await open(temp, "wx");
-    try {
-      await handle.writeFile(data, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    await replaceFile(temp, path);
-  } catch (error) {
-    await rm(temp, { force: true });
-    throw error;
-  }
 }
 
 function isErrno(error: unknown, code: string): boolean {
