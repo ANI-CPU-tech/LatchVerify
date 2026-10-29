@@ -40,6 +40,8 @@ a regression test first.
 | Client configs | `jsonc-parser` (read and edit JSONC configs without losing comments; `src/config/jsonc.ts`) |
 | Tests | `vitest` |
 | Package manager | `pnpm` (single package, no workspaces; `pnpm-workspace.yaml` only holds pnpm 11 settings) |
+| Desktop app | Electron (exact version in devDependencies), built by `@electron/packager` |
+| Updates | ed25519 via `node:crypto`; no updater dependency |
 | Optional LLM pass | any OpenAI-compatible chat-completions API via `fetch` (Groq, OpenRouter); no SDK |
 
 ## Hard rules
@@ -117,6 +119,12 @@ that blocks on every reword gets disabled by its users.
 - Background: `src/daemon/` (`sync.ts` syncClients, `watch.ts` startWatcher behind `latch watch`,
   `notify.ts` desktop notifications via notify-send or a PowerShell toast). Settings:
   `src/store/settings.ts` (`settings.json` beside the per-user lockfile).
+- Desktop app: `src/desktop/` (`main.ts` Electron main process: window, tray, login start; `shell.ts`
+  pure helpers; `preload.cts`; `updates.ts` the update dialogs). `pnpm desktop` runs it from a
+  checkout; `--smoke` starts the services, prints and quits. It opens no browser, and nothing else does.
+- Updates: `src/update/` (`manifest.ts` schema and signed message, `index.ts` check, download,
+  install per kind, `key.ts` the public key). The private key is the release workflow's
+  `LATCH_UPDATE_SIGNING_KEY` secret, never in the repo. `latch update` (`commands/update.ts`).
 - Dev: `src/dev/presets.ts` (demo presets; `demo/` referenced by path, never imported), the Dev
   Tools page and `pnpm demo:add`.
 - Memory: commands load on demand (`cli.ts`); `tests/startup.test.ts` pins the startup import
@@ -124,7 +132,8 @@ that blocks on every reword gets disabled by its users.
 - Per-user lockfile: `src/config/paths.ts` `userLockfilePath()` (`%APPDATA%\LatchVerify`,
   `~/.config/latchverify`, `~/Library/Application Support/LatchVerify`). `statePaths` falls
   back to it only when no flag or env names a lockfile and `./latch.lock` is absent.
-- Installers: `packaging/` (see `packaging/README.md`) and
+- Installers: `packaging/` (see `packaging/README.md`; `build-desktop.ts` builds the app into each
+  package, `make-latest-json.ts` signs the update manifest) and
   `.github/workflows/build-installers.yml`, which builds and smoke-tests each installer on Windows
   and Linux and publishes on `v*` tags. Every package bundles Node.js 22, so wrapped entries
   point at the install directory by absolute path. `tests/packaging/` checks the scripts and the
@@ -282,6 +291,10 @@ There is no browser test runner. To check the UI visually, serve the built bundl
 
 - CI results are not stored, so the Git & CI page documents `latch verify` rather than
   showing CI runs, and no page shows live proxy connections.
+- `.github/workflows/ci.yml` runs typecheck and tests on Ubuntu and Windows; Windows has not yet had
+  a green run.
+- The portable Linux archive has no setuid `chrome-sandbox`, so the app needs unprivileged user
+  namespaces there (the deb and the Arch package ship a setuid helper).
 - On Windows, MCP clients that spawn `latch` without a shell may not resolve `latch.cmd`.
   Entries written by `init`, `add` and `setup` avoid this by starting node by absolute path.
 - The Windows installer and its smoke test run only in CI (no Inno Setup or PowerShell here).

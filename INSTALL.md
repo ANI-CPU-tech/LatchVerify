@@ -46,15 +46,18 @@ found and asks which to connect. Nothing asks where a `latch.lock` is.
    read-only tool that starts asking for shell commands) is blocked until you approve it.
 
 Tools whose description already hides instructions are held for review instead of being pinned.
-Run `latch review --ui` (or **LatchVerify Review** in your app menu) to see them.
+Open **LatchVerify** from your app menu (or its tray icon) to see them.
 
 `latch review` and `latch verify` open your `latch.lock` from any directory. Inside a project
 that has its own committed `latch.lock`, they use the project's file instead.
 
 No MCP client installed yet? The installer still succeeds and says so. Install your client,
-then run `latch setup` once. `latch watch` keeps connected clients linked in the background
-(new servers included) and tells you on the desktop when a tool waits for review, when a call
-was blocked, and when it finds a client you have not answered about.
+then run `latch setup` once, or connect it on the app's MCP Servers page.
+
+**The LatchVerify app** sits in your tray and starts at login (Settings can turn that off). It keeps
+connected clients linked in the background (new servers included) and tells you on the desktop
+when a tool waits for review, when a call was blocked, and when it finds a client you have not
+answered about. On a machine without a desktop, `latch watch` does the same in a terminal.
 
 Upgrading from an earlier version? It kept copies of your client configs as
 `<config>.<date>.bak` next to them, keys included. `latch setup` lists them; delete them.
@@ -167,6 +170,11 @@ On Windows: `Get-FileHash latchverify-<version>-windows-x64-setup.exe`, then com
 ## Updating
 
 You never need to uninstall first, and your `latch.lock` and approvals are kept.
+
+**The app updates itself.** It checks once a day, shows the release notes, and installs when you
+click **Install now** (on Linux packages it asks for your password through `pkexec`). Each update is
+checked against the release's ed25519 signature before it runs. `latch update` does the same from a
+terminal; `latch update --check` only reports. To update by hand:
 
 - **Windows:** run the newer installer.
 - **Debian / Ubuntu:** `sudo apt install ./latchverify_<new-version>_amd64.deb`

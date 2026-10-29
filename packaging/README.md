@@ -9,6 +9,8 @@ this on GitHub's Windows and Linux machines. Users read [INSTALL.md](../INSTALL.
 app/           package.json, LICENSE, README.md, dist/ (CLI and review UI), node_modules/ (production, flat)
 node/          Node.js 22, downloaded from nodejs.org and checked against its SHA256SUMS
 latch          launcher: the bundled node running app/dist/cli.js (latch.cmd on Windows)
+desktop/       the LatchVerify app (Electron, from build-desktop.ts): latchverify-desktop[.exe]
+install-kind   inno, deb, pacman or tarball: how the app and `latch update` install updates
 ```
 
 Installing runs `latch setup --all`, and uninstalling runs `latch setup --remove --all` (see
@@ -21,6 +23,8 @@ keep working whatever is on PATH.
 | File | Role |
 |---|---|
 | `stage.ts` | Copies the built app into `<out>/app` and installs production dependencies from `pnpm-lock.yaml` (frozen, no scripts, hoisted, so no symlinks). |
+| `build-desktop.ts` | Builds `<stage>/desktop` with `@electron/packager` from the staged app, with the Electron version pinned in `devDependencies`. |
+| `make-latest-json.ts`, `keygen.ts` | The signed update manifest the release job publishes (needs the `LATCH_UPDATE_SIGNING_KEY` secret), and a new key pair for it. |
 | `version.ts` | `package.json`'s version in each format: `semver`, `deb` (`1.2.0~rc.1`), `arch` (`1.2.0rc1`), `windows` (`1.2.0.0`). |
 | `release-notes.ts` | The GitHub release body: the version's `CHANGELOG.md` section plus a downloads table. |
 | `linux/fetch-node.sh`, `windows/fetch-node.ps1` | Download a verified Node.js 22 into `<stage>/node`. `NODE_VERSION=v22.x.y` pins a release. |
@@ -28,7 +32,7 @@ keep working whatever is on PATH.
 | `linux/link-user` | What the package scripts call. Runs `latch setup --all` (or `--remove --all`) as the user behind `sudo`/`pkexec`, never as root. Never fails the package. |
 | `arch/PKGBUILD`, `arch/latchverify.install` | Repackage the `.deb` for pacman, with the same link and unlink hooks. |
 | `linux/build-tarball.sh`, `install.sh`, `uninstall.sh` | The portable archive and its per-user installer (no root, `~/.local`). |
-| `windows/latchverify.iss` | Inno Setup script for the per-user setup EXE: `latch.cmd`, the icon, Start menu entry and an optional PATH entry. |
+| `windows/latchverify.iss` | Inno Setup script for the per-user setup EXE: `latch.cmd`, the app, the icon, the Start menu entry and an optional PATH entry. `/RELAUNCH=1` starts the app after a silent update. |
 | `test/check-link.ts`, `test/stub-server.mjs` | Smoke-test helpers: write a Claude Code config with a stub server, check that it is linked or unlinked, and probe it over MCP. |
 
 Line endings are pinned in `.gitattributes`: CRLF for the Windows scripts, LF for the shell scripts.
@@ -41,6 +45,7 @@ Arch package `makepkg`.
 ```sh
 pnpm install --frozen-lockfile && pnpm build
 pnpm -s exec tsx packaging/stage.ts build/stage
+pnpm -s exec tsx packaging/build-desktop.ts build/stage linux x64
 sh packaging/linux/fetch-node.sh build/stage x64
 
 sh packaging/linux/build-deb.sh build/stage build/out "$(pnpm -s exec tsx packaging/version.ts deb)" amd64
@@ -59,6 +64,7 @@ On Windows, with Inno Setup 6.3 or newer:
 ```powershell
 pnpm install --frozen-lockfile; pnpm build
 pnpm -s exec tsx packaging/stage.ts build\stage
+pnpm -s exec tsx packaging/build-desktop.ts build\stage win32 x64
 ./packaging/windows/fetch-node.ps1 -Destination "$PWD\build\stage"
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$(pnpm -s exec tsx packaging/version.ts semver)" `
   "/DFileVersion=$(pnpm -s exec tsx packaging/version.ts windows)" "/DStageDir=$PWD\build\stage" "/DOutputDir=$PWD\build\out" `

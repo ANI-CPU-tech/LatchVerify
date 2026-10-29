@@ -145,6 +145,29 @@ Delete the entry from `rejected.json` to take a rejection back.
   (repeats summed per minute) and clients found but not asked about. One watcher runs per state
   directory.
 
+## The app and updates
+
+- **The app** (`src/desktop/`, Electron) runs the same review server (`startUiServer`, loopback,
+  port 0) and watcher as `latch review --ui` and `latch watch`, in one process, with a tray icon and
+  native notifications. The proxies stay plain Node processes started by the MCP clients: one
+  Electron process per machine, not per server. The window is sandboxed with context isolation;
+  it may load only its own server's origin, opens no other window, and the preload exposes only
+  the version and the two update calls. Closing it keeps the app in the tray. An installed app
+  starts at login: an XDG autostart entry on Linux, a Run value named after the AppUserModelID on
+  Windows; Settings turns it off. Only one instance runs.
+- **Updates** (`src/update/`). Each release publishes `latest.json`: the version, notes and, per
+  install kind (`windows-x86_64-inno`, `linux-x86_64-deb`, `linux-x86_64-pacman`,
+  `linux-x86_64-tarball`), the installer's https URL, sha256 and an ed25519 signature over
+  `latchverify-update\n{version}\n{platform}\n{sha256}\n`. The public key is built in
+  (`src/update/key.ts`); the private key exists only as the release workflow's secret. The app
+  reads its install kind from the `install-kind` file its installer wrote, so a source checkout
+  never updates. A manifest is capped at 1 MB and must parse; a bad signature is an error, a
+  pre-release is never offered. The installer is downloaded only after the user clicks Install
+  (capped at 512 MB), its sha256 is checked, and it is run: the Inno installer silently (it starts
+  the app again), `pkexec apt-get install` or `pkexec pacman -U`, or the new archive's `install.sh`
+  into the same prefix. Running proxies keep their files until their client restarts them.
+  `LATCH_UPDATE_URL` replaces the manifest URL only in development mode.
+
 ## Keys in client configs
 
 Client configs hold the servers' API keys, in `env` and sometimes in arguments. LatchVerify
@@ -236,6 +259,8 @@ serialized.
 | `src/commands/*` | One file per CLI command |
 | `src/config/*` | Env loading, MCP client config detection and rewriting (env values dropped at parse) |
 | `src/daemon/*` | Background sync (`sync.ts`), watcher (`watch.ts`) and desktop notifications (`notify.ts`) |
+| `src/desktop/*` | The Electron app: window, tray, login start, update dialogs; pure helpers in `shell.ts` |
+| `src/update/*` | Update manifest schema, signature check, download and install per package kind |
 | `src/dev/*` | Demo presets for the Dev Tools page and `pnpm demo:add` (development only) |
 | `src/ui/*` | hono review API, bound to 127.0.0.1, with the clients and settings endpoints |
 | `web/` | React review UI |

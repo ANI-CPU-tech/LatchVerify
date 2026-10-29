@@ -4,6 +4,7 @@
 
 ### Installers
 - **Windows installer, Debian/Ubuntu and Arch/CachyOS packages, and a portable Linux archive**, built by the **Build installers** workflow on GitHub's Windows and Linux machines. Each carries its own Node.js 22, so nothing else needs installing.
+- **The LatchVerify app comes with every installer**: it starts after installing (Windows), from your app menu or in the tray (Linux), and at login. Uninstalling stops it and removes its login start.
 - **Installing creates your per-user `latch.lock` and connects only the MCP clients you choose**: the Windows installer's checkbox, or `latch setup` afterwards on Linux (`install.sh` asks in your terminal). Uninstalling gives every client its original server commands back (`latch setup --remove --all`) and keeps `latch.lock`; before, only Claude Code was restored, and a client linked by hand kept pointing at the removed install.
 
 ### Added
@@ -19,6 +20,8 @@
 - **`latch watch`** keeps connected clients linked in the background: new servers are linked within a second, entries a client turned back are re-wrapped, entries of a moved install are repaired.
 - **Desktop notifications** (notify-send on Linux, a toast on Windows) when changes wait for review at start, when a proxy queues a change, when calls are blocked (repeats summed per minute) and when a new MCP client is found. Settings has switches for them, for update checks and for starting at login.
 - **The MCP Servers page shows each client and its servers**: which client starts which server, whether it is protected, waiting for its first run or not connected, with Connect and Disconnect.
+- **The LatchVerify app** (Electron): the review UI in its own window and a tray icon with the review queue count, Pause watching, Check for updates and Quit. It runs the background sync and shows native notifications; clicking one opens the review queue. Closing the window keeps it in the tray, and it starts at login unless Settings turns that off. The window loads only its own loopback server: no new windows, no navigation elsewhere, sandboxed with context isolation.
+- **Updates, signed.** The app checks for a new release 10 s after it starts and then once a day (Settings can turn this off), shows the release notes and installs on one click: the Windows installer, `apt-get` or `pacman` through `pkexec`, or the portable archive's own `install.sh`. Nothing is downloaded before you click. Every release publishes a `latest.json` signed with ed25519; the installer's sha256 and signature are checked before it runs. `latch update` does the same from a terminal, and `latch update --check` only reports. A source checkout never updates itself.
 - **Dev Tools** (development mode only) and `pnpm demo:add` add the demo servers to a client in one step.
 
 ### Changed
@@ -27,6 +30,8 @@
 - **`latch.lock` no longer stores launch lines.** Each server keeps its program name and a hash of how it is started; arguments, which can hold a key, never reach git. Older lockfiles are read and converted. `latch verify` takes launch lines from `--config <file>` (for example `.mcp.json`), `./.mcp.json` or the client configs, and its `--json` report (version 2) names the program only.
 - **Linked entries keep your env untouched**: only `command` and `args` change, the lockfile path travels as `--lockfile`, and no `.bak` copy of the config is made any more. `latch setup` lists the copies earlier versions left, which hold your keys, so you can delete them.
 - **The demo stays out of real installs.** The Simulation page and its API (`POST /api/simulate`) exist only in development mode, `LATCH_DEV=1`. Its code and the demo tool lists load as a separate chunk only then. An installed review UI never shows sample data: when the API is down, it says so.
+- **LatchVerify opens no browser.** `latch review --ui` serves the review UI and prints its address; the app is how you open it. The `latchverify-review` launcher and the **LatchVerify Review** menu entry are replaced by **LatchVerify**.
+- **CI runs on every push**, on Linux and Windows (`ci.yml`), and Windows test failures now fail the installer build instead of being reported only.
 - **`GET /api/info`** reports the running version and whether development mode is on.
 
 ### Security

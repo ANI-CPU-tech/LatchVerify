@@ -74,7 +74,9 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
 [release](https://github.com/ANI-CPU-tech/LatchVerify/releases). They bring their own Node.js
 and create your own `latch.lock`. They connect an MCP client only when you say so (`latch setup`
 asks, the Windows installer has a checkbox); a connected client's servers go behind the proxy and
-are pinned on their first run. See [INSTALL.md](INSTALL.md).
+are pinned on their first run. The **LatchVerify app** then sits in your tray: it keeps connected
+clients linked, notifies you when a change waits for review, and updates itself from signed
+releases. See [INSTALL.md](INSTALL.md).
 
 **Your keys stay yours.** LatchVerify reads client configs but never their keys: env values are
 dropped as soon as a file is parsed, only `command` and `args` are edited, `latch.lock` keeps a hash
@@ -97,9 +99,10 @@ pnpm link --global   # puts `latch` on your PATH
 | `latch setup` | List the MCP clients on this machine and ask which to connect; `--client <id>` or `--all` connect without asking. Uses the per-user `latch.lock`, created if needed. `--remove` disconnects (original entries back). Nothing is connected without your say-so. |
 | `latch watch` | Keep connected clients linked in the background (new servers included) and show desktop notifications for changes to review, blocked calls and new clients. `--once` syncs one time. |
 | `latch add` | Put one server behind latch: record it in `latch.lock` and add it, wrapped, to one client config (Claude Desktop by default); its tools are pinned on its first run. `latch add github --env GITHUB_PERSONAL_ACCESS_TOKEN -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server` |
-| `latch review` | Walk the pending queue in the terminal, or with `--ui` open the web review screen. Approving rewrites `latch.lock` for you to commit; rejecting keeps that definition blocked, even after a restart. |
+| `latch review` | Walk the pending queue in the terminal, or with `--ui` serve the review UI on a local port (no browser is opened). Approving rewrites `latch.lock` for you to commit; rejecting keeps that definition blocked, even after a restart. |
 | `latch lock status` / `accept` / `restore` | Check `latch.lock` for edits made outside LatchVerify (a server tampering with its own approvals, or a `git pull`). Proxies ignore such an edit until you `accept` it; `restore` puts back the last version LatchVerify wrote. |
 | `latch verify` | CI check. Starts every server in `latch.lock` (launch lines from `--config .mcp.json` or the client configs, since `latch.lock` keeps only their hash), diffs live tools against pinned ones, and exits non-zero on tier 2+ drift. |
+| `latch update` | Check for a signed release and install it (`--check` only reports). Installed packages only; a source checkout never updates itself. |
 | `latch inspect` | Print derived capabilities and findings for a server or a saved `tools/list` JSON, without touching the lockfile. |
 
 `latch proxy` also exists. It is hidden from `--help` because only the client configs
@@ -116,7 +119,8 @@ value from your shell, so tokens stay out of the command line.
 pnpm dev          # watch-run the CLI with tsx
 pnpm typecheck    # tsc over src/, tests/, demo/ and web/
 pnpm test         # vitest
-pnpm build        # emit dist/ (CLI) and dist/web/ (review UI served by `latch review --ui`)
+pnpm build        # emit dist/ (CLI and desktop app code) and dist/web/ (review UI)
+pnpm desktop      # build, then run the LatchVerify app (Electron) from the checkout
 pnpm ui           # dev: hono API + Vite review UI with hot reload on http://localhost:5173
 ```
 
@@ -145,12 +149,15 @@ src/schema/    zod schemas: the shared contract
 src/proxy/     stdio JSON-RPC proxy and the three interception points
 src/analyze/   capability extraction, Unicode/pattern detectors, differ, tiers, LLM pass
 src/store/     latch.lock, the .latch/ pending queue and event log
-src/commands/  init, setup, add, review, verify, inspect, proxy
+src/commands/  init, setup, add, review, verify, inspect, update, proxy
+src/daemon/    background sync, config watcher, desktop notifications
+src/desktop/   the LatchVerify app (Electron main process, tray, preload)
+src/update/    signed update manifest, download and install per package kind
 src/ui/        hono review API
 web/           Vite + React review UI
 demo/          benign and evil demo servers (development only)
 docs/          design docs
-packaging/     installers: Windows (Inno Setup), deb, Arch, portable tar.gz
+packaging/     installers (Windows Inno Setup, deb, Arch, portable tar.gz), the app build, latest.json
 ```
 
 ## License
