@@ -126,7 +126,7 @@ export function installCommand(kind: InstallKind, file: string, root: string): {
   switch (kind) {
     case "inno":
       // Closes the running app (and proxies) and restarts it afterwards; the installer's own [Run] relaunches.
-      return { command: file, args: ["/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTART"] };
+      return { command: file, args: ["/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTART", "/RELAUNCH=1"] };
     case "deb":
       return { command: "pkexec", args: ["apt-get", "install", "-y", file] };
     case "pacman":

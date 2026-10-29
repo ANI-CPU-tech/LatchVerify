@@ -67,6 +67,21 @@ describe("the build-installers workflow", () => {
     expect(release.indexOf("make-latest-json.ts")).toBeGreaterThan(release.indexOf("packaging/release-notes.ts"));
   });
 
+  it("builds the desktop app into every installer and smoke-tests it", () => {
+    expect(job("windows")).toContain("packaging/build-desktop.ts build/stage win32 x64");
+    expect(job("linux")).toContain("packaging/build-desktop.ts build/stage linux x64");
+    expect(job("windows")).toContain('latchverify-desktop.exe" -ArgumentList "--smoke", "--hidden"');
+    expect(job("linux")).toContain("xvfb-run -a latchverify-desktop --smoke --hidden");
+  });
+
+  it("runs the tests on Windows without hiding failures, and in ci.yml on every push", () => {
+    expect(workflow).not.toContain("continue-on-error");
+    const ci = readFileSync(new URL(".github/workflows/ci.yml", root), "utf8");
+    expect(ci).toMatch(/^on:\n {2}push:\n {2}pull_request:$/m);
+    expect(ci).toContain("os: [ubuntu-24.04, windows-latest]");
+    for (const step of ["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm test"]) expect(ci).toContain(`run: ${step}`);
+  });
+
   it("signs the Windows installer only when the certificate secret is set", () => {
     const windows = job("windows");
     expect(windows).toContain("WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}");

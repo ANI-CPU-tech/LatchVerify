@@ -11,7 +11,7 @@ import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, typ
 import { loadDotEnv, loadEnv } from "../config/env.js";
 import { userLockfilePath } from "../config/paths.js";
 import { defaultReviewer } from "../config/reviewer.js";
-import type { DesktopNotification } from "../daemon/notify.js";
+import { APP_ID, type DesktopNotification } from "../daemon/notify.js";
 import { startWatcher, type Watcher } from "../daemon/watch.js";
 import { createLogger } from "../log.js";
 import { emptyLockfile, writeLockfile } from "../store/lockfile.js";
@@ -39,6 +39,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function main(): Promise<void> {
+  // Windows ties notifications, the taskbar and the login start to the Start menu shortcut's id.
+  if (process.platform === "win32") app.setAppUserModelId(APP_ID);
   loadDotEnv();
   const env = loadEnv();
   const lockfilePath = userLockfilePath();
@@ -212,5 +214,6 @@ async function applyLoginStart(settingsFile: string): Promise<void> {
     }
     return;
   }
-  app.setLoginItemSettings({ openAtLogin: enabled, args: ["--hidden"] });
+  // The installer removes this Run value by name when LatchVerify is uninstalled.
+  app.setLoginItemSettings({ openAtLogin: enabled, args: ["--hidden"], name: APP_ID });
 }

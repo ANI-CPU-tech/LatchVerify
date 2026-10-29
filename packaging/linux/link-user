@@ -2,7 +2,8 @@
 # After installing ("setup"): lists the MCP clients of the user who installed the package and how
 # to connect them, and creates their per-user latch.lock. It connects nothing: LatchVerify connects
 # a client only when its user says so (`latch setup` in a terminal, or --client/--all).
-# Before removing ("remove"): unlinks every MCP client, so none points at the removed install.
+# Before removing ("remove"): stops the app, unlinks every MCP client, so none points at the removed
+# install, and deletes the login start the app wrote.
 #
 # Package manager scripts run as root, but client configs (~/.claude.json, ~/.cursor/mcp.json, ...)
 # and the per-user latch.lock belong to a person. This runs latch as the user behind sudo or pkexec,
@@ -34,6 +35,12 @@ if [ -z "$home" ] || [ ! -d "$home" ]; then
 fi
 
 here=$(dirname "$(readlink -f "$0")")
+if [ "$1" = remove ]; then
+  # The app first, so it does not link the clients again; then its login start.
+  pkill -u "$user" -f "^$here/desktop/latchverify-desktop" 2>/dev/null || true
+  autostart="$home/.config/autostart/latchverify.desktop"
+  if [ -f "$autostart" ] && grep -q "$here/desktop/" "$autostart"; then rm -f "$autostart"; fi
+fi
 # A clean user environment: root's XDG_CONFIG_HOME must not decide where the user's lockfile goes.
 # shellcheck disable=SC2086 # $args is several words on purpose
 if command -v runuser >/dev/null 2>&1; then
@@ -41,4 +48,5 @@ if command -v runuser >/dev/null 2>&1; then
 else
   su -s /bin/sh "$user" -c "env -u XDG_CONFIG_HOME HOME='$home' USER='$user' LOGNAME='$user' '$here/latch' $args"
 fi || echo "LatchVerify: 'latch $args' did not finish for $user. It can be run again at any time."
+[ "$1" = setup ] && echo "LatchVerify: start LatchVerify from your app menu; it then runs in the tray and starts at login."
 exit 0

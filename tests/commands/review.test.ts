@@ -119,7 +119,7 @@ describe("runReview without a terminal", () => {
     expect(text.split("\n")[0]).toBe("latch review: 4 pending changes, highest tier first");
     const headers = text.split("\n").filter((line) => line.startsWith("tier "));
     expect(headers.map((h) => h.split("  ")[1])).toEqual(["weather/get_forecast", "weather/run_diagnostics", "weather/sync_alerts", "weather/read_config"]);
-    expect(text).toContain("decide in a terminal with `latch review`, or in the browser with `latch review --ui`");
+    expect(text).toContain("decide in a terminal with `latch review`, or in the LatchVerify app");
     expect(readFileSync(join(dir, "pending.json"), "utf8")).toBe(before);
     expect(readFileSync(lockfilePath, "utf8")).toBe(readFileSync(join(root, "latch.lock.example"), "utf8"));
   });

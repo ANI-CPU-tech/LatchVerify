@@ -36,19 +36,18 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Unit tests (Windows has not been verified before; failures are reported but don't block the installer)
-        continue-on-error: true
-        run: pnpm test
+      - run: pnpm typecheck && pnpm test
       - run: pnpm build
       - name: Read the version
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           Add-Content -Path $env:GITHUB_ENV -Value "VERSION=$(pnpm -s exec tsx packaging/version.ts semver)"
           Add-Content -Path $env:GITHUB_ENV -Value "FILE_VERSION=$(pnpm -s exec tsx packaging/version.ts windows)"
-      - name: Stage the app and a verified Node.js 22
+      - name: Stage the app, the desktop app and a verified Node.js 22
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           pnpm -s exec tsx packaging/stage.ts build/stage
+          pnpm -s exec tsx packaging/build-desktop.ts build/stage win32 x64
           ./packaging/windows/fetch-node.ps1 -Destination "$env:GITHUB_WORKSPACE\build\stage" -Arch x64
       - name: Inno Setup 6.3 or newer
         run: |
@@ -104,6 +103,11 @@ jobs:
           if ($run.ExitCode -ne 0) { Get-Content $log; throw "The installer exited with $($run.ExitCode)" }
           Get-Content "$app\setup.log"
           & "$app\latch.cmd" --version
+          # The app starts its review server and watcher, reports and quits.
+          $out = Join-Path $env:RUNNER_TEMP "desktop-smoke.txt"
+          $desktop = Start-Process -FilePath "$app\desktop\latchverify-desktop.exe" -ArgumentList "--smoke", "--hidden" -RedirectStandardOutput $out -Wait -PassThru
+          Get-Content $out
+          if ($desktop.ExitCode -ne 0 -or -not (Select-String -Path $out -Pattern "watcher running" -Quiet)) { throw "The desktop app did not start (exit $($desktop.ExitCode))" }
           pnpm -s exec tsx $check linked --config $config --lockfile $lock --server stub
           pnpm -s exec tsx $check probe --config $config --server stub --tool echo
           pnpm -s exec tsx $check pinned --config $config --lockfile $lock --server stub
@@ -131,7 +135,7 @@ jobs:
       - name: Packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y pacman-package-manager libarchive-tools zstd fakeroot
+          sudo apt-get install -y pacman-package-manager libarchive-tools zstd fakeroot xvfb
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -147,9 +151,10 @@ jobs:
             echo "DEB_VERSION=$(pnpm -s exec tsx packaging/version.ts deb)"
             echo "ARCH_VERSION=$(pnpm -s exec tsx packaging/version.ts arch)"
           } >> "$GITHUB_ENV"
-      - name: Stage the app and a verified Node.js 22
+      - name: Stage the app, the desktop app and a verified Node.js 22
         run: |
           pnpm -s exec tsx packaging/stage.ts build/stage
+          pnpm -s exec tsx packaging/build-desktop.ts build/stage linux x64
           sh packaging/linux/fetch-node.sh build/stage x64
       - name: Build the deb and the portable archive
         run: |
@@ -169,6 +174,9 @@ jobs:
           $check client --config ~/.claude.json --server stub
           sudo apt-get install -y "./build/out/latchverify_${DEB_VERSION}_amd64.deb"
           latch --version
+          # The app starts its review server and watcher, reports and quits.
+          xvfb-run -a latchverify-desktop --smoke --hidden | tee "$RUNNER_TEMP/desktop-smoke.txt"
+          grep -q "watcher running" "$RUNNER_TEMP/desktop-smoke.txt"
           $check unlinked --config ~/.claude.json --lockfile "$lock" --server stub
           latch setup --client claude-code
           $check linked --config ~/.claude.json --lockfile "$lock" --server stub
@@ -193,7 +201,7 @@ jobs:
           $check probe --config "$home/.claude.json" --server stub --tool echo
           $check pinned --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
           as_user "$RUNNER_TEMP/latchverify-${VERSION}-linux-x64/uninstall.sh"
-          test ! -e "$home/.local/lib/latchverify" && test ! -e "$home/.local/bin/latch"
+          test ! -e "$home/.local/lib/latchverify" && test ! -e "$home/.local/bin/latch" && test ! -e "$home/.local/bin/latchverify-desktop"
           $check unlinked --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
       - uses: actions/upload-artifact@v4
         with:

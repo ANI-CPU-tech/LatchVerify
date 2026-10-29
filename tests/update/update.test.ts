@@ -95,7 +95,7 @@ describe("downloading and installing", () => {
   });
 
   it("installs each kind its own way", () => {
-    expect(installCommand("inno", "C:\\t\\setup.exe", "C:\\app")).toEqual({ command: "C:\\t\\setup.exe", args: ["/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTART"] });
+    expect(installCommand("inno", "C:\\t\\setup.exe", "C:\\app")).toEqual({ command: "C:\\t\\setup.exe", args: ["/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTART", "/RELAUNCH=1"] });
     expect(installCommand("deb", "/t/x.deb", "/usr/lib/latchverify")).toEqual({ command: "pkexec", args: ["apt-get", "install", "-y", "/t/x.deb"] });
     expect(installCommand("pacman", "/t/x.pkg.tar.zst", "/usr/lib/latchverify")).toEqual({ command: "pkexec", args: ["pacman", "-U", "--noconfirm", "/t/x.pkg.tar.zst"] });
     const tarball = installCommand("tarball", "/t/x.tar.gz", "/home/me/.local/lib/latchverify");

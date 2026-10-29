@@ -1,11 +1,13 @@
 #!/bin/sh
 # Build the LatchVerify .deb from a staged tree (packaging/stage.ts plus fetch-node.sh):
 #
-#   /usr/lib/latchverify/{app,node,latch,latchverify-review,link-user}
-#   /usr/bin/latch, /usr/bin/latchverify-review         symlinks into /usr/lib/latchverify
+#   /usr/lib/latchverify/{app,node,desktop,latch,link-user}
+#   /usr/bin/latch, /usr/bin/latchverify-desktop         symlinks into /usr/lib/latchverify
 #   /usr/share/applications/io.github.vinayakkam.LatchVerify.desktop
 #   /usr/share/icons/hicolor/scalable/apps/io.github.vinayakkam.LatchVerify.svg
 #   /usr/share/doc/latchverify/copyright
+#
+# packaging/build-desktop.ts builds <stage-dir>/desktop, the Electron app.
 #
 # Usage: build-deb.sh <stage-dir> <out-dir> <deb-version> [amd64|arm64]
 # LATCH_PACKAGER="Name <email>" sets the Maintainer field.
@@ -18,20 +20,20 @@ arch=${4:-amd64}
 repo=$(readlink -f "$(dirname "$0")/../..")
 maintainer=${LATCH_PACKAGER:-LatchVerify maintainers <latchverify@users.noreply.github.com>}
 
-for required in "$stage/app/dist/cli.js" "$stage/node/bin/node"; do
-  [ -e "$required" ] || { echo "build-deb: $required is missing; stage the app and fetch Node.js first" >&2; exit 1; }
+for required in "$stage/app/dist/cli.js" "$stage/node/bin/node" "$stage/desktop/latchverify-desktop"; do
+  [ -e "$required" ] || { echo "build-deb: $required is missing; stage the app, fetch Node.js and build the desktop app first" >&2; exit 1; }
 done
 
 root=$(mktemp -d)
 trap 'rm -rf "$root"' EXIT
 lib="$root/usr/lib/latchverify"
 mkdir -p "$lib" "$root/usr/bin" "$root/DEBIAN"
-cp -a "$stage/app" "$stage/node" "$lib/"
+cp -a "$stage/app" "$stage/node" "$stage/desktop" "$lib/"
 # How `latch update` and the app install updates (src/update): this is the deb.
 printf 'deb\n' > "$lib/install-kind"
-install -m 755 "$repo/packaging/linux/latch" "$repo/packaging/linux/latchverify-review" "$repo/packaging/linux/link-user" "$lib/"
+install -m 755 "$repo/packaging/linux/latch" "$repo/packaging/linux/link-user" "$lib/"
 ln -s ../lib/latchverify/latch "$root/usr/bin/latch"
-ln -s ../lib/latchverify/latchverify-review "$root/usr/bin/latchverify-review"
+ln -s ../lib/latchverify/desktop/latchverify-desktop "$root/usr/bin/latchverify-desktop"
 install -Dm 644 "$repo/packaging/linux/io.github.vinayakkam.LatchVerify.desktop" "$root/usr/share/applications/io.github.vinayakkam.LatchVerify.desktop"
 install -Dm 644 "$repo/web/public/favicon.svg" "$root/usr/share/icons/hicolor/scalable/apps/io.github.vinayakkam.LatchVerify.svg"
 install -Dm 644 "$repo/LICENSE" "$root/usr/share/doc/latchverify/copyright"
@@ -39,6 +41,8 @@ install -Dm 644 "$repo/LICENSE" "$root/usr/share/doc/latchverify/copyright"
 # root (mktemp makes it 0700) must not carry odd permissions into the package's "./".
 chmod -R go-w "$root"
 chmod 755 "$root"
+# Chromium's setuid sandbox helper: root-owned (--root-owner-group) and setuid, as Electron needs it.
+chmod 4755 "$lib/desktop/chrome-sandbox"
 
 size=$(du -sk --exclude=DEBIAN "$root" | cut -f1)
 sed -e "s|@VERSION@|$version|" -e "s|@ARCH@|$arch|" -e "s|@INSTALLED_SIZE@|$size|" -e "s|@MAINTAINER@|$maintainer|" \

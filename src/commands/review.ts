@@ -90,7 +90,7 @@ export async function runReview(options: ReviewOptions): Promise<number> {
     say(pc.bold(`latch review: ${plural(queue.length, "pending change")}, highest tier first`));
     for (const change of queue) say(), say(renderChange(change, lock));
     say();
-    say(`decide in a terminal with \`latch review\`, or in the browser with \`latch review --ui\``);
+    say(`decide in a terminal with \`latch review\`, or in the LatchVerify app`);
     return 0;
   }
 
@@ -162,7 +162,7 @@ export async function runReview(options: ReviewOptions): Promise<number> {
   return tally.failed > 0 ? 1 : 0;
 }
 
-/** `latch review --ui`: serve the review API and built UI until stopped, opening the browser on it. */
+/** `latch review --ui`: serve the review API and built UI until stopped; LatchVerify opens nothing itself. */
 async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: string, say: (line?: string) => void): Promise<number> {
   if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65_535) {
     throw new Error(`latch review: --port must be a whole number from 0 to 65535, got ${String(options.port)}`);
