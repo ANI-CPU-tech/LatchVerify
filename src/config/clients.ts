@@ -5,25 +5,11 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { replaceFile } from "../store/replace.js";
+import { SUPPORTED_CLIENTS, type ClientId } from "./client-ids.js";
 import { parseJsonc, setJsonc } from "./jsonc.js";
 import { appDataDir, platformPath } from "./paths.js";
 
-/** MCP clients whose config files `latch init` knows how to rewrite. */
-export const SUPPORTED_CLIENTS = [
-  "claude-desktop",
-  "claude-code",
-  "cursor",
-  "vscode",
-  "vscode-insiders",
-  "vscodium",
-  "cline",
-  "cline-cli",
-  "gemini-cli",
-  "zed",
-  "lm-studio",
-  "amazon-q",
-] as const;
-export type ClientId = (typeof SUPPORTED_CLIENTS)[number];
+export { SUPPORTED_CLIENTS, type ClientId };
 
 /** One server entry as clients store it on disk. */
 export interface ClientServerEntry {
@@ -256,11 +242,20 @@ export interface ProxyLaunch {
 export const PATH_LAUNCH: ProxyLaunch = { command: PROXY_COMMAND, args: [] };
 
 /**
+ * Node options for every proxy a client starts through INSTALL_LAUNCH. A client keeps one proxy
+ * per server alive, and a 1 MiB young generation instead of V8's 16 MiB default keeps about
+ * 6 MiB less resident in each (measured on Node 22). Proxy traffic is small and short-lived, so
+ * the extra scavenges cost nothing noticeable. The old generation is left unbounded: one message
+ * can legitimately be tens of MiB.
+ */
+export const PROXY_NODE_FLAGS: readonly string[] = ["--max-semi-space-size=1"];
+
+/**
  * This install, by absolute path: the running node and this checkout's cli.js. Clients start
  * servers without the user's shell setup (a shell function or alias named `latch` is invisible
  * to them), so `latch init` and `latch add` write this launch.
  */
-export const INSTALL_LAUNCH: ProxyLaunch = { command: process.execPath, args: [fileURLToPath(new URL("../cli.js", import.meta.url))] };
+export const INSTALL_LAUNCH: ProxyLaunch = { command: process.execPath, args: [...PROXY_NODE_FLAGS, fileURLToPath(new URL("../cli.js", import.meta.url))] };
 
 /**
  * Rewrite one server entry so the client launches `latch proxy` instead of the real server:
@@ -302,12 +297,15 @@ export function unwrapProxy(entry: ClientServerEntry): ClientServerEntry {
 
 /**
  * True for `latch proxy ...`, however the latch executable is spelled (path, .cmd, .exe), and for
- * INSTALL_LAUNCH's form, `<node> <path>/cli.js proxy --server ...`.
+ * INSTALL_LAUNCH's form, `<node> [node flags] <path>/cli.js proxy --server ...`, with or without
+ * the flags (entries written before PROXY_NODE_FLAGS existed have none).
  */
 function isProxyInvocation(entry: ClientServerEntry): boolean {
   if (typeof entry.command !== "string" || !Array.isArray(entry.args)) return false;
-  const [first, second, third] = entry.args;
-  if (typeof first === "string" && baseName(first) === "cli.js" && second === "proxy" && third === "--server") return true;
+  const [first] = entry.args;
+  const script = entry.args.findIndex((arg) => typeof arg !== "string" || !arg.startsWith("-"));
+  const [cli, second, third] = script === -1 ? [] : entry.args.slice(script);
+  if (typeof cli === "string" && baseName(cli) === "cli.js" && second === "proxy" && third === "--server") return true;
   if (first !== "proxy") return false;
   const executable = baseName(entry.command);
   return executable === PROXY_COMMAND || executable === `${PROXY_COMMAND}.cmd` || executable === `${PROXY_COMMAND}.exe`;

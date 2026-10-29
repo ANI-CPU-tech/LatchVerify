@@ -1,6 +1,7 @@
 import { FindingSchema, FindingTypeSchema, LlmAdvisorySchema, type Finding, type LlmAdvisory, type McpTool, type Sha256Hex } from "../schema/index.js";
 import { canonicalJson, sha256Hex } from "./hash.js";
 import { escapeForEvidence } from "./unicode.js";
+import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from "./llm-defaults.js";
 
 /**
  * Pass 3 (optional, off by default): an LLM reviews a tool definition and reports findings the
@@ -18,11 +19,7 @@ export interface LlmOptions {
   fetch?: typeof fetch;
 }
 
-/** Groq's OpenAI-compatible endpoint, which has a free tier. OpenRouter: https://openrouter.ai/api/v1. */
-export const DEFAULT_LLM_BASE_URL = "https://api.groq.com/openai/v1";
-
-/** Model used for the advisory pass unless overridden. Must be available at the base URL. */
-export const DEFAULT_LLM_MODEL = "llama-3.3-70b-versatile";
+export { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL };
 
 /**
  * Version of the advisory prompt and output rules. Part of the cache key, so changing the prompt

@@ -7,6 +7,7 @@ import {
   INSTALL_LAUNCH,
   MAX_BACKUPS,
   PROXY_COMMAND,
+  PROXY_NODE_FLAGS,
   SUPPORTED_CLIENTS,
   clientConfigPath,
   clientLocations,
@@ -176,11 +177,24 @@ describe("wrapWithProxy", () => {
     });
   });
 
-  it("launches this install by absolute path with INSTALL_LAUNCH", () => {
+  it("launches this install by absolute path with INSTALL_LAUNCH, with the proxy's node flags first", () => {
     expect(INSTALL_LAUNCH.command).toBe(process.execPath);
-    expect(INSTALL_LAUNCH.args).toHaveLength(1);
-    expect(isAbsolute(INSTALL_LAUNCH.args[0]!)).toBe(true);
-    expect(basename(INSTALL_LAUNCH.args[0]!)).toBe("cli.js");
+    expect(PROXY_NODE_FLAGS).toEqual(["--max-semi-space-size=1"]);
+    expect(INSTALL_LAUNCH.args.slice(0, -1)).toEqual(PROXY_NODE_FLAGS);
+    expect(isAbsolute(INSTALL_LAUNCH.args.at(-1)!)).toBe(true);
+    expect(basename(INSTALL_LAUNCH.args.at(-1)!)).toBe("cli.js");
+  });
+
+  it("recognizes a wrapped entry with or without node flags before cli.js", () => {
+    const real = { command: "tsx", args: ["demo/evil-server.ts"] };
+    const flagged = wrapWithProxy("weather", real, INSTALL_LAUNCH);
+    expect(flagged.args!.slice(0, 2)).toEqual(["--max-semi-space-size=1", INSTALL_LAUNCH.args.at(-1)]);
+    expect(wrapWithProxy("weather", flagged, INSTALL_LAUNCH)).toBe(flagged);
+    expect(unwrapProxy(flagged)).toEqual(real);
+    // Written before the flag existed: still recognized, never wrapped twice.
+    const old = { command: process.execPath, args: [INSTALL_LAUNCH.args.at(-1)!, "proxy", "--server", "weather", "--", "tsx", "demo/evil-server.ts"] };
+    expect(wrapWithProxy("weather", old, INSTALL_LAUNCH)).toBe(old);
+    expect(unwrapProxy(old)).toEqual(real);
   });
 
   it("recognizes an entry wrapped as <node> <path>/cli.js proxy, so it is never wrapped twice", () => {

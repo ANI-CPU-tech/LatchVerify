@@ -1,18 +1,15 @@
 #!/usr/bin/env node
 import { Command, Option } from "commander";
 import pc from "picocolors";
-import { SUPPORTED_CLIENTS } from "./config/clients.js";
+import { SUPPORTED_CLIENTS } from "./config/client-ids.js";
 import { loadDotEnv, loadEnv, statePaths, type LatchEnv } from "./config/env.js";
 import { userLockfilePath } from "./config/paths.js";
-import { runAdd } from "./commands/add.js";
-import { runInit } from "./commands/init.js";
-import { runInspect } from "./commands/inspect.js";
-import { runLockAccept, runLockRestore, runLockStatus } from "./commands/lock.js";
-import { runProxy } from "./commands/proxy.js";
-import { runReview } from "./commands/review.js";
-import { runSetup, runUnlink } from "./commands/setup.js";
-import { VERIFY_EXIT, runVerify } from "./commands/verify.js";
+import { VERIFY_EXIT } from "./commands/exit-codes.js";
 import { VERSION } from "./version.js";
+
+// Each command's module is imported when that command runs, never at startup. Every wrapped MCP
+// server keeps a `latch proxy` process alive, and loading the review UI, prompts and HTTP server
+// it never uses would cost each one tens of MiB.
 
 /**
  * Run a command and turn its result (or thrown error) into the process exit code. The
@@ -51,7 +48,7 @@ program
   .addOption(new Option("--client <id>", "only configure this client").choices(SUPPORTED_CLIENTS))
   .option("--dry-run", "show planned changes without writing", false)
   .action((opts: { client?: (typeof SUPPORTED_CLIENTS)[number]; dryRun: boolean }) =>
-    run(() => runInit({ ...opts, ...globals() })),
+    run(async () => (await import("./commands/init.js")).runInit({ ...opts, ...globals() })),
   );
 
 /**
@@ -73,7 +70,10 @@ program
   .option("--dry-run", "show what would change without writing", false)
   .action((opts: { client: (typeof SUPPORTED_CLIENTS)[number]; all?: boolean; remove: boolean; dryRun: boolean }) => {
     const client = opts.all ? undefined : opts.client;
-    return run(() => (opts.remove ? runUnlink({ client, dryRun: opts.dryRun }) : runSetup({ client, dryRun: opts.dryRun, ...setupGlobals() })));
+    return run(async () => {
+      const { runSetup, runUnlink } = await import("./commands/setup.js");
+      return opts.remove ? runUnlink({ client, dryRun: opts.dryRun }) : runSetup({ client, dryRun: opts.dryRun, ...setupGlobals() });
+    });
   });
 
 program
@@ -86,7 +86,7 @@ program
   .option("--env <KEY[=VALUE]>", "server environment variable; a bare KEY copies it from this shell (repeatable)", (value, previous: string[]) => [...previous, value], [])
   .option("--dry-run", "show what would be pinned and added without writing", false)
   .action((name: string, command: string[], opts: { client: (typeof SUPPORTED_CLIENTS)[number]; env: string[]; dryRun: boolean }) =>
-    run(() => runAdd({ ...opts, name, command, ...globals() })),
+    run(async () => (await import("./commands/add.js")).runAdd({ ...opts, name, command, ...globals() })),
   );
 
 program
@@ -95,8 +95,8 @@ program
   .option("--ui", "open the web review UI", false)
   .option("--port <port>", "web UI port (default: $LATCH_UI_PORT or 7777)", (v) => Number.parseInt(v, 10))
   .action((opts: { ui: boolean; port?: number }) =>
-    run((env) =>
-      runReview({
+    run(async (env) =>
+      (await import("./commands/review.js")).runReview({
         ...opts,
         port: opts.port ?? env.uiPort,
         // Only the built-in default may move to a free port; a port the user chose must not.
@@ -112,7 +112,7 @@ program
   .description("CI check: exit non-zero if any server drifted from latch.lock")
   .option("--json", "machine-readable output", false)
   // An unexpected failure is an error (3), never drift (1): CI must tell the two apart.
-  .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: readingGlobals().lockfilePath }), VERIFY_EXIT.error));
+  .action((opts: { json: boolean }) => run(async () => (await import("./commands/verify.js")).runVerify({ ...opts, lockfilePath: readingGlobals().lockfilePath }), VERIFY_EXIT.error));
 
 const lock = program
   .command("lock")
@@ -120,15 +120,15 @@ const lock = program
 lock
   .command("status")
   .description("say whether latch.lock is what LatchVerify last wrote (exit 1 when it was changed outside it)")
-  .action(() => run(() => runLockStatus(readingGlobals())));
+  .action(() => run(async () => (await import("./commands/lock.js")).runLockStatus(readingGlobals())));
 lock
   .command("accept")
   .description("trust latch.lock as it is now, after a git pull, merge or hand edit")
-  .action(() => run(() => runLockAccept(readingGlobals())));
+  .action(() => run(async () => (await import("./commands/lock.js")).runLockAccept(readingGlobals())));
 lock
   .command("restore")
   .description("put back the last version of latch.lock that LatchVerify wrote")
-  .action(() => run(() => runLockRestore(readingGlobals())));
+  .action(() => run(async () => (await import("./commands/lock.js")).runLockRestore(readingGlobals())));
 
 program
   .command("inspect")
@@ -138,7 +138,7 @@ program
   .option("--json", "machine-readable output", false)
   .passThroughOptions()
   .action((server: string[], opts: { file?: string; json: boolean }) =>
-    run(() => runInspect({ ...opts, server: server.length > 0 ? server : undefined })),
+    run(async () => (await import("./commands/inspect.js")).runInspect({ ...opts, server: server.length > 0 ? server : undefined })),
   );
 
 // Internal: what `latch init` writes into client configs. Hidden from --help.
@@ -148,8 +148,8 @@ program
   .argument("<command...>", "real server command, after --")
   .passThroughOptions()
   .action((command: string[], opts: { server: string }) =>
-    run((env) =>
-      runProxy({
+    run(async (env) =>
+      (await import("./commands/proxy.js")).runProxy({
         serverId: opts.server,
         command,
         ...globals(),

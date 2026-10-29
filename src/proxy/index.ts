@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises";
 import { constants } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { runAdvisory, type LlmOptions } from "../analyze/llm.js";
+import type { LlmOptions } from "../analyze/llm.js";
 import type { LogLevel } from "../config/env.js";
 import { createLogger } from "../log.js";
 import type { LockFile } from "../schema/index.js";
@@ -203,7 +203,8 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     observed: new Map(),
     verified: false,
     ownRequests: new Map(),
-    advise: options.llm === undefined ? undefined : (tool, cached) => runAdvisory(tool, options.llm!, cached),
+    // Loaded only when the advisory pass is on, so a proxy without it never holds the LLM client.
+    advise: options.llm === undefined ? undefined : async (tool, cached) => (await import("../analyze/llm.js")).runAdvisory(tool, options.llm!, cached),
     sendToServer: (message) => void outbox.push(message),
     refresh: async () => {
       const nextLock = await lockStampNow().catch(() => lockStamp);

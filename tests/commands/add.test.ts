@@ -193,7 +193,7 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     expect(code).toBe(0);
     expect(text).toContain("✔ weather: would pin 2 tools");
     expect(text).toContain(`would write ${lockfilePath} and add weather to ${configPath}:`);
-    expect(text).toContain(`${INSTALL_LAUNCH.command} ${INSTALL_LAUNCH.args[0]} proxy --server weather -- `);
+    expect(text).toContain(`${INSTALL_LAUNCH.command} ${INSTALL_LAUNCH.args.join(" ")} proxy --server weather -- `);
     expect(await readFile(configPath, "utf8")).toBe(before);
     expect(await exists(lockfilePath)).toBe(false);
   });

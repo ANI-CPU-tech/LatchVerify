@@ -7,6 +7,7 @@ import { captureTools } from "../proxy/capture.js";
 import type { CapabilityDelta, Finding, LockFile, ServerEntry, Tier } from "../schema/index.js";
 import { readLockfile } from "../store/lockfile.js";
 import { plural, printable } from "./text.js";
+import { VERIFY_EXIT } from "./exit-codes.js";
 
 export interface VerifyOptions {
   lockfilePath: string;
@@ -18,13 +19,7 @@ export interface VerifyOptions {
   output?: Writable;
 }
 
-/** Exit codes, the CI contract. Documented in docs/LOCKFILE.md. */
-export const VERIFY_EXIT = {
-  ok: 0,
-  drift: 1,
-  hardBlock: 2,
-  error: 3,
-} as const;
+export { VERIFY_EXIT };
 
 /** Outcome for one server or the whole run, in increasing severity. */
 export type VerifyStatus = "ok" | "drift" | "hard_block" | "error";

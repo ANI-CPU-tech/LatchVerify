@@ -428,8 +428,9 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
     expect((await init()).code).toBe(0);
     const entry = JSON.parse(await readFile(config, "utf8")).mcpServers.weather as ClientServerEntry;
     expect(entry.command).toBe(process.execPath);
-    expect(entry.args!.slice(1, 5)).toEqual(["proxy", "--server", "weather", "--"]);
-    expect(entry.args![0]).toBe(INSTALL_LAUNCH.args[0]);
+    const launch = INSTALL_LAUNCH.args.length;
+    expect(entry.args!.slice(0, launch)).toEqual(INSTALL_LAUNCH.args);
+    expect(entry.args!.slice(launch, launch + 4)).toEqual(["proxy", "--server", "weather", "--"]);
   });
 
   it("writes the launch it is given", async () => {
