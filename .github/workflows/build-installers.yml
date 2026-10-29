@@ -106,6 +106,7 @@ jobs:
           & "$app\latch.cmd" --version
           pnpm -s exec tsx $check linked --config $config --lockfile $lock --server stub
           pnpm -s exec tsx $check probe --config $config --server stub --tool echo
+          pnpm -s exec tsx $check pinned --config $config --lockfile $lock --server stub
 
           Start-Process -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
           # The uninstaller hands over to a copy of itself in %TEMP% and returns before it is done.
@@ -161,15 +162,18 @@ jobs:
           cd build/arch
           sed -i -e "s/^pkgver=.*/pkgver=${ARCH_VERSION}/" -e "s/^_debver=.*/_debver=${DEB_VERSION}/" PKGBUILD
           PKGDEST="$GITHUB_WORKSPACE/build/out" PKGEXT='.pkg.tar.zst' makepkg --nodeps --noconfirm -f
-      - name: "Smoke test: the deb links Claude Code on install and restores it on removal"
+      - name: "Smoke test: the deb connects nothing by itself, links Claude Code on request and restores it on removal"
         run: |
           check="pnpm -s exec tsx packaging/test/check-link.ts"
           lock="$HOME/.config/latchverify/latch.lock"
           $check client --config ~/.claude.json --server stub
           sudo apt-get install -y "./build/out/latchverify_${DEB_VERSION}_amd64.deb"
           latch --version
+          $check unlinked --config ~/.claude.json --lockfile "$lock" --server stub
+          latch setup --client claude-code
           $check linked --config ~/.claude.json --lockfile "$lock" --server stub
           $check probe --config ~/.claude.json --server stub --tool echo
+          $check pinned --config ~/.claude.json --lockfile "$lock" --server stub
           sudo apt-get remove -y latchverify
           test ! -e /usr/lib/latchverify
           $check unlinked --config ~/.claude.json --lockfile "$lock" --server stub
@@ -182,8 +186,12 @@ jobs:
           as_user() { env -u XDG_CONFIG_HOME -u XDG_DATA_HOME HOME="$home" "$@"; }
           as_user "$RUNNER_TEMP/latchverify-${VERSION}-linux-x64/install.sh"
           "$home/.local/bin/latch" --version
+          # Without a terminal, install.sh's `latch setup` only lists the clients.
+          $check unlinked --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
+          as_user "$home/.local/bin/latch" setup --client claude-code
           $check linked --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
           $check probe --config "$home/.claude.json" --server stub --tool echo
+          $check pinned --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
           as_user "$RUNNER_TEMP/latchverify-${VERSION}-linux-x64/uninstall.sh"
           test ! -e "$home/.local/lib/latchverify" && test ! -e "$home/.local/bin/latch"
           $check unlinked --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub

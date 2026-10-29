@@ -4,7 +4,7 @@ import { INSTALL_LAUNCH, detectClients, writeClientConfig, type ClientId, type C
 import type { LockFile, Settings } from "../schema/index.js";
 import { launchesAs, linkServer, mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { withStateLock } from "../store/pending.js";
-import { clientEnabled } from "../store/settings.js";
+import { clientConnected } from "../store/settings.js";
 
 export interface SyncOptions {
   lockfilePath: string;
@@ -28,6 +28,8 @@ export interface SyncResult {
   failed: Array<{ serverId: string; reason: string }>;
   /** Config files rewritten, with the servers wrapped (or re-wrapped) in each. */
   wrapped: Array<{ client: ClientId; path: string; scope?: string; serverIds: string[] }>;
+  /** Clients found that the user was never asked about, with their stdio server count: left alone. */
+  unasked: Array<{ client: ClientId; servers: number }>;
 }
 
 /**
@@ -45,17 +47,23 @@ export interface SyncResult {
  *    wraps new servers, re-wraps an entry the client turned back into the original, and repairs
  *    one that starts an old latch (a moved install), while an entry already right is not touched.
  *
- * Linking comes before wrapping, so a wrapped server is always in latch.lock. Clients turned off
- * in the settings, and non-stdio servers, are never touched.
+ * Linking comes before wrapping, so a wrapped server is always in latch.lock. Only clients the
+ * user connected (settings.clients[id] true) are touched: one never asked about is reported in
+ * `unasked` and left alone, and non-stdio servers are never touched.
  */
 export async function syncClients(options: SyncOptions): Promise<SyncResult> {
   const now = options.now ?? (() => new Date());
   const launch = options.launch ?? INSTALL_LAUNCH;
   const detection = await detectClients();
-  const configs = detection.configs.filter((config) => clientEnabled(options.settings, config.client));
-  const problems = detection.problems.filter((problem) => clientEnabled(options.settings, problem.client));
+  const configs = detection.configs.filter((config) => clientConnected(options.settings, config.client));
+  const problems = detection.problems.filter((problem) => clientConnected(options.settings, problem.client));
+  const unasked = new Map<ClientId, number>();
+  for (const config of detection.configs) {
+    if (options.settings.clients[config.client] !== undefined) continue;
+    unasked.set(config.client, (unasked.get(config.client) ?? 0) + Object.keys(config.servers).length);
+  }
   const { servers, skipped } = collectServers(configs);
-  const result: SyncResult = { problems, skipped, linked: [], failed: [], wrapped: [] };
+  const result: SyncResult = { problems, skipped, linked: [], failed: [], wrapped: [], unasked: [...unasked].map(([client, servers]) => ({ client, servers })) };
 
   const lock = await readLockfile(options.lockfilePath);
   let linkedLock: LockFile = lock;

@@ -7,7 +7,7 @@ import { LatchEventSchema, type LatchEvent, type PendingChange, type Settings } 
 import { EVENTS_FILE } from "../store/events.js";
 import { PENDING_FILE, readPending } from "../store/pending.js";
 import { readSettings } from "../store/settings.js";
-import { callsBlocked, changeQueued, pendingSummary, type Notifier } from "./notify.js";
+import { callsBlocked, changeQueued, clientFound, pendingSummary, type Notifier } from "./notify.js";
 import { syncClients, type SyncResult } from "./sync.js";
 
 export interface WatchOptions {
@@ -88,6 +88,8 @@ async function claim(stateDir: string): Promise<string> {
  * - Syncs at start (syncClients), then DEBOUNCE ms after any change in a folder holding a client
  *   config or settings.json, and every POLL ms, which also covers clients installed later and
  *   folders that did not exist at start. Syncs never overlap; a change during one runs one more.
+ * - Links only the clients the user connected. A client found that the user was never asked
+ *   about is announced once (clientFound) and left alone.
  * - At start, with notifications on, shows how many changes wait for review (pendingSummary).
  * - When a proxy queues a change (pending.json gains an id), shows changeQueued.
  * - When a proxy blocks a call (events.jsonl gains call_blocked), shows callsBlocked; repeats for
@@ -117,6 +119,8 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
   };
 
   // --- syncing ---
+  /** Clients already announced as found but not connected, so each is announced once per run. */
+  const announced = new Set<string>();
   let running: Promise<SyncResult> | undefined;
   let again = false;
   const runSync = async (): Promise<SyncResult> => {
@@ -132,6 +136,11 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
       ...(options.launch === undefined ? {} : { launch: options.launch }),
     });
     report(result);
+    for (const { client, servers } of result.unasked) {
+      if (announced.has(client)) continue;
+      announced.add(client);
+      await notify("client found", clientFound(client, servers));
+    }
     options.onSync?.(result);
     return result;
   };
@@ -143,7 +152,7 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
     running = runSync()
       .catch((error: unknown) => {
         log.error(`sync failed: ${error instanceof Error ? error.message : String(error)}`);
-        return { problems: [], skipped: [], linked: [], failed: [], wrapped: [] } satisfies SyncResult;
+        return { problems: [], skipped: [], linked: [], failed: [], wrapped: [], unasked: [] } satisfies SyncResult;
       })
       .finally(() => {
         running = undefined;

@@ -3,6 +3,8 @@ import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { printable } from "../commands/text.js";
+import type { ClientId } from "../config/client-ids.js";
+import { CLIENT_NAMES } from "../config/client-names.js";
 import type { LatchEvent, PendingChange } from "../schema/index.js";
 
 /** One desktop notification. `critical` stays on screen until dismissed where the desktop allows it. */
@@ -64,6 +66,16 @@ export function changeQueued(change: PendingChange): DesktopNotification {
   const title = change.tier === 3 ? `High risk: ${name} changed` : `${name} changed and needs review`;
   const body = `${changeSummary(change)}. Its calls are blocked until you review it in LatchVerify.`;
   return { title: clean(title, MAX_TITLE), body: clean(body, MAX_BODY), urgency: change.tier === 3 ? "critical" : "normal" };
+}
+
+/** The notification for an MCP client found on this machine that the user has not been asked about. */
+export function clientFound(client: ClientId, servers: number): DesktopNotification {
+  const name = CLIENT_NAMES[client];
+  return {
+    title: clean(`Found ${name} with ${servers === 1 ? "1 MCP server" : `${servers} MCP servers`}`, MAX_TITLE),
+    body: clean(`LatchVerify protects it only if you connect it: run \`latch setup\`, or choose Connect in LatchVerify. Nothing was changed.`, MAX_BODY),
+    urgency: "normal",
+  };
 }
 
 /** Why a call was blocked, from a call_blocked event's reason ("hard_block chg_..", "unpinned"). */

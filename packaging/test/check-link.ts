@@ -7,10 +7,13 @@
  * Node.js, by absolute paths, as an installer finds it on a fresh machine.
  *
  *   tsx packaging/test/check-link.ts linked   --config <~/.claude.json> --lockfile <latch.lock> --server <id>
+ *   tsx packaging/test/check-link.ts pinned   --config <~/.claude.json> --lockfile <latch.lock> --server <id>
  *   tsx packaging/test/check-link.ts unlinked --config <~/.claude.json> --lockfile <latch.lock> --server <id>
  *
- * linked: the entry starts `latch proxy --server <id>` with LATCH_LOCKFILE_PATH set to the
- * lockfile, and the lockfile pins at least one of the server's tools.
+ * linked: the entry starts `latch --lockfile <latch.lock> ... proxy --server <id>`, carries no
+ * LATCH_* variable in its env, and the lockfile lists the server.
+ * pinned: after the server's first run (probe), the lockfile pins at least one of its tools and
+ * no longer marks it for trust on first use.
  * unlinked: the entry runs its own command again with no LATCH_* variables, and the lockfile is
  * still there (uninstalling keeps the approvals).
  *
@@ -45,9 +48,19 @@ export function checkLinked(config: unknown, lock: unknown, serverId: string, lo
   const args = entry.args ?? [];
   const at = args.indexOf("proxy");
   if (at === -1 || args[at + 1] !== "--server" || args[at + 2] !== serverId) return `"${serverId}" does not start latch proxy: ${[entry.command, ...args].join(" ")}`;
-  if (entry.env?.LATCH_LOCKFILE_PATH !== lockfilePath) return `"${serverId}" has LATCH_LOCKFILE_PATH=${entry.env?.LATCH_LOCKFILE_PATH}, expected ${lockfilePath}`;
-  const tools = (lock as { servers?: Record<string, { tools?: unknown[] }> }).servers?.[serverId]?.tools ?? [];
-  if (tools.length === 0) return `latch.lock pins no tool of "${serverId}"`;
+  const lockAt = args.indexOf("--lockfile");
+  if (lockAt === -1 || lockAt > at || args[lockAt + 1] !== lockfilePath) return `"${serverId}" does not pass --lockfile ${lockfilePath} to latch`;
+  const leftover = Object.keys(entry.env ?? {}).filter((key) => key.startsWith("LATCH_"));
+  if (leftover.length > 0) return `"${serverId}" has ${leftover.join(", ")} in its env`;
+  if ((lock as { servers?: Record<string, unknown> }).servers?.[serverId] === undefined) return `latch.lock does not list "${serverId}"`;
+  return null;
+}
+
+export function checkPinned(lock: unknown, serverId: string): string | null {
+  const server = (lock as { servers?: Record<string, { tools?: unknown[]; trustOnFirstUse?: boolean }> }).servers?.[serverId];
+  if (server === undefined) return `latch.lock does not list "${serverId}"`;
+  if ((server.tools ?? []).length === 0) return `latch.lock pins no tool of "${serverId}"`;
+  if (server.trustOnFirstUse === true) return `"${serverId}" is still marked for trust on first use`;
   return null;
 }
 
@@ -110,9 +123,9 @@ if (process.argv[1]?.endsWith("check-link.ts")) {
   const [mode] = positionals;
   const { config, lockfile, server, tool } = values;
   const usable =
-    mode === "client" ? config && server : mode === "probe" ? config && server && tool : (mode === "linked" || mode === "unlinked") && config && lockfile && server;
+    mode === "client" ? config && server : mode === "probe" ? config && server && tool : (mode === "linked" || mode === "pinned" || mode === "unlinked") && config && lockfile && server;
   if (!usable) {
-    console.error("usage: check-link.ts client --config <path> --server <id>\n       check-link.ts linked|unlinked --config <path> --lockfile <path> --server <id>\n       check-link.ts probe --config <path> --server <id> --tool <name>");
+    console.error("usage: check-link.ts client --config <path> --server <id>\n       check-link.ts linked|pinned|unlinked --config <path> --lockfile <path> --server <id>\n       check-link.ts probe --config <path> --server <id> --tool <name>");
     process.exit(2);
   }
   if (mode === "client") {
@@ -126,7 +139,9 @@ if (process.argv[1]?.endsWith("check-link.ts")) {
     const entry = serverEntry(read(config!), server!);
     problem = entry ? await probe(entry, tool!) : `no "${server}" entry in the Claude Code config`;
   } else if (!existsSync(lockfile!)) problem = `${lockfile} does not exist`;
-  else problem = mode === "linked" ? checkLinked(read(config!), read(lockfile!), server!, lockfile!) : checkUnlinked(read(config!), server!);
+  else if (mode === "linked") problem = checkLinked(read(config!), read(lockfile!), server!, lockfile!);
+  else if (mode === "pinned") problem = checkPinned(read(lockfile!), server!);
+  else problem = checkUnlinked(read(config!), server!);
   if (problem) {
     console.error(`✖ ${mode}: ${problem}`);
     process.exit(1);

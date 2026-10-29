@@ -1,15 +1,17 @@
 #!/bin/sh
-# Links (or, with "remove", unlinks) every MCP client of the user who installed the package.
+# After installing ("setup"): lists the MCP clients of the user who installed the package and how
+# to connect them, and creates their per-user latch.lock. It connects nothing: LatchVerify connects
+# a client only when its user says so (`latch setup` in a terminal, or --client/--all).
+# Before removing ("remove"): unlinks every MCP client, so none points at the removed install.
 #
 # Package manager scripts run as root, but client configs (~/.claude.json, ~/.cursor/mcp.json, ...)
-# and the per-user latch.lock belong to a person. This runs `latch setup --all` as the user behind
-# sudo or pkexec, with their home directory, so the files it writes are theirs. It never fails: the
-# package is installed either way, and anyone can run `latch setup --all` (or
-# `latch setup --remove --all`) themselves. Set LATCH_SKIP_SETUP=1 to leave the clients alone.
+# and the per-user latch.lock belong to a person. This runs latch as the user behind sudo or pkexec,
+# with their home directory, so the files it writes are theirs. It never fails: the package is
+# installed either way. Set LATCH_SKIP_SETUP=1 to leave the clients alone.
 #
 # Usage: link-user setup | link-user remove
 case "${1:-}" in
-  setup) args="setup --all" ;;
+  setup) args="setup" ;;
   remove) args="setup --remove --all" ;;
   *) echo "usage: $0 setup|remove" >&2; exit 2 ;;
 esac

@@ -63,18 +63,22 @@ const setupGlobals = () => {
 
 program
   .command("setup")
-  .description("link Claude Code (or --all clients) to latch with no questions: wrap their MCP servers and create the per-user latch.lock (installers run this)")
-  .addOption(new Option("--client <id>", "client to link").choices(SUPPORTED_CLIENTS).default("claude-code"))
-  .addOption(new Option("--all", "link (or with --remove, unlink) every MCP client found on this machine").conflicts("client"))
-  .option("--remove", "unlink instead: give the client's servers their original commands back (latch.lock is kept)", false)
+  .description("find the MCP clients on this machine and connect the ones you choose: their servers start behind latch, pinned in the per-user latch.lock")
+  .addOption(new Option("--client <id>", "connect this client without asking").choices(SUPPORTED_CLIENTS))
+  .addOption(new Option("--all", "connect (or with --remove, disconnect) every MCP client found, without asking").conflicts("client"))
+  .option("--remove", "disconnect instead: give the client's servers their original commands back (latch.lock is kept)", false)
   .option("--dry-run", "show what would change without writing", false)
-  .action((opts: { client: (typeof SUPPORTED_CLIENTS)[number]; all?: boolean; remove: boolean; dryRun: boolean }) => {
-    const client = opts.all ? undefined : opts.client;
-    return run(async () => {
-      const { runSetup, runUnlink } = await import("./commands/setup.js");
-      return opts.remove ? runUnlink({ client, dryRun: opts.dryRun }) : runSetup({ client, dryRun: opts.dryRun, ...setupGlobals() });
-    });
-  });
+  .action((opts: { client?: (typeof SUPPORTED_CLIENTS)[number]; all?: boolean; remove: boolean; dryRun: boolean }) =>
+    run(async () => {
+      const { runSetup, runSetupAsk, runUnlink } = await import("./commands/setup.js");
+      if (opts.remove) {
+        if (!opts.all && opts.client === undefined) throw new Error("latch setup --remove: name the client with --client <id>, or use --all");
+        return runUnlink({ client: opts.all ? undefined : opts.client, dryRun: opts.dryRun });
+      }
+      if (opts.all || opts.client !== undefined) return runSetup({ client: opts.all ? undefined : opts.client, dryRun: opts.dryRun, ...setupGlobals() });
+      return runSetupAsk({ dryRun: opts.dryRun, ...setupGlobals() });
+    }),
+  );
 
 program
   .command("add")

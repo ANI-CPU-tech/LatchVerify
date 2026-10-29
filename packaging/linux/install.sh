@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install LatchVerify for the current user, without root: the app in ~/.local/lib/latchverify,
-# `latch` and `latchverify-review` in ~/.local/bin, a menu entry, then link every MCP client with
-# `latch setup --all` (LATCH_SKIP_SETUP=1 skips that). Run it again from a newer archive to update.
+# `latch` and `latchverify-review` in ~/.local/bin, a menu entry, then `latch setup`, which asks
+# which MCP clients to connect (LATCH_SKIP_SETUP=1 skips that). Run it again from a newer archive to update.
 # PREFIX=/some/dir installs somewhere other than ~/.local.
 set -eu
 
@@ -32,9 +32,9 @@ cp "$src/io.github.vinayakkam.LatchVerify.svg" "$data/icons/hicolor/scalable/app
 
 echo "Installed LatchVerify $("$lib/latch" --version) in $lib"
 if [ "${LATCH_SKIP_SETUP:-}" = 1 ]; then
-  echo "LATCH_SKIP_SETUP=1: your MCP clients were left alone. Run 'latch setup --all' to link them."
+  echo "LATCH_SKIP_SETUP=1: your MCP clients were left alone. Run 'latch setup' to choose which to connect."
 else
-  "$lib/latch" setup --all || echo "Linking your MCP clients did not finish; run 'latch setup --all' again at any time."
+  "$lib/latch" setup || echo "Connecting your MCP clients did not finish; run 'latch setup' again at any time."
 fi
 
 case ":$PATH:" in

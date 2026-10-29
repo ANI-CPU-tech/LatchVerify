@@ -1,32 +1,22 @@
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import type { Writable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import pc from "picocolors";
 import { clientConfigPath, detectClients, findOldBackups, unwrapProxy, withoutLatchEnv, writeClientConfig, type ClientId, type ClientServerEntry, type ProxyLaunch } from "../config/clients.js";
 import { emptyLockfile, writeLockfile } from "../store/lockfile.js";
+import { readSettings, settingsPath, updateSettings } from "../store/settings.js";
+import { CLIENT_NAMES } from "../config/client-names.js";
 import { runInit } from "./init.js";
 import { configPlace, oldBackupWarning, plural, printable, problemWarning } from "./text.js";
 
-/** How each client is named to people. */
-export const CLIENT_NAMES: Record<ClientId, string> = {
-  "claude-desktop": "Claude Desktop",
-  "claude-code": "Claude Code",
-  cursor: "Cursor",
-  vscode: "VS Code",
-  "vscode-insiders": "VS Code Insiders",
-  vscodium: "VSCodium",
-  cline: "Cline (VS Code)",
-  "cline-cli": "Cline CLI",
-  "gemini-cli": "Gemini CLI",
-  zed: "Zed",
-  "lm-studio": "LM Studio",
-  "amazon-q": "Amazon Q Developer",
-};
+export { CLIENT_NAMES };
 
 export interface SetupOptions {
-  /** The client to link, or undefined for every client found (`--all`). The CLI defaults it to claude-code. */
+  /** The client to link (--client), or undefined for every client found (--all). Naming it is the user's consent. */
   client: ClientId | undefined;
+  /** settings.json, where the consent is recorded. Defaults to the one beside the per-user lockfile. */
+  settingsPath?: string;
   /** Show what would change without writing. */
   dryRun: boolean;
   /** The lockfile to create and link to. The CLI defaults it to userLockfilePath(). */
@@ -40,8 +30,10 @@ export interface SetupOptions {
 }
 
 /**
- * `latch setup`: link a client (Claude Code by default), or with `--all` every client found, to
- * latch with no questions, as installers run it right after installing.
+ * `latch setup --client <id>` or `latch setup --all`: link that client, or every client found, to
+ * latch with no questions. Naming the clients is the user's consent, recorded in settings.json
+ * (clients[id] = true), so the background sync keeps them linked, new servers included. Plain
+ * `latch setup` asks first (runSetupAsk).
  *
  * 1. Creates the lockfile (by default the per-user one, see userLockfilePath) if it does not exist,
  *    so latch review and verify find it from any directory without asking.
@@ -106,6 +98,11 @@ export async function runSetup(options: SetupOptions): Promise<number> {
     }
   }
 
+  // Consent: the clients linked here stay linked by the background sync.
+  if (!options.dryRun && linked.length > 0) {
+    await updateSettings(options.settingsPath ?? settingsPath(), { clients: Object.fromEntries(linked.map((id) => [id, true])) });
+  }
+
   for (const line of oldBackupWarning(await findOldBackups())) say(pc.yellow(line));
 
   say();
@@ -128,6 +125,8 @@ export interface UnlinkOptions {
   client: ClientId | undefined;
   dryRun: boolean;
   output?: Writable;
+  /** settings.json, where the choice is recorded (clients[id] = false). Defaults to the one beside the per-user lockfile. */
+  settingsPath?: string;
 }
 
 /**
@@ -187,8 +186,85 @@ export async function runUnlink(options: UnlinkOptions): Promise<number> {
     restoredClients.add(config.client);
     say(`${pc.green("✔")} restored ${plural(ids.length, "server")} in ${configPlace(config)}: ${printable(ids.join(", "))}`);
   }
+  // Unlinking is a no: the background sync leaves these clients alone from now on.
+  if (!options.dryRun) {
+    const declined = client === undefined ? [...new Set([...detection.configs, ...detection.problems].map((found) => found.client))] : [client];
+    if (declined.length > 0) await updateSettings(options.settingsPath ?? settingsPath(), { clients: Object.fromEntries(declined.map((id) => [id, false])) });
+  }
   if (restoredClients.size > 0) {
     say(`next: restart ${listOf([...restoredClients].map((id) => CLIENT_NAMES[id]))}. latch.lock is kept, so linking again later keeps your approvals.`);
   }
+  return code;
+}
+
+export interface SetupAskOptions extends Omit<SetupOptions, "client"> {
+  /** Ask with a prompt. Defaults to true when stdin and stdout are terminals. */
+  interactive?: boolean;
+  input?: Readable;
+}
+
+/**
+ * Plain `latch setup`: find the MCP clients on this machine and ask which to connect. Only names
+ * are shown: the client, its config file and how many servers it has, never a server's launch
+ * line or env. Each client chosen is linked (runSetup) and recorded as connected.
+ *
+ * Without a terminal (an installer, a script) nothing is linked: setup lists what it found and
+ * how to connect, and creates the per-user lockfile. Resolves 1 when a chosen client failed.
+ */
+export async function runSetupAsk(options: SetupAskOptions): Promise<number> {
+  const out = options.output ?? process.stdout;
+  const say = (line = "") => void out.write(`${line}\n`);
+  const detection = await detectClients();
+  const found = new Map<ClientId, { files: Set<string>; servers: number }>();
+  for (const config of detection.configs) {
+    const entry = found.get(config.client) ?? { files: new Set<string>(), servers: 0 };
+    entry.files.add(config.path);
+    entry.servers += Object.keys(config.servers).length;
+    found.set(config.client, entry);
+  }
+  for (const problem of detection.problems) say(pc.yellow(problemWarning(problem)));
+  const settings = await readSettings(options.settingsPath ?? settingsPath());
+
+  say(pc.bold("latch setup: MCP clients on this machine"));
+  if (found.size === 0) say("  none found yet. After installing an MCP client, run `latch setup` again.");
+  for (const [id, { files, servers }] of found) {
+    const state = settings.clients[id] === true ? pc.green("connected") : settings.clients[id] === false ? pc.dim("not connected (you said no)") : pc.yellow("not connected yet");
+    say(`  ${CLIENT_NAMES[id].padEnd(20)} ${plural(servers, "server").padEnd(11)} ${state}  ${printable([...files].join(", "))}`);
+  }
+
+  const candidates = [...found.keys()].filter((id) => settings.clients[id] !== true);
+  const interactive = options.interactive ?? (process.stdin.isTTY === true && process.stdout.isTTY === true);
+  if (candidates.length === 0 || !interactive) {
+    if (candidates.length > 0) {
+      say();
+      say("Nothing was changed. LatchVerify connects a client only when you say so:");
+      say("  latch setup                    choose in a terminal");
+      say("  latch setup --client <id>      connect one: " + candidates.join(", "));
+      say("  latch setup --all              connect every client found");
+    }
+    if (!existsSync(options.lockfilePath) && !options.dryRun) {
+      await mkdir(dirname(resolve(options.lockfilePath)), { recursive: true });
+      await writeLockfile(resolve(options.lockfilePath), emptyLockfile());
+    }
+    return 0;
+  }
+
+  // Loaded only for the prompt.
+  const { isCancel, multiselect } = await import("@clack/prompts");
+  say();
+  const picked = await multiselect({
+    message: "Which clients should LatchVerify connect? Their servers start behind the proxy, and their tools are pinned on first run.",
+    options: candidates.map((id) => ({ value: id, label: CLIENT_NAMES[id], hint: plural(found.get(id)!.servers, "server") })),
+    initialValues: [],
+    required: false,
+    input: options.input ?? process.stdin,
+    output: out,
+  });
+  if (isCancel(picked) || picked.length === 0) {
+    say("nothing connected");
+    return 0;
+  }
+  let code = 0;
+  for (const client of picked) code = Math.max(code, await runSetup({ ...options, client }));
   return code;
 }

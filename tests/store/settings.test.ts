@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, SettingsPatchSchema } from "../../src/schema/index.js";
-import { SettingsError, clientEnabled, readSettings, settingsPath, updateSettings } from "../../src/store/settings.js";
+import { SettingsError, clientConnected, readSettings, settingsPath, updateSettings } from "../../src/store/settings.js";
 
 let dir: string;
 let path: string;
@@ -65,10 +65,10 @@ describe("updateSettings", () => {
   });
 });
 
-describe("clientEnabled", () => {
-  it("is true unless the client was turned off", () => {
-    expect(clientEnabled(DEFAULT_SETTINGS, "cursor")).toBe(true);
-    expect(clientEnabled({ ...DEFAULT_SETTINGS, clients: { cursor: true } }, "cursor")).toBe(true);
-    expect(clientEnabled({ ...DEFAULT_SETTINGS, clients: { cursor: false } }, "cursor")).toBe(false);
+describe("clientConnected", () => {
+  it("is true only after the user said yes: never for a client never asked about", () => {
+    expect(clientConnected(DEFAULT_SETTINGS, "cursor")).toBe(false);
+    expect(clientConnected({ ...DEFAULT_SETTINGS, clients: { cursor: true } }, "cursor")).toBe(true);
+    expect(clientConnected({ ...DEFAULT_SETTINGS, clients: { cursor: false } }, "cursor")).toBe(false);
   });
 });

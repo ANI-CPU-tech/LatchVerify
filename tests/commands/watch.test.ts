@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runWatch } from "../../src/commands/watch.js";
 import { clientConfigPath } from "../../src/config/clients.js";
 import { emptyLockfile, writeLockfile } from "../../src/store/lockfile.js";
+import { updateSettings } from "../../src/store/settings.js";
 
 const tools = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/benign-tools.json", import.meta.url)), "utf8")).tools;
 const stub = {
@@ -31,6 +32,7 @@ describe.skipIf(process.platform === "win32")("latch watch --once", { timeout: 3
     lockfilePath = join(home, ".config", "latchverify", "latch.lock");
     await mkdir(dirname(lockfilePath), { recursive: true });
     await writeLockfile(lockfilePath, emptyLockfile());
+    await updateSettings(join(dirname(lockfilePath), "settings.json"), { clients: { cursor: true } });
   });
   afterEach(async () => {
     vi.unstubAllEnvs();

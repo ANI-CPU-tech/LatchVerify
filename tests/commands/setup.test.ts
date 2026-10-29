@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { launchHash, programName } from "../../src/analyze/hash.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runSetup, runUnlink, type SetupOptions } from "../../src/commands/setup.js";
+import { runSetup, runSetupAsk, runUnlink, type SetupOptions } from "../../src/commands/setup.js";
 import { INSTALL_LAUNCH, clientConfigPath, clientLocations, wrapWithProxy, type ClientId } from "../../src/config/clients.js";
 import { LockFileSchema } from "../../src/schema/index.js";
 
@@ -227,6 +227,64 @@ describe.skipIf(process.platform === "win32")("runSetup", { timeout: 30_000 }, (
     expect(text).toContain(`    ${old}`);
     expect(text).not.toContain("sk-CANARY-backup");
     expect(await readFile(old, "utf8")).toContain("sk-CANARY-backup");
+  });
+
+  describe("consent", () => {
+    const settingsFile = () => join(dirname(lockfilePath), "settings.json");
+    const settings = async () => JSON.parse(await readFile(settingsFile(), "utf8"));
+
+    it("records the client as connected, and --remove records the no", async () => {
+      await claudeConfig({ mcpServers: { weather } });
+      expect((await setup()).code).toBe(0);
+      expect((await settings()).clients).toEqual({ "claude-code": true });
+      expect(await runUnlink({ client: "claude-code", dryRun: false, output: new PassThrough() })).toBe(0);
+      expect((await settings()).clients).toEqual({ "claude-code": false });
+    });
+
+    async function ask(keys: string | null) {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      let text = "";
+      output.setEncoding("utf8").on("data", (chunk: string) => {
+        text += chunk;
+        if (keys !== null && text.includes("Which clients should LatchVerify connect?")) {
+          const typed = keys;
+          setImmediate(() => input.write(typed));
+          keys = null;
+        }
+      });
+      const code = await runSetupAsk({ dryRun: false, lockfilePath, output, input, interactive: keys !== null });
+      return { code, text: text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "") };
+    }
+
+    it("without a terminal, lists what it found and connects nothing", async () => {
+      const config = await claudeConfig({ mcpServers: { weather } });
+      const before = await readFile(config, "utf8");
+      const { code, text } = await ask(null);
+      expect(code).toBe(0);
+      expect(text).toContain("Claude Code");
+      expect(text).toContain("1 server");
+      expect(text).toContain("not connected yet");
+      expect(text).toContain("latch setup --client <id>      connect one: claude-code");
+      expect(text).not.toContain("weather-server.ts");
+      expect(await readFile(config, "utf8")).toBe(before);
+      await lockOnDisk();
+    });
+
+    it("connects the clients picked in the prompt, and only those", async () => {
+      const config = await claudeConfig({ mcpServers: { weather } });
+      const { code } = await ask(" \r");
+      expect(code).toBe(0);
+      expect(JSON.parse(await readFile(config, "utf8")).mcpServers.weather.args).toContain("proxy");
+      expect((await settings()).clients).toEqual({ "claude-code": true });
+    });
+
+    it("connects nothing when nothing is picked", async () => {
+      const config = await claudeConfig({ mcpServers: { weather } });
+      const before = await readFile(config, "utf8");
+      expect((await ask("\r")).text).toContain("nothing connected");
+      expect(await readFile(config, "utf8")).toBe(before);
+    });
   });
 
   it("writes nothing on a dry run", async () => {

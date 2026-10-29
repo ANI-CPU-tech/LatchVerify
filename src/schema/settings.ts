@@ -7,7 +7,11 @@ import { SUPPORTED_CLIENTS } from "../config/client-ids.js";
  * field has a default, so a missing or partial file is a complete set of settings.
  */
 export const SettingsSchema = z.object({
-  /** Clients the background sync links, by id. A client not listed is linked: off is an explicit choice. */
+  /**
+   * The user's answer per client: true to connect it (the background sync links it and the
+   * servers added to it later), false for no. A client not listed has not been asked, and is not
+   * linked: LatchVerify only notes that it found it.
+   */
   clients: z.partialRecord(z.enum(SUPPORTED_CLIENTS), z.boolean()).default({}),
   /** Desktop notifications for changes waiting for review and for blocked calls. */
   notifications: z.boolean().default(true),

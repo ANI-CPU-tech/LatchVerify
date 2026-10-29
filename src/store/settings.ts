@@ -52,7 +52,10 @@ export async function updateSettings(path: string, patch: SettingsPatch): Promis
   });
 }
 
-/** True unless the user turned `client` off. */
-export function clientEnabled(settings: Settings, client: keyof Settings["clients"]): boolean {
-  return settings.clients[client] !== false;
+/**
+ * True only when the user connected `client`: answered yes in `latch setup`, named it with
+ * --client or --all, or chose Connect in the app. A client never asked about is not connected.
+ */
+export function clientConnected(settings: Settings, client: keyof Settings["clients"]): boolean {
+  return settings.clients[client] === true;
 }

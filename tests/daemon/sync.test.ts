@@ -37,7 +37,8 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
     vi.stubEnv("HOME", home);
     vi.stubEnv("XDG_CONFIG_HOME", undefined);
     const lockfilePath = join(home, ".config", "latchverify", "latch.lock");
-    options = { lockfilePath, stateDir: join(dirname(lockfilePath), ".latch"), settings: DEFAULT_SETTINGS };
+    // The user connected Cursor and VS Code; every other client is unasked.
+    options = { lockfilePath, stateDir: join(dirname(lockfilePath), ".latch"), settings: { ...DEFAULT_SETTINGS, clients: { cursor: true, vscode: true } } };
     await mkdir(dirname(lockfilePath), { recursive: true });
     await writeLockfile(lockfilePath, emptyLockfile());
   });
@@ -69,7 +70,15 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
 
     const before = await readFile(path, "utf8");
     const second = await syncClients(options);
-    expect(second).toEqual({ problems: [], skipped: [], linked: [], failed: [], wrapped: [] });
+    expect(second).toEqual({ problems: [], skipped: [], linked: [], failed: [], wrapped: [], unasked: [] });
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+
+  it("never touches a client the user was not asked about, and says it found it", async () => {
+    const path = await writeConfig("zed", { context_servers: { a: stub("a"), b: stub("b") } });
+    const before = await readFile(path, "utf8");
+    const result = await syncClients(options);
+    expect(result).toEqual({ problems: [], skipped: [], linked: [], failed: [], wrapped: [], unasked: [{ client: "zed", servers: 2 }] });
     expect(await readFile(path, "utf8")).toBe(before);
   });
 
@@ -77,7 +86,7 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
     const path = await writeConfig("cursor", { mcpServers: { weather: stub("w") } });
     const before = await readFile(path, "utf8");
     const result = await syncClients({ ...options, settings: { ...DEFAULT_SETTINGS, clients: { cursor: false } } });
-    expect(result).toEqual({ problems: [], skipped: [], linked: [], failed: [], wrapped: [] });
+    expect(result).toEqual({ problems: [], skipped: [], linked: [], failed: [], wrapped: [], unasked: [] });
     expect(await readFile(path, "utf8")).toBe(before);
   });
 

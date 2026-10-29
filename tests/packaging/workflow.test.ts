@@ -30,13 +30,13 @@ describe("the build-installers workflow", () => {
 
   it("asks version.ts and check-link.ts only for what they support", () => {
     for (const [, format] of workflow.matchAll(/version\.ts (\w+)/g)) expect(["semver", "deb", "arch", "windows"]).toContain(format);
-    for (const [, mode] of workflow.matchAll(/\$check (\w+)/g)) expect(["client", "linked", "unlinked", "probe"]).toContain(mode);
+    for (const [, mode] of workflow.matchAll(/\$check (\w+)/g)) expect(["client", "linked", "pinned", "unlinked", "probe"]).toContain(mode);
   });
 
   it("installs, checks and uninstalls every installer it builds", () => {
     for (const name of ["windows", "linux"]) {
       const text = job(name);
-      for (const mode of ["client", "linked", "probe", "unlinked"]) expect(text, `${name} ${mode}`).toContain(`$check ${mode}`);
+      for (const mode of ["client", "linked", "probe", "pinned", "unlinked"]) expect(text, `${name} ${mode}`).toContain(`$check ${mode}`);
     }
     expect(job("windows")).toContain("unins000.exe");
     expect(job("linux")).toContain("sudo apt-get remove -y latchverify");

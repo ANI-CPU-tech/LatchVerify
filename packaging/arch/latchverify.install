@@ -1,4 +1,5 @@
-# pacman runs these as root; link-user links or unlinks the MCP clients as the user behind sudo.
+# pacman runs these as root; link-user lists (after install) or unlinks (before removal) the MCP
+# clients as the user behind sudo. It connects a client only when its user says so.
 # LATCH_SKIP_SETUP=1 leaves the clients alone.
 
 post_install() {

@@ -86,12 +86,24 @@ describe.skipIf(process.platform === "win32")("startWatcher", { timeout: 30_000 
 
   const cursorServers = async () => JSON.parse(await readFile(clientConfigPath("cursor"), "utf8")).mcpServers as Record<string, ClientServerEntry>;
 
-  it("links a server added to a client config while it runs", async () => {
+  it("links a server added to a connected client's config while it runs", async () => {
+    await updateSettings(options.settingsPath, { clients: { cursor: true } });
     await mkdir(dirname(clientConfigPath("cursor")), { recursive: true });
     watcher = await startWatcher(options);
     await writeFile(clientConfigPath("cursor"), JSON.stringify({ mcpServers: { weather: stub } }));
     await eventually(async () => expect((await cursorServers()).weather!.args).toContain("proxy"));
     expect(LockFileSchema.parse(JSON.parse(await readFile(options.lockfilePath, "utf8"))).servers.weather).toMatchObject({ tools: [], trustOnFirstUse: true });
+  });
+
+  it("announces a client it was never told to connect, once, and leaves it alone", async () => {
+    const path = clientConfigPath("cursor");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ mcpServers: { weather: stub } }));
+    watcher = await startWatcher(options);
+    expect(shown).toEqual([expect.objectContaining({ title: "Found Cursor with 1 MCP server" })]);
+    await watcher.syncNow();
+    expect(shown).toHaveLength(1);
+    expect(JSON.parse(await readFile(path, "utf8")).mcpServers.weather).toEqual(stub);
   });
 
   it("says at start how many changes wait for review", async () => {

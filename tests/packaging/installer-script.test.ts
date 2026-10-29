@@ -37,9 +37,9 @@ describe("the Inno Setup script", () => {
 describe("the Linux install hooks", () => {
   const read = (path: string) => readFileSync(new URL(`packaging/${path}`, root), "utf8");
 
-  it("link and unlink every MCP client, as the installing user", () => {
+  it("connect nothing without the user's say-so, and unlink every client on removal, as the installing user", () => {
     const linkUser = read("linux/link-user");
-    expect(linkUser).toContain('setup) args="setup --all" ;;');
+    expect(linkUser).toContain('setup) args="setup" ;;');
     expect(linkUser).toContain('remove) args="setup --remove --all" ;;');
     expect(read("debian/postinst")).toContain("/usr/lib/latchverify/link-user setup");
     expect(read("debian/prerm")).toContain("/usr/lib/latchverify/link-user remove");
@@ -47,8 +47,8 @@ describe("the Linux install hooks", () => {
     expect(read("arch/latchverify.install")).toMatch(/pre_remove\(\) \{\n {2}\/usr\/lib\/latchverify\/link-user remove/);
   });
 
-  it("link every client from the tarball's install.sh and unlink them in uninstall.sh", () => {
-    expect(read("linux/install.sh")).toContain('"$lib/latch" setup --all ||');
+  it("ask in the terminal from the tarball's install.sh, and unlink every client in uninstall.sh", () => {
+    expect(read("linux/install.sh")).toContain('"$lib/latch" setup ||');
     expect(read("linux/uninstall.sh")).toContain('"$lib/latch" setup --remove --all ||');
   });
 });
