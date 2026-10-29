@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -37,8 +36,8 @@ export interface ReviewOptions {
   dev?: boolean;
   /** --ui: the built review UI to serve. Defaults to dist/web of this latchverify install. */
   staticDir?: string;
-  /** --ui: opens the review UI's URL. Defaults to the platform's browser opener. */
-  openBrowser?: (url: string) => void;
+  /** --ui: called with the review UI's URL once it is served (tests use it). No browser is opened. */
+  onReady?: (url: string) => void;
   /** --ui: resolves when the server should stop. Defaults to the first SIGINT or SIGTERM. */
   until?: Promise<void>;
 }
@@ -198,7 +197,8 @@ async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: s
     say(pc.yellow(`port ${options.port} is in use (often an earlier \`latch review --ui\` that is still running); using a free port instead`));
   }
   say(`review UI on ${handle.url} (approvals are recorded as ${printable(reviewer)}); press Ctrl+C to stop`);
-  (options.openBrowser ?? ((url: string) => openInBrowser(url, say)))(handle.url);
+  say(`open ${handle.url} in the LatchVerify app or a browser; LatchVerify opens nothing itself`);
+  options.onReady?.(handle.url);
 
   try {
     await (options.until ?? untilSignal());
@@ -220,15 +220,6 @@ function untilSignal(): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });
-}
-
-/** Opens `url` with the platform's opener, saying where to go if that fails. */
-function openInBrowser(url: string, say: (line?: string) => void): void {
-  const [command, args] =
-    process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
-  const child = spawn(command, args, { stdio: "ignore", detached: true, windowsHide: true });
-  child.on("error", () => say(`could not open a browser; open ${url} yourself`));
-  child.unref();
 }
 
 /** Approve change `id` as it is in the queue now; "gone" when it is no longer there. */

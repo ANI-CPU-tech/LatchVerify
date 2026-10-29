@@ -320,7 +320,7 @@ describe("runReview --ui", () => {
       port: 0,
       staticDir,
       until,
-      openBrowser: (url) => {
+      onReady: (url) => {
         opened = url;
         use(url).catch((error: unknown) => (failure = error)).finally(stop);
       },
@@ -343,7 +343,7 @@ describe("runReview --ui", () => {
     expect(await info({ dev: true })).toMatchObject({ dev: true });
   });
 
-  it("serves the review screen and the queue, opens the browser on it, and stops cleanly (task Verify)", async () => {
+  it("serves the review screen and the queue, reports its URL, and stops cleanly (task Verify)", async () => {
     let base = "";
     const { code, text, opened } = await withUi(async (url) => {
       base = url;
@@ -412,7 +412,7 @@ describe("runReview --ui", () => {
 
   it("fails on a port the user chose when it is taken, naming the likely cause", async () => {
     await withPortTaken(async (port) => {
-      await expect(review({ ui: true, port, staticDir, until: Promise.resolve(), openBrowser: () => {} })).rejects.toThrow(
+      await expect(review({ ui: true, port, staticDir, until: Promise.resolve(), onReady: () => {} })).rejects.toThrow(
         `latch review: port ${port} is in use (often an earlier \`latch review --ui\` that is still running); stop it, or choose another port with --port`,
       );
     });
@@ -427,7 +427,7 @@ describe("runReview --ui", () => {
         portFallback: true,
         staticDir,
         until: Promise.resolve(),
-        openBrowser: (url) => (opened = url),
+        onReady: (url) => (opened = url),
       });
       expect(code).toBe(0);
       expect(text).toContain(`port ${port} is in use`);
@@ -441,6 +441,6 @@ describe("runReview --ui", () => {
 
   it("refuses to start on a malformed queue", async () => {
     await writeFile(join(dir, "pending.json"), "{ nope");
-    await expect(review({ ui: true, port: 0, staticDir, until: Promise.resolve(), openBrowser: () => {} })).rejects.toThrow("not valid JSON");
+    await expect(review({ ui: true, port: 0, staticDir, until: Promise.resolve(), onReady: () => {} })).rejects.toThrow("not valid JSON");
   });
 });

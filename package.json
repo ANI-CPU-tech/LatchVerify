@@ -32,7 +32,8 @@
     "demo:benign": "tsx demo/weather-server.ts",
     "demo:evil": "tsx demo/evil-server.ts",
     "demo:devtools": "tsx demo/devtools-server.ts",
-    "demo:add": "tsx demo/add.ts"
+    "demo:add": "tsx demo/add.ts",
+    "desktop": "pnpm -s build && electron dist/desktop/main.js"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
@@ -46,6 +47,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@electron/packager": "20.3.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "^22",
     "@types/react": "^18.3.31",
@@ -53,6 +55,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "autoprefixer": "^10.6.1",
     "concurrently": "^10.0.6",
+    "electron": "44.7.2",
     "postcss": "^8.5.31",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
