@@ -169,6 +169,15 @@ describe("startProxy", () => {
     expect(stderr.join("")).toContain("[latch] the server is still running 100 ms after SIGTERM; sending SIGKILL");
   });
 
+  it("never lets a tier-3 tool's description reach the client", async () => {
+    const poisoned = JSON.parse(readFileSync(join(root, "tests/fixtures/poisoned-tools.json"), "utf8")).tools as Array<{ name: string; description: string }>;
+    const { messages, text } = await run({ args: ["-e", echoServer(poisoned)] }, [request(1, "tools/list"), (out) => waitFor(() => out().includes('"id":1'))]);
+    const listed = (messages.find((m) => m.id === 1)!.result as { tools: Array<{ name: string; description: string }> }).tools;
+    const forecast = poisoned.find((t) => t.name === "get_forecast")!;
+    expect(listed.find((t) => t.name === "get_forecast")!.description).toMatch(/^\[LatchVerify\] This tool's definition was withheld/);
+    expect(text).not.toContain(forecast.description);
+  });
+
   it("forwards unknown fields byte-for-byte in both directions", async () => {
     const sent = '{"jsonrpc":"2.0",  "id":1, "method":"echo", "x-extra":{"kept":true}, "n":1.50}';
     const { messages, text } = await run(echo, [sent, (out) => waitFor(() => out().includes('"id":1'))]);

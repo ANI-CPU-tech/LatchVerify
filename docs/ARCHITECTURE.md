@@ -45,7 +45,7 @@ never stdout, because stdout is the protocol.
 
 | Message | Direction | What LatchVerify does |
 |---|---|---|
-| `tools/list` response | server → client | Capture every tool, extract capabilities, diff against `latch.lock`, queue changes. The list is still forwarded. |
+| `tools/list` response | server → client | Capture every tool, extract capabilities, diff against `latch.lock`, queue changes. The list is still forwarded, except that a tier-3 tool reaches the client as its name and a "withheld" notice, never its own description or schema. |
 | `tools/call` request | client → server | Block when the tool is unpinned or has a pending tier-2+ change. Otherwise forward. |
 | `notifications/tools/list_changed` | server → client | The rug-pull signal. Re-fetch `tools/list` from the server and analyze it before the client acts on the change. Then forward the notification. |
 

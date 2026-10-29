@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LlmError } from "../../src/analyze/llm.js";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
-import { MAX_OWN_PAGES, routeFrame, type InterceptorContext } from "../../src/proxy/interceptor.js";
+import { MAX_OWN_PAGES, WITHHELD_DESCRIPTION, routeFrame, type InterceptorContext } from "../../src/proxy/interceptor.js";
 import { parseLine, type Direction, type JsonRpcRequest } from "../../src/proxy/transport.js";
 import { LockFileSchema, type LockFile, type McpTool } from "../../src/schema/index.js";
 import { readEvents } from "../../src/store/events.js";
@@ -134,7 +134,7 @@ describe("onToolsList", () => {
 
   it("queues the rug pull, persists it and logs each change", async () => {
     const { listTools, ctx, kinds, logs, stateDir } = await setup({ specVersion: "2025-06-18" });
-    expect(await listTools(poisoned)).toEqual(FORWARD);
+    expect(await listTools(poisoned)).toMatchObject({ action: "rewrite" });
     expect(ctx.pending.map((c) => [c.toolName, c.tier])).toEqual([
       ["get_forecast", 3],
       ["read_config", 2],
@@ -150,6 +150,29 @@ describe("onToolsList", () => {
     );
     expect(logs[0]).toMatch(/^weather\/get_forecast: tier 3 change hard-blocked: Critical pattern finding/);
     expect(logs[1]).toMatch(/^weather\/read_config: tier 2 change blocked for review: Gained filesystem\.read/);
+  });
+
+  it("passes tier-3 tools on with only their name, and every other tool untouched", async () => {
+    const { listTools, logs } = await setup();
+    const decision = await listTools(poisoned);
+    const tools = (decision as { message: { result: { tools: McpTool[] } } }).message.result.tools;
+    expect(tools.map((t) => t.name)).toEqual(poisoned.map((t) => t.name));
+    for (const [i, tool] of tools.entries()) {
+      if (["get_forecast", "run_diagnostics", "sync_alerts"].includes(tool.name)) {
+        expect(tool).toEqual({ name: tool.name, description: WITHHELD_DESCRIPTION, inputSchema: { type: "object", properties: {} } });
+      } else {
+        expect(tool).toEqual(poisoned[i]);
+      }
+    }
+    expect(decision).toMatchObject({ message: { jsonrpc: "2.0", id: 2 } });
+    expect(logs).toContain("weather: withheld the description of 3 tier-3 tool(s) from the client: get_forecast, run_diagnostics, sync_alerts");
+  });
+
+  it("forwards a list without tier-3 changes unchanged", async () => {
+    const { listTools } = await setup();
+    expect(await listTools([...benign, { name: "ping", description: "Check the server is up.", inputSchema: { type: "object" } }])).toEqual(
+      FORWARD,
+    );
   });
 
   it("does not churn change ids when the same list arrives again", async () => {
@@ -252,7 +275,7 @@ describe("onToolsList", () => {
     dirs.push(blocker);
     await writeFile(blocker, "");
     const { listTools, ctx, logs } = await setup({ stateDir: blocker });
-    expect(await listTools(poisoned)).toEqual(FORWARD);
+    expect(await listTools(poisoned)).toMatchObject({ action: "rewrite" });
     expect(ctx.pending).toHaveLength(4);
     expect(logs.some((line) => line.startsWith("could not write the pending queue:"))).toBe(true);
     expect(logs.some((line) => line.startsWith("could not write the event log:"))).toBe(true);
@@ -302,7 +325,10 @@ describe("onToolsList", () => {
     expect(ctx.pending).toEqual([]);
     expect(ctx.observed.size).toBe(0);
     expect(ctx.verified).toBe(true);
-    expect(logs).toEqual(["stranger: not in latch.lock, so its tools are blocked as unpinned; run `latch init` to pin them"]);
+    expect(logs).toEqual([
+      "stranger: not in latch.lock, so its tools are blocked as unpinned; run `latch init` to pin them",
+      expect.stringMatching(/^stranger: withheld the description of \d+ tier-3 tool\(s\) from the client: /),
+    ]);
     await expect(readFile(join(stateDir, "pending.json"))).rejects.toMatchObject({ code: "ENOENT" });
     expect(await fromClient(call(5, "get_forecast"))).toMatchObject({
       message: { error: { message: expect.stringContaining("run `latch init`"), data: { reason: { kind: "server_unpinned" } } } },
