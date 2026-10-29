@@ -22,7 +22,7 @@ import { captureTools } from "../proxy/capture.js";
 import type { LockFile } from "../schema/index.js";
 import { applyApproval, readLockfile, serializeLockfile, writeLockfile } from "../store/lockfile.js";
 import { defaultReviewer } from "../ui/server.js";
-import { plural, printable, problemWarning } from "./text.js";
+import { configPlace, plural, printable, problemWarning } from "./text.js";
 
 export interface InitOptions {
   /** Restrict to one client; default is every detected client. */
@@ -119,7 +119,10 @@ export function collectServers(configs: readonly ClientConfig[]): { servers: Ini
       skipped.push({
         serverId: server.serverId,
         clients: server.clients,
-        reason: `${listOf(server.clients)} launch it with different commands; give one of them another name`,
+        reason:
+          server.clients.length === 1
+            ? `${server.clients[0]} launches it with different commands in different places; give one of them another name`
+            : `${listOf(server.clients)} launch it with different commands; give one of them another name`,
       });
     } else {
       servers.push(server);
@@ -249,7 +252,7 @@ export async function runInit(options: InitOptions): Promise<number> {
 
   say(pc.bold(`latch init: ${printable(lockfilePath)}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
   for (const config of configs) {
-    say(`  found ${config.client}: ${printable(config.path)} (${plural(Object.keys(config.servers).length, "stdio server")})`);
+    say(`  found ${config.client}: ${configPlace(config)} (${plural(Object.keys(config.servers).length, "stdio server")})`);
   }
   const { servers, skipped } = collectServers(configs);
   // A config that could not be read keeps its servers unprotected: that is not a clean run.
@@ -326,7 +329,7 @@ export async function runInit(options: InitOptions): Promise<number> {
   if (options.dryRun) {
     if (lockChanged) say(`would write ${printable(lockfilePath)} with ${plural(Object.keys(next.servers).length, "server")}`);
     for (const { config, servers: entries } of rewrites) {
-      say(`would rewrite ${printable(config.path)}, keeping a .bak copy:`);
+      say(`would rewrite ${configPlace(config)}, keeping a .bak copy:`);
       for (const [serverId, entry] of Object.entries(entries)) {
         say(`  ${printable(serverId)}: ${commandLine(entry.command, entry.args ?? [])}`);
       }
@@ -343,9 +346,9 @@ export async function runInit(options: InitOptions): Promise<number> {
   for (const { config, servers: entries } of rewrites) {
     try {
       await writeClientConfig({ ...config, servers: entries });
-      say(`${pc.green("✔")} wrapped ${plural(Object.keys(entries).length, "server")} in ${printable(config.path)} (the original is kept as a .bak copy)`);
+      say(`${pc.green("✔")} wrapped ${plural(Object.keys(entries).length, "server")} in ${configPlace(config)} (the original is kept as a .bak copy)`);
     } catch (error) {
-      say(pc.red(`✖ could not rewrite ${printable(config.path)}: ${printable(error instanceof Error ? error.message : String(error))}`));
+      say(pc.red(`✖ could not rewrite ${configPlace(config)}: ${printable(error instanceof Error ? error.message : String(error))}`));
       failed = true;
     }
   }

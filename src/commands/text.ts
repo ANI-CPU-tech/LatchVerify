@@ -1,5 +1,5 @@
 import { formatCodepoint } from "../analyze/unicode.js";
-import type { ConfigProblem } from "../config/clients.js";
+import type { ClientConfig, ConfigProblem } from "../config/clients.js";
 
 /**
  * Text safe to print on a terminal: control and format characters (escape sequences, bidi
@@ -8,6 +8,11 @@ import type { ConfigProblem } from "../config/clients.js";
  */
 export function printable(text: string): string {
   return text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (char) => `[${formatCodepoint(char.codePointAt(0)!)}]`);
+}
+
+/** A config's file for people, with the part of it when that is not the whole file: "~/.claude.json (project /app)". */
+export function configPlace(config: Pick<ClientConfig, "path" | "scope">): string {
+  return printable(config.scope === undefined ? config.path : `${config.path} (${config.scope})`);
 }
 
 /** The warning for a client config that exists but cannot be used (see detectClients). */

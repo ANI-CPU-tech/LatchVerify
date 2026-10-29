@@ -92,6 +92,27 @@ describe.skipIf(process.platform === "win32")("runSetup", () => {
     expect((await lockOnDisk()).servers).toEqual({});
   });
 
+  it("links and unlinks Claude Code's per-project servers too", async () => {
+    const original = { mcpServers: { weather }, projects: { "/srv/app": { mcpServers: { forecast: weather }, allowedTools: [] } } };
+    const config = await claudeConfig(original);
+    const linked = await setup();
+    expect(linked.code).toBe(0);
+    expect(linked.text).toContain(`found claude-code: ${config} (project /srv/app) (1 stdio server)`);
+    expect(linked.text).toContain(`wrapped 1 server in ${config} (project /srv/app)`);
+    const after = JSON.parse(await readFile(config, "utf8"));
+    expect(after.mcpServers.weather.args).toContain("proxy");
+    expect(after.projects["/srv/app"].mcpServers.forecast.args).toContain("proxy");
+    expect(after.projects["/srv/app"].allowedTools).toEqual([]);
+    expect(Object.keys((await lockOnDisk()).servers).sort()).toEqual(["forecast", "weather"]);
+
+    const output = new PassThrough();
+    let text = "";
+    output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+    expect(await runUnlink({ client: "claude-code", dryRun: false, output })).toBe(0);
+    expect(text).toContain(`restored 1 server in ${config} (project /srv/app)`);
+    expect(JSON.parse(await readFile(config, "utf8"))).toEqual(original);
+  });
+
   it("links and unlinks every file of a client that keeps servers in two (Amazon Q)", async () => {
     const [legacy, agent] = clientLocations("amazon-q").map((location) => location.path);
     await mkdir(dirname(legacy!), { recursive: true });

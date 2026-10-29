@@ -8,5 +8,19 @@
       "env": { "AIRTABLE_API_KEY": "YOUR_KEY" }
     },
     "stripe": { "type": "http", "url": "https://mcp.stripe.com" }
+  },
+  "projects": {
+    "/path/to/your/project": {
+      "allowedTools": [],
+      "mcpServers": {
+        "database-tools": {
+          "command": "/path/to/your/project/servers/db-server",
+          "args": ["--config", "/path/to/your/project/config.json"],
+          "env": { "DB_URL": "postgres://localhost/app" }
+        },
+        "stripe": { "type": "http", "url": "https://mcp.stripe.com" }
+      }
+    },
+    "/path/to/another/project": { "allowedTools": [] }
   }
 }

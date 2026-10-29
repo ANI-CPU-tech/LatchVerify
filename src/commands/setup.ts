@@ -6,7 +6,7 @@ import pc from "picocolors";
 import { clientConfigPath, detectClients, unwrapProxy, writeClientConfig, type ClientId, type ClientServerEntry, type ProxyLaunch } from "../config/clients.js";
 import { emptyLockfile, writeLockfile } from "../store/lockfile.js";
 import { runInit } from "./init.js";
-import { plural, printable, problemWarning } from "./text.js";
+import { configPlace, plural, printable, problemWarning } from "./text.js";
 
 /** How each client is named to people. */
 export const CLIENT_NAMES: Record<ClientId, string> = {
@@ -155,22 +155,22 @@ export async function runUnlink(options: UnlinkOptions): Promise<number> {
     }
     const ids = Object.keys(restored);
     if (ids.length === 0) {
-      say(`nothing to unlink: no server in ${printable(config.path)} runs through latch`);
+      say(`nothing to unlink: no server in ${configPlace(config)} runs through latch`);
       continue;
     }
     if (options.dryRun) {
-      say(`would restore ${plural(ids.length, "server")} in ${printable(config.path)}, keeping a .bak copy: ${printable(ids.join(", "))}`);
+      say(`would restore ${plural(ids.length, "server")} in ${configPlace(config)}, keeping a .bak copy: ${printable(ids.join(", "))}`);
       continue;
     }
     try {
       await writeClientConfig({ ...config, servers: restored });
     } catch (error) {
-      say(pc.red(`✖ could not rewrite ${printable(config.path)}: ${printable(error instanceof Error ? error.message : String(error))}`));
+      say(pc.red(`✖ could not rewrite ${configPlace(config)}: ${printable(error instanceof Error ? error.message : String(error))}`));
       code = 1;
       continue;
     }
     restoredAny = true;
-    say(`${pc.green("✔")} restored ${plural(ids.length, "server")} in ${printable(config.path)} (the previous file is kept as a .bak copy): ${printable(ids.join(", "))}`);
+    say(`${pc.green("✔")} restored ${plural(ids.length, "server")} in ${configPlace(config)} (the previous file is kept as a .bak copy): ${printable(ids.join(", "))}`);
   }
   if (restoredAny) say(`next: restart ${name}. latch.lock is kept, so linking again later keeps your approvals.`);
   return code;

@@ -42,6 +42,8 @@ export interface ClientLocation {
 /** A client config located on this machine. */
 export interface ClientConfig extends ClientLocation {
   client: ClientId;
+  /** Which part of the file, for people, when it is not the whole client: "project /home/me/app". */
+  scope?: string;
   servers: Record<string, ClientServerEntry>;
   /** The full parsed file. Written out only when the file has disappeared by the time it is rewritten. */
   raw: Record<string, unknown>;
@@ -167,36 +169,56 @@ export function valueAt(root: unknown, keys: readonly string[]): unknown {
  *
  * `servers` holds only the stdio entries latch can wrap: a non-empty string `command`, `type`
  * absent or "stdio", `args` absent or all strings, `env` absent or an object. HTTP/SSE servers
- * and malformed entries stay in the file untouched. Only user-level servers are read; Claude
- * Code's per-project servers in ~/.claude.json are not.
+ * and malformed entries stay in the file untouched.
+ *
+ * Claude Code also keeps servers per project in ~/.claude.json, under
+ * projects["<project path>"].mcpServers (its "local" scope). Each project with servers there is
+ * one more config, with that serversPath and a `scope` naming the project. Project-scoped
+ * .mcp.json files are not read: they are shared through version control, and a wrapped entry
+ * holds this machine's paths.
  */
 export async function detectClients(): Promise<Detection> {
   const results = await Promise.all(
     SUPPORTED_CLIENTS.flatMap((client) => clientLocations(client).map((location) => readClientConfig(client, location))),
   );
   const detection: Detection = { configs: [], problems: [] };
-  for (const result of results) {
-    if (result === undefined) continue;
+  for (const result of results.flat()) {
     if ("message" in result) detection.problems.push(result);
     else detection.configs.push(result);
   }
   return detection;
 }
 
-async function readClientConfig(client: ClientId, { path, serversPath }: ClientLocation): Promise<ClientConfig | ConfigProblem | undefined> {
+/** Claude Code's per-project configs in the ~/.claude.json `user` config, in file order. */
+function claudeCodeProjects(user: ClientConfig): Array<ClientConfig | ConfigProblem> {
+  const projects = user.raw.projects;
+  if (!isPlainObject(projects)) return [];
+  return Object.entries(projects).flatMap(([project, settings]): Array<ClientConfig | ConfigProblem> => {
+    const map = isPlainObject(settings) ? settings.mcpServers : undefined;
+    if (map === undefined) return [];
+    const serversPath = ["projects", project, "mcpServers"];
+    if (!isPlainObject(map)) return [{ client: user.client, path: user.path, message: `keeps "${serversPath.join(".")}" as something other than an object` }];
+    if (Object.keys(map).length === 0) return [];
+    return [{ ...user, serversPath, scope: `project ${project}`, servers: stdioServers(map) }];
+  });
+}
+
+/** The config at `location` (and, for Claude Code, its projects'), problems, or nothing when the file is missing. */
+async function readClientConfig(client: ClientId, { path, serversPath }: ClientLocation): Promise<Array<ClientConfig | ConfigProblem>> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
   } catch (error) {
-    if (isErrno(error, "ENOENT")) return undefined;
-    return { client, path, message: `cannot be read (${(error as NodeJS.ErrnoException).code ?? String(error)})` };
+    if (isErrno(error, "ENOENT")) return [];
+    return [{ client, path, message: `cannot be read (${(error as NodeJS.ErrnoException).code ?? String(error)})` }];
   }
   const parsed = parseJsonc(text);
-  if (!parsed.ok) return { client, path, message: `is not valid JSON: ${parsed.error}` };
-  if (!isPlainObject(parsed.value)) return { client, path, message: "is not a JSON object" };
+  if (!parsed.ok) return [{ client, path, message: `is not valid JSON: ${parsed.error}` }];
+  if (!isPlainObject(parsed.value)) return [{ client, path, message: "is not a JSON object" }];
   const map = valueAt(parsed.value, serversPath);
-  if (map !== undefined && !isPlainObject(map)) return { client, path, message: `keeps "${serversPath.join(".")}" as something other than an object` };
-  return { client, path, serversPath, servers: stdioServers(map), raw: parsed.value };
+  if (map !== undefined && !isPlainObject(map)) return [{ client, path, message: `keeps "${serversPath.join(".")}" as something other than an object` }];
+  const config: ClientConfig = { client, path, serversPath, servers: stdioServers(map), raw: parsed.value };
+  return client === "claude-code" ? [config, ...claudeCodeProjects(config)] : [config];
 }
 
 function stdioServers(value: unknown): Record<string, ClientServerEntry> {

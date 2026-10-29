@@ -403,6 +403,27 @@ describe.skipIf(onWindows)("detectClients", () => {
     expect(await detectClients()).toEqual({ configs: [], problems: [{ client: "cursor", path: clientConfigPath("cursor"), message: "cannot be read (EISDIR)" }] });
   });
 
+  it("reads Claude Code's per-project servers as one more config per project", async () => {
+    home = await fakeHome();
+    const user = { a: { command: "a" } };
+    const app = { b: { command: "b" }, remote: { type: "http", url: "https://mcp.example" } };
+    await writeConfig("claude-code", { mcpServers: user, projects: { "/srv/app": { mcpServers: app }, "/srv/empty": { mcpServers: {} }, "/srv/none": {} } });
+    const { configs, problems } = await detectClients();
+    expect(problems).toEqual([]);
+    expect(configs.map(({ client, serversPath, scope, servers }) => ({ client, serversPath, scope, servers }))).toEqual([
+      { client: "claude-code", serversPath: ["mcpServers"], scope: undefined, servers: user },
+      { client: "claude-code", serversPath: ["projects", "/srv/app", "mcpServers"], scope: "project /srv/app", servers: { b: { command: "b" } } },
+    ]);
+  });
+
+  it("reports a Claude Code project whose servers are not an object, and still reads the rest", async () => {
+    home = await fakeHome();
+    await writeConfig("claude-code", { mcpServers: { a: { command: "a" } }, projects: { "/srv/app": { mcpServers: ["x"] } } });
+    const { configs, problems } = await detectClients();
+    expect(configs.map((config) => config.serversPath)).toEqual([["mcpServers"]]);
+    expect(problems).toEqual([{ client: "claude-code", path: clientConfigPath("claude-code"), message: 'keeps "projects./srv/app.mcpServers" as something other than an object' }]);
+  });
+
   it("accepts a leading byte-order mark", async () => {
     home = await fakeHome();
     await writeConfig("cursor", `\uFEFF${JSON.stringify({ mcpServers: { a: { command: "a" } } })}`);
@@ -425,7 +446,7 @@ const fixture = (client: ClientId, path: string): string =>
 /** The stdio servers each fixture holds, per file: the ones latch wraps. */
 const FIXTURE_SERVERS: Record<ClientId, string[][]> = {
   "claude-desktop": [["filesystem"]],
-  "claude-code": [["airtable"]],
+  "claude-code": [["airtable"], ["database-tools"]],
   cursor: [["server-name"]],
   vscode: [["Perplexity", "fetch"]],
   "vscode-insiders": [["Perplexity", "fetch"]],
@@ -480,15 +501,21 @@ describe.skipIf(onWindows)("every supported client, on its documented example co
       await writeClientConfig({ ...config, servers: Object.fromEntries(Object.entries(config.servers).map(([id, entry]) => [id, unwrapProxy(entry)])) });
     }
 
+    let checkedComments = 0;
     for (const config of configs) {
       const original = originals.get(config.path)!;
       const restored = await readFile(config.path, "utf8");
-      for (const comment of original.match(/\/\/.*|\/\*[\s\S]*?\*\//g) ?? []) expect(restored, config.path).toContain(comment);
+      // Comments in the fixtures start their line or are /* blocks */, so no URL inside a string is mistaken for one.
+      const comments = original.match(/^[ \t]*\/\/.*$|\/\*[\s\S]*?\*\//gm) ?? [];
+      for (const comment of comments) expect(restored, config.path).toContain(comment.trim());
+      checkedComments += comments.length;
       // unwrapProxy gives back `args: []` as no args key; clients treat the two the same.
       const dropEmptyArgs = (value: unknown) => JSON.parse(JSON.stringify(value, (key, v) => (key === "args" && Array.isArray(v) && v.length === 0 ? undefined : v)));
       const reread = (await detectClients()).configs.find((candidate) => candidate.path === config.path)!;
       expect(reread.raw, config.path).toEqual(dropEmptyArgs(config.raw));
     }
+    // VS Code's three fixtures carry 3 comments each, Zed's 4.
+    expect(checkedComments).toBe(13);
   });
 });
 
@@ -640,6 +667,17 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
 `);
     const [backup] = await backups(config.path);
     expect(await readFile(join(dirname(config.path), backup!), "utf8")).toBe(original);
+  });
+
+  it("writes a Claude Code project's servers under that project only", async () => {
+    home = await fakeHome();
+    const path = await writeConfig("claude-code", { mcpServers: { weather }, projects: { "/srv/app": { mcpServers: { weather }, allowedTools: [] } } });
+    const project = (await detectClients()).configs.find((config) => config.scope === "project /srv/app")!;
+    await writeClientConfig(wrapAll(project));
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      mcpServers: { weather },
+      projects: { "/srv/app": { mcpServers: { weather: wrapWithProxy("weather", weather) }, allowedTools: [] } },
+    });
   });
 
   it("refuses to rewrite a file whose server map stopped being an object", async () => {
