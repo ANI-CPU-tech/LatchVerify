@@ -314,6 +314,56 @@ describe("readFrames", () => {
     expect(frames.map((f) => f.raw)).toEqual(['{"jsonrpc":"2.0","method":"a"}', '{"jsonrpc":"2.0","method":"b"}']);
   });
 
+  it("stops at a line longer than maxLineBytes, delivering the lines of earlier chunks", async () => {
+    const input = new PassThrough();
+    const raws: string[] = [];
+    let overflows = 0;
+    readFrames(input, (frame) => raws.push(frame.raw), { maxLineBytes: 8, onOverflow: () => overflows++ });
+    input.write("12345678\n");
+    await tick();
+    input.write("abc");
+    input.write("defgh");
+    input.write("ijk\nlater\n");
+    await tick();
+    expect(raws).toEqual(["12345678"]);
+    expect(overflows).toBe(1);
+  });
+
+  it("catches an oversized line that starts and ends inside one chunk", async () => {
+    const input = new PassThrough();
+    const raws: string[] = [];
+    let overflows = 0;
+    readFrames(input, (frame) => raws.push(frame.raw), { maxLineBytes: 4, onOverflow: () => overflows++ });
+    input.write("ok\nfar too long\nok\n");
+    await tick();
+    expect(raws).toEqual([]);
+    expect(overflows).toBe(1);
+  });
+
+  it("counts a long line across chunks in bytes, and resets at each terminator", async () => {
+    const input = new PassThrough();
+    const raws: string[] = [];
+    let overflows = 0;
+    readFrames(input, (frame) => raws.push(frame.raw), { maxLineBytes: 6, onOverflow: () => overflows++ });
+    input.write("abc");
+    input.write("def\r\n");
+    input.write("\u00e9\u00e9\u00e9\n");
+    await tick();
+    expect(raws).toEqual(["abcdef", "\u00e9\u00e9\u00e9"]);
+    expect(overflows).toBe(0);
+    input.write("\u00e9\u00e9\u00e9\u00e9");
+    await tick();
+    expect(overflows).toBe(1);
+  });
+
+  it("destroys the input on overflow by default", async () => {
+    const input = new PassThrough();
+    readFrames(input, () => {}, { maxLineBytes: 4 });
+    input.write("toolong");
+    await tick();
+    expect(input.destroyed).toBe(true);
+  });
+
   it("stops delivering frames once closed, even lines already buffered", async () => {
     const input = new PassThrough();
     const raws: string[] = [];

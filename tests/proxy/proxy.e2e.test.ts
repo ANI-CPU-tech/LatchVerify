@@ -146,6 +146,15 @@ describe("startProxy", () => {
     }
   });
 
+  it("stops a server that writes a line longer than maxLineBytes", async () => {
+    const flood = `process.stdout.write('{"jsonrpc":"2.0","method":"x","pad":"' + "a".repeat(4096)); setInterval(() => {}, 1000);`;
+    const { code } = await run({ args: ["-e", flood] }, [(out) => waitFor(() => stderr.join("").includes("longer than"))], {
+      maxLineBytes: 1024,
+    });
+    expect(code).toBe(128 + 15);
+    expect(stderr.join("")).toContain("[latch] the server wrote a line longer than 1024 bytes; stopping it");
+  });
+
   it("forwards unknown fields byte-for-byte in both directions", async () => {
     const sent = '{"jsonrpc":"2.0",  "id":1, "method":"echo", "x-extra":{"kept":true}, "n":1.50}';
     const { messages, text } = await run(echo, [sent, (out) => waitFor(() => out().includes('"id":1'))]);

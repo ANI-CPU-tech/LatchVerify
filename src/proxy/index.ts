@@ -8,6 +8,7 @@ import { PENDING_FILE, readPending } from "../store/pending.js";
 import { buildBlockError } from "./blocker.js";
 import { routeFrame, type InterceptDecision, type InterceptorContext } from "./interceptor.js";
 import {
+  MAX_LINE_BYTES,
   isRequest,
   readFrames,
   serialize,
@@ -33,6 +34,8 @@ export interface ProxyOptions {
   holdTimeoutMs?: number;
   /** Run the LLM advisory pass on new and changed tools with these options. Off when absent. */
   llm?: LlmOptions;
+  /** Longest line accepted from either side. Defaults to MAX_LINE_BYTES. */
+  maxLineBytes?: number;
 }
 
 /** Default for ProxyOptions.holdTimeoutMs. */
@@ -65,7 +68,8 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
  * made with `latch review` applies to the next tools/call without restarting the proxy.
  *
  * When the client closes its input, the server's stdin is closed once everything queued for
- * it is written; when the client stops reading, the server is sent SIGTERM. SIGINT, SIGTERM and
+ * it is written; when the client stops reading, or either side sends a line longer than
+ * `maxLineBytes`, the server is sent SIGTERM. SIGINT, SIGTERM and
  * SIGHUP are passed on to the server. Only JSON-RPC is written to `output`; diagnostics go to
  * stderr and the event log.
  *
@@ -201,12 +205,28 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
   const enqueue = (task: () => Promise<void>) => {
     queue = queue.then(task).catch((error: unknown) => log(`internal error: ${String(error)}`));
   };
-  const stopClient = readFrames(input, (frame) => enqueue(() => fromClient(frame)));
-  const stopServer = readFrames(child.stdout, (frame) =>
-    enqueue(async () => {
-      await handle("server->client", frame);
-      await release(false);
-    }),
+  const { maxLineBytes } = options;
+  const stopClient = readFrames(input, (frame) => enqueue(() => fromClient(frame)), {
+    maxLineBytes,
+    onOverflow: () => {
+      log(`the client sent a line longer than ${maxLineBytes ?? MAX_LINE_BYTES} bytes; stopping the server`);
+      child.kill("SIGTERM");
+    },
+  });
+  const stopServer = readFrames(
+    child.stdout,
+    (frame) =>
+      enqueue(async () => {
+        await handle("server->client", frame);
+        await release(false);
+      }),
+    {
+      maxLineBytes,
+      onOverflow: () => {
+        log(`the server wrote a line longer than ${maxLineBytes ?? MAX_LINE_BYTES} bytes; stopping it`);
+        child.kill("SIGTERM");
+      },
+    },
   );
   // Registered after readFrames, so readline has delivered a final unterminated line by now.
   input.once("end", () => enqueue(() => fromClient(END)));

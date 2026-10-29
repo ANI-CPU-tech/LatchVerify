@@ -1,6 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { VERSION } from "../version.js";
 import {
+  MAX_LINE_BYTES,
   isRequest,
   isResponse,
   readFrames,
@@ -53,8 +54,9 @@ export class CaptureError extends Error {
  * Lines on stdout that are not JSON-RPC (a startup banner, a stray console.log) are skipped, as
  * the proxy forwards them without acting on them; the first one is reported on stderr.
  *
- * @throws CaptureError when the server cannot be started, exits early, answers with an error or
- * a result without a tools array, pages more than MAX_CAPTURE_PAGES times, or misses the deadline.
+ * @throws CaptureError when the server cannot be started, exits early, writes a line longer than
+ * MAX_LINE_BYTES, answers with an error or a result without a tools array, pages more than
+ * MAX_CAPTURE_PAGES times, or misses the deadline.
  */
 export async function captureTools(command: string, args: readonly string[], options: CaptureOptions = {}): Promise<CapturedTools> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_CAPTURE_TIMEOUT_MS;
@@ -104,7 +106,7 @@ export async function captureTools(command: string, args: readonly string[], opt
           : { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: `Method not found: ${message.method}` } },
       );
     }
-  });
+  }, { onOverflow: () => fail(new CaptureError(`${command} wrote a line longer than ${MAX_LINE_BYTES} bytes`)) });
 
   let nextId = 1;
   const request = (method: string, params?: Record<string, unknown>) =>
