@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
 import { Command, Option } from "commander";
 import pc from "picocolors";
 import { SUPPORTED_CLIENTS } from "./config/clients.js";
@@ -12,6 +11,7 @@ import { runProxy } from "./commands/proxy.js";
 import { runReview } from "./commands/review.js";
 import { runSetup, runUnlink } from "./commands/setup.js";
 import { VERIFY_EXIT, runVerify } from "./commands/verify.js";
+import { VERSION } from "./version.js";
 
 /**
  * Run a command and turn its result (or thrown error) into the process exit code. The
@@ -28,13 +28,11 @@ async function run(command: (env: LatchEnv) => Promise<number>, failureCode = 1)
   }
 }
 
-/** This install's version: package.json sits one level above both src/cli.ts and dist/cli.js. */
-const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 
 const program = new Command()
   .name("latch")
   .description("Pin MCP tool capabilities in latch.lock and block unreviewed drift.")
-  .version(version)
+  .version(VERSION)
   .enablePositionalOptions()
   .option("--lockfile <path>", "path to latch.lock (default: $LATCH_LOCKFILE_PATH or ./latch.lock; review and verify fall back to the per-user lockfile from `latch setup`)")
   .option("--state-dir <path>", "local state directory (default: $LATCH_STATE_DIR or .latch next to the lockfile)");

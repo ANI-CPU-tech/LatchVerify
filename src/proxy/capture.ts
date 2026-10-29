@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { VERSION } from "../version.js";
 import {
   isRequest,
   isResponse,
@@ -49,10 +50,11 @@ export class CaptureError extends Error {
  *
  * Server requests are answered (ping with an empty result, anything else with -32601) so a
  * server that asks the client something cannot stall the capture; notifications are ignored.
+ * Lines on stdout that are not JSON-RPC (a startup banner, a stray console.log) are skipped, as
+ * the proxy forwards them without acting on them; the first one is reported on stderr.
  *
- * @throws CaptureError when the server cannot be started, exits early, writes a line that is
- * not JSON-RPC to stdout, answers with an error or a result without a tools array, pages more
- * than MAX_CAPTURE_PAGES times, or misses the deadline.
+ * @throws CaptureError when the server cannot be started, exits early, answers with an error or
+ * a result without a tools array, pages more than MAX_CAPTURE_PAGES times, or misses the deadline.
  */
 export async function captureTools(command: string, args: readonly string[], options: CaptureOptions = {}): Promise<CapturedTools> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_CAPTURE_TIMEOUT_MS;
@@ -60,6 +62,7 @@ export async function captureTools(command: string, args: readonly string[], opt
   const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));
   const waiting = new Map<JsonRpcId, { method: string; resolve: (result: unknown) => void; reject: (error: Error) => void }>();
   let failure: CaptureError | undefined;
+  let reportedNoise = false;
 
   const fail = (error: CaptureError) => {
     failure ??= error;
@@ -79,7 +82,10 @@ export async function captureTools(command: string, args: readonly string[], opt
   const stopReading = readFrames(child.stdout, (frame) => {
     const { message } = frame;
     if (message === null) {
-      if (frame.raw.trim() !== "") fail(new CaptureError(`${command} wrote a line that is not JSON-RPC: ${preview(frame.raw)}`));
+      if (!reportedNoise && frame.raw.trim() !== "") {
+        reportedNoise = true;
+        process.stderr.write(`[latch] ${command} wrote a line that is not JSON-RPC to stdout; skipping it and any more: ${preview(frame.raw)}\n`);
+      }
       return;
     }
     if (isResponse(message)) {
@@ -115,7 +121,7 @@ export async function captureTools(command: string, args: readonly string[], opt
     const init = await request("initialize", {
       protocolVersion: CAPTURE_PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: "latchverify", version: "0.0.0" },
+      clientInfo: { name: "latchverify", version: VERSION },
     });
     const specVersion = isPlainObject(init) && typeof init.protocolVersion === "string" && init.protocolVersion !== "" ? init.protocolVersion : null;
     send({ jsonrpc: "2.0", method: "notifications/initialized" });
