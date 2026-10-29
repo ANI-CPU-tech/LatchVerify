@@ -1,4 +1,4 @@
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import crossSpawn from "cross-spawn";
@@ -194,6 +194,9 @@ export function serverEnvironment(base: NodeJS.ProcessEnv, env?: NodeJS.ProcessE
   return merged;
 }
 
+/** cross-spawn's command resolution (exported, untyped): `file` is the resolved path, or empty when not found. */
+type CrossSpawnParse = { _parse(command: string, args: string[], options: object): { file?: string } };
+
 /**
  * Spawn the real server with piped stdio. Its stderr is copied to our stderr untouched (and our
  * stderr stays open when it exits); stdout is the protocol channel, so the caller wires the
@@ -206,18 +209,18 @@ export function serverEnvironment(base: NodeJS.ProcessEnv, env?: NodeJS.ProcessE
  * LatchVerify's own LATCH_* variables never reach the server.
  *
  * Never throws for a bad command: spawn failures (ENOENT, EACCES) arrive as the child's "error"
- * event, which the caller must handle.
+ * event, which the caller must handle. On Windows a command cross-spawn cannot find on PATH would
+ * go to cmd.exe, which starts, prints "not recognized" and exits 1; it is spawned directly instead,
+ * so it fails with ENOENT before "spawn", as on POSIX.
  */
 export function spawnUpstream(
   command: string,
   args: string[],
   env?: NodeJS.ProcessEnv,
 ): ChildProcessWithoutNullStreams {
-  const child = crossSpawn(command, args, {
-    stdio: "pipe",
-    env: serverEnvironment(process.env, env),
-    windowsHide: true,
-  }) as ChildProcessWithoutNullStreams;
+  const options = { stdio: "pipe", env: serverEnvironment(process.env, env), windowsHide: true } as const;
+  const missing = process.platform === "win32" && !(crossSpawn as unknown as CrossSpawnParse)._parse(command, args, options).file;
+  const child = (missing ? spawn(command, args, options) : crossSpawn(command, args, options)) as ChildProcessWithoutNullStreams;
   child.stderr.pipe(process.stderr, { end: false });
   return child;
 }

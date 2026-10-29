@@ -13,7 +13,7 @@ const src = fileURLToPath(new URL("../src/", import.meta.url));
 function staticImports(file: string): string[] {
   const text = readFileSync(join(src, file), "utf8");
   return [...text.matchAll(/^import (?!type )[^"]*?from "([^"]+)";$/gm)].map(([, spec]) =>
-    spec!.startsWith(".") ? relative(src, resolve(dirname(join(src, file)), spec!)) : spec!,
+    spec!.startsWith(".") ? relative(src, resolve(dirname(join(src, file)), spec!)).replaceAll("\\", "/") : spec!,
   );
 }
 
