@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   INSTALL_LAUNCH,
+  MAX_BACKUPS,
   PROXY_COMMAND,
   SUPPORTED_CLIENTS,
   clientConfigPath,
@@ -706,6 +707,27 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
     await writeClientConfig(wrapAll(config));
     expect((await lstat(config.path)).isSymbolicLink()).toBe(true);
     expect(JSON.parse(await readFile(real, "utf8")).mcpServers.weather.command).toBe("latch");
+  });
+
+  it(`keeps only the ${MAX_BACKUPS} newest backups, and no other file is touched`, async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const config = await detected({ mcpServers: { weather } });
+    const unrelated = `${config.path}.notes.bak`;
+    await writeFile(unrelated, "mine");
+    const stamps: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      vi.setSystemTime(new Date(Date.UTC(2026, 9, 23, 9, 0, i)));
+      stamps.push(`claude_desktop_config.json.2026-10-23T09-00-0${i}-000Z.bak`);
+      await writeClientConfig({ ...config, servers: { weather: { command: `v${i}` } } });
+    }
+    // Two in the same millisecond: the -1 copy is the newer one.
+    await writeClientConfig({ ...config, servers: { weather: { command: "last" } } });
+    expect(await backups(config.path)).toEqual(
+      [...stamps.slice(-4), "claude_desktop_config.json.2026-10-23T09-00-07-000Z-1.bak"].sort(),
+    );
+    expect(await readFile(unrelated, "utf8")).toBe("mine");
+    const newest = join(dirname(config.path), "claude_desktop_config.json.2026-10-23T09-00-07-000Z-1.bak");
+    expect(JSON.parse(await readFile(newest, "utf8")).mcpServers.weather.command).toBe("v7");
   });
 
   it("never overwrites an earlier backup taken in the same millisecond", async () => {

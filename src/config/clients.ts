@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { replaceFile } from "../store/replace.js";
@@ -336,7 +336,7 @@ function withCommand(entry: ClientServerEntry, command: string, args: string[]):
 
 /**
  * Write `config.servers` into the client's config file, after a timestamped `.bak` copy of the
- * file as it was. Resolves once the new file is flushed to disk.
+ * file as it was (the MAX_BACKUPS newest are kept). Resolves once the new file is flushed to disk.
  *
  * - Only the entries of `config.servers` that differ are edited, in place (setJsonc). Every
  *   other byte of the file stays as it is: other servers (HTTP servers, servers the user did not
@@ -402,18 +402,45 @@ async function readIfExists(path: string): Promise<{ text: string; mode: number 
   }
 }
 
-/** `<path>.<UTC timestamp>.bak`, never overwriting an earlier backup. */
+/** Backups kept per config file; older ones are deleted after each new one. */
+export const MAX_BACKUPS = 5;
+
+/**
+ * `<path>.<UTC timestamp>.bak`, never overwriting an earlier backup. Then only the MAX_BACKUPS
+ * newest backups of `path` are kept: the background sync rewrites configs often, and an
+ * unbounded pile of copies (which may hold tokens) helps nobody.
+ */
 async function writeBackup(path: string, text: string, mode: number): Promise<void> {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   for (let attempt = 0; ; attempt++) {
     const backup = `${path}.${stamp}${attempt === 0 ? "" : `-${attempt}`}.bak`;
     try {
       await writeFile(backup, text, { encoding: "utf8", flag: "wx", mode });
-      return;
+      break;
     } catch (error) {
       if (!isErrno(error, "EEXIST") || attempt >= 99) throw error;
     }
   }
+  await pruneBackups(path);
+}
+
+/** Deletes all but the MAX_BACKUPS newest of `path`'s backups. Never fails the write that made one. */
+async function pruneBackups(path: string): Promise<void> {
+  const name = basename(path);
+  const pattern = /^\.(\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z)(?:-(\d+))?\.bak$/;
+  let names: string[];
+  try {
+    names = await readdir(dirname(path));
+  } catch {
+    return;
+  }
+  const backups = names.flatMap((file) => {
+    const match = file.startsWith(name) ? pattern.exec(file.slice(name.length)) : null;
+    return match ? [{ file, stamp: match[1]!, attempt: Number(match[2] ?? 0) }] : [];
+  });
+  // Newest first: by timestamp, then by the -N suffix taken within one millisecond.
+  backups.sort((a, b) => (a.stamp === b.stamp ? b.attempt - a.attempt : a.stamp < b.stamp ? 1 : -1));
+  await Promise.all(backups.slice(MAX_BACKUPS).map(({ file }) => rm(join(dirname(path), file), { force: true }).catch(() => undefined)));
 }
 
 /** Temp file, fsync, rename: the target holds either the old or the new content, never a mix. */
