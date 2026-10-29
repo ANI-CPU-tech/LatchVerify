@@ -36,10 +36,15 @@ export interface ProxyOptions {
   llm?: LlmOptions;
   /** Longest line accepted from either side. Defaults to MAX_LINE_BYTES. */
   maxLineBytes?: number;
+  /** How long the server gets to exit before the next, harder signal. Defaults to EXIT_GRACE_MS. */
+  exitGraceMs?: number;
 }
 
 /** Default for ProxyOptions.holdTimeoutMs. */
 export const DEFAULT_HOLD_TIMEOUT_MS = 10_000;
+
+/** Default for ProxyOptions.exitGraceMs. */
+export const EXIT_GRACE_MS = 5_000;
 
 /** Signals passed on to the real server. The proxy itself exits when the server does. */
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -69,8 +74,10 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
  *
  * When the client closes its input, the server's stdin is closed once everything queued for
  * it is written; when the client stops reading, or either side sends a line longer than
- * `maxLineBytes`, the server is sent SIGTERM. SIGINT, SIGTERM and
- * SIGHUP are passed on to the server. Only JSON-RPC is written to `output`; diagnostics go to
+ * `maxLineBytes`, the server is sent SIGTERM. SIGINT, SIGTERM and SIGHUP are passed on to the
+ * server. A server that has not exited `exitGraceMs` after its stdin closed is sent SIGTERM, and
+ * one still running `exitGraceMs` after any signal is sent SIGKILL, so the proxy never waits on a
+ * server forever. If the proxy's own process exits first, the server is killed with it. Only JSON-RPC is written to `output`; diagnostics go to
  * stderr and the event log.
  *
  * @throws Error when latch.lock or the queue is malformed, or the server cannot be started.
@@ -100,10 +107,33 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     child.once("close", (code, signal) => resolve([code, signal])),
   );
 
+  const exitGraceMs = options.exitGraceMs ?? EXIT_GRACE_MS;
+  let escalation: NodeJS.Timeout | undefined;
+  let running = true;
+  void exited.then(() => {
+    running = false;
+    clearTimeout(escalation);
+  });
+  /** Send `signal` now, and SIGKILL if the server is still running after the grace period. */
+  const signalServer = (signal: NodeJS.Signals) => {
+    if (!running) return;
+    child.kill(signal);
+    clearTimeout(escalation);
+    escalation = setTimeout(() => {
+      if (!running) return;
+      log(`the server is still running ${exitGraceMs} ms after ${signal}; sending SIGKILL`);
+      child.kill("SIGKILL");
+    }, exitGraceMs);
+  };
+  const killWithProxy = () => {
+    if (running) child.kill("SIGKILL");
+  };
+  process.once("exit", killWithProxy);
+
   const toServer = lineWriter(child.stdin, (error) => log(`could not write to the server: ${error.message}`));
   const toClient = lineWriter(output, (error) => {
     log(`could not write to the client (${error.message}); stopping the server`);
-    child.kill("SIGTERM");
+    signalServer("SIGTERM");
   });
 
   const outbox: JsonRpcMessage[] = [];
@@ -147,6 +177,12 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     if (frame === END) {
       await toServer.flushed();
       child.stdin.end();
+      clearTimeout(escalation);
+      escalation = setTimeout(() => {
+        if (!running) return;
+        log(`the server is still running ${exitGraceMs} ms after its input closed; sending SIGTERM`);
+        signalServer("SIGTERM");
+      }, exitGraceMs);
       return;
     }
     let decision: InterceptDecision;
@@ -210,7 +246,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     maxLineBytes,
     onOverflow: () => {
       log(`the client sent a line longer than ${maxLineBytes ?? MAX_LINE_BYTES} bytes; stopping the server`);
-      child.kill("SIGTERM");
+      signalServer("SIGTERM");
     },
   });
   const stopServer = readFrames(
@@ -224,7 +260,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
       maxLineBytes,
       onOverflow: () => {
         log(`the server wrote a line longer than ${maxLineBytes ?? MAX_LINE_BYTES} bytes; stopping it`);
-        child.kill("SIGTERM");
+        signalServer("SIGTERM");
       },
     },
   );
@@ -232,7 +268,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
   input.once("end", () => enqueue(() => fromClient(END)));
 
   const handlers = FORWARDED_SIGNALS.map((signal) => {
-    const handler = () => void child.kill(signal);
+    const handler = () => signalServer(signal);
     process.on(signal, handler);
     return [signal, handler] as const;
   });
@@ -244,6 +280,8 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     return code ?? (signal !== null ? 128 + (constants.signals[signal] ?? 0) : 1);
   } finally {
     clearTimeout(holdTimer);
+    clearTimeout(escalation);
+    process.off("exit", killWithProxy);
     stopClient();
     stopServer();
     for (const [signal, handler] of handlers) process.off(signal, handler);

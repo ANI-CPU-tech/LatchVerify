@@ -155,6 +155,20 @@ describe("startProxy", () => {
     expect(stderr.join("")).toContain("[latch] the server wrote a line longer than 1024 bytes; stopping it");
   });
 
+  it("sends SIGTERM to a server that keeps running after its input closed", async () => {
+    const { code } = await run({ args: ["-e", "setInterval(() => {}, 1000)"] }, [], { exitGraceMs: 100 });
+    expect(code).toBe(128 + 15);
+    expect(stderr.join("")).toContain("[latch] the server is still running 100 ms after its input closed; sending SIGTERM");
+  });
+
+  // Windows has no catchable SIGTERM: child.kill() always terminates the process there.
+  it.skipIf(process.platform === "win32")("sends SIGKILL to a server that ignores SIGTERM", async () => {
+    const stubborn = 'process.on("SIGTERM", () => {}); process.stdout.write("{}\\n"); setInterval(() => {}, 1000)';
+    const { code } = await run({ args: ["-e", stubborn] }, [(out) => waitFor(() => out().includes("{}"))], { exitGraceMs: 100 });
+    expect(code).toBe(128 + 9);
+    expect(stderr.join("")).toContain("[latch] the server is still running 100 ms after SIGTERM; sending SIGKILL");
+  });
+
   it("forwards unknown fields byte-for-byte in both directions", async () => {
     const sent = '{"jsonrpc":"2.0",  "id":1, "method":"echo", "x-extra":{"kept":true}, "n":1.50}';
     const { messages, text } = await run(echo, [sent, (out) => waitFor(() => out().includes('"id":1'))]);
