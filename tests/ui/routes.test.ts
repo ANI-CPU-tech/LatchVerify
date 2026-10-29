@@ -10,6 +10,7 @@ import { findRecord, readLockfile } from "../../src/store/lockfile.js";
 import { readPending, writePending } from "../../src/store/pending.js";
 import { readRejected } from "../../src/store/rejected.js";
 import { SimulationResultSchema, type PendingChange, type ToolRecord } from "../../src/schema/index.js";
+import { VERSION } from "../../src/version.js";
 
 const EXAMPLE_LOCK = new URL("../../latch.lock.example", import.meta.url);
 const HASH = "d".repeat(64);
@@ -342,7 +343,32 @@ describe("request guard", () => {
   });
 });
 
+describe("GET /api/info", () => {
+  it("names the version and says development mode is off by default", async () => {
+    const response = await request("/api/info");
+    expect(response.status).toBe(200);
+    expect(await json(response)).toEqual({ version: VERSION, dev: false });
+  });
+
+  it("says when development mode is on", async () => {
+    deps = { ...deps, dev: true };
+    expect(await json(await request("/api/info"))).toEqual({ version: VERSION, dev: true });
+  });
+});
+
+describe("POST /api/simulate outside development mode", () => {
+  it("does not exist", async () => {
+    const response = await request("http://127.0.0.1/api/simulate", { method: "POST", headers: { "content-type": "application/json", [CLIENT_HEADER]: "test" }, body: "{}" });
+    expect(response.status).toBe(404);
+    expect(await json(response)).toEqual({ error: "no route for POST /api/simulate" });
+  });
+});
+
 describe("POST /api/simulate", () => {
+  beforeEach(() => {
+    deps = { ...deps, dev: true };
+  });
+
   const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"));
   const body = () => ({ serverId: "weather", pinned: fixture("benign-tools.json"), served: fixture("poisoned-tools.json"), callsBefore: ["get_alerts"], callsAfter: ["get_forecast"] });
   const post = (payload: unknown, headers: Record<string, string> = { [CLIENT_HEADER]: "test" }) =>

@@ -33,6 +33,8 @@ export interface ReviewOptions {
   output?: Writable;
   /** Who approvals are recorded as. Defaults to defaultReviewer(): LATCH_REVIEWER, git user.email, OS user. */
   reviewer?: string;
+  /** --ui: development mode (LATCH_DEV), which serves the Simulation page's API. */
+  dev?: boolean;
   /** --ui: the built review UI to serve. Defaults to dist/web of this latchverify install. */
   staticDir?: string;
   /** --ui: opens the review UI's URL. Defaults to the platform's browser opener. */
@@ -178,7 +180,7 @@ async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: s
 
   const reviewer = (options.reviewer ?? defaultReviewer()).trim();
   if (reviewer === "") throw new Error("latch review: no reviewer name; set LATCH_REVIEWER or git config user.email");
-  const start = (port: number) => startUiServer({ port, lockfilePath, stateDir, reviewer, staticDir });
+  const start = (port: number) => startUiServer({ port, lockfilePath, stateDir, reviewer, staticDir, dev: options.dev });
   const inUse = (error: unknown) => (error as NodeJS.ErrnoException).code === "EADDRINUSE";
   let handle;
   try {

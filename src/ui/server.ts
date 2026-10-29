@@ -94,7 +94,7 @@ async function main(): Promise<void> {
   const reviewer = defaultReviewer();
   let handle: UiServerHandle;
   try {
-    handle = await startUiServer({ port: env.uiPort, lockfilePath: env.lockfilePath, stateDir: env.stateDir, reviewer });
+    handle = await startUiServer({ port: env.uiPort, lockfilePath: env.lockfilePath, stateDir: env.stateDir, reviewer, dev: env.dev });
   } catch (error) {
     // No fallback here: Vite proxies /api to LATCH_UI_PORT, so the API must be on that port.
     if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     throw error;
   }
   console.error(`[latch ui] review API on ${handle.url} (approvals recorded as ${reviewer})`);
+  if (!env.dev) console.error("[latch ui] development mode is off: set LATCH_DEV=1 in .env for the Simulation page");
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => void handle.close().finally(() => process.exit(0)));
   }

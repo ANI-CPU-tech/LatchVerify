@@ -99,6 +99,7 @@ program
         port: opts.port ?? env.uiPort,
         // Only the built-in default may move to a free port; a port the user chose must not.
         portFallback: opts.port === undefined && !process.env.LATCH_UI_PORT?.trim(),
+        dev: env.dev,
         ...readingGlobals(),
       }),
     ),

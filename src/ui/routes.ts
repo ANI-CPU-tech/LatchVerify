@@ -6,6 +6,7 @@ import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
 import { addRejection, readRejected, writeRejected } from "../store/rejected.js";
+import { VERSION } from "../version.js";
 import { lockfileGitStatus } from "./git.js";
 import { SimulationInputError, simulateRugPull } from "./simulation.js";
 
@@ -17,6 +18,8 @@ export interface RouteDeps {
   reviewer: string;
   /** Clock for approval and event timestamps. Defaults to the system clock. */
   now?: () => Date;
+  /** Development mode (LATCH_DEV): also serve POST /api/simulate. Off by default. */
+  dev?: boolean;
 }
 
 /** Largest POST /api/simulate body: two tool lists, far more than any real server serves. */
@@ -85,6 +88,7 @@ export function createRoutes(deps: RouteDeps): Hono {
   const reviewer = deps.reviewer.trim();
   if (reviewer.length === 0) throw new TypeError("createRoutes: reviewer must not be empty; approvals record who made them");
   const now = deps.now ?? (() => new Date());
+  const dev = deps.dev ?? false;
   const app = new Hono();
 
   // Request guard, ahead of every route:
@@ -172,6 +176,10 @@ export function createRoutes(deps: RouteDeps): Hono {
     return c.body(null, 204);
   });
 
+  // What is serving: the LatchVerify version, and whether development mode is on (the UI shows
+  // the Simulation page only then). Returns { version, dev }.
+  app.get("/api/info", (c) => c.json({ version: VERSION, dev }));
+
   // The newest events, oldest first. ?limit= defaults to DEFAULT_EVENT_LIMIT. Returns LatchEvent[].
   app.get("/api/events", async (c) => c.json(await readEvents(deps.stateDir, eventLimit(c.req.query("limit")))));
 
@@ -183,26 +191,29 @@ export function createRoutes(deps: RouteDeps): Hono {
 
   // Rehearse a rug pull in memory with the proxy's own pipeline (src/ui/simulation.ts). Reads and
   // writes nothing, but is a POST, so it passes the same write guard. Returns SimulationResult.
-  app.post(
-    "/api/simulate",
-    bodyLimit({ maxSize: MAX_SIMULATION_BYTES, onError: (c) => c.json({ error: `the simulation body is over ${MAX_SIMULATION_BYTES} bytes` }, 413) }),
-    async (c) => {
-      let body: unknown;
-      try {
-        body = await c.req.json();
-      } catch {
-        throw new ApiError(400, "the simulation body must be JSON");
-      }
-      const request = SimulationRequestSchema.safeParse(body);
-      if (!request.success) throw new ApiError(400, `invalid simulation: ${request.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ")}`);
-      try {
-        return c.json(simulateRugPull(request.data, now()));
-      } catch (error) {
-        if (error instanceof SimulationInputError) throw new ApiError(400, error.message);
-        throw error;
-      }
-    },
-  );
+  // Development mode only: in real use the route does not exist and answers 404.
+  if (dev) {
+    app.post(
+      "/api/simulate",
+      bodyLimit({ maxSize: MAX_SIMULATION_BYTES, onError: (c) => c.json({ error: `the simulation body is over ${MAX_SIMULATION_BYTES} bytes` }, 413) }),
+      async (c) => {
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          throw new ApiError(400, "the simulation body must be JSON");
+        }
+        const request = SimulationRequestSchema.safeParse(body);
+        if (!request.success) throw new ApiError(400, `invalid simulation: ${request.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ")}`);
+        try {
+          return c.json(simulateRugPull(request.data, now()));
+        } catch (error) {
+          if (error instanceof SimulationInputError) throw new ApiError(400, error.message);
+          throw error;
+        }
+      },
+    );
+  }
 
   app.notFound((c) => c.json({ error: `no route for ${c.req.method} ${c.req.path}` }, 404));
 

@@ -331,6 +331,18 @@ describe("runReview --ui", () => {
     return { ...outcome, opened };
   }
 
+  it("serves development mode only when asked to", async () => {
+    const info = async (options: Partial<ReviewOptions>) => {
+      let body: unknown;
+      await withUi(async (url) => {
+        body = await (await fetch(`${url}/api/info`)).json();
+      }, options);
+      return body;
+    };
+    expect(await info({})).toMatchObject({ dev: false });
+    expect(await info({ dev: true })).toMatchObject({ dev: true });
+  });
+
   it("serves the review screen and the queue, opens the browser on it, and stops cleanly (task Verify)", async () => {
     let base = "";
     const { code, text, opened } = await withUi(async (url) => {
