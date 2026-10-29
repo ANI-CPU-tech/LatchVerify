@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { Writable } from "node:stream";
 import pc from "picocolors";
-import { clientConfigPath, detectClients, unwrapProxy, writeClientConfig, type ClientId, type ClientServerEntry, type ProxyLaunch } from "../config/clients.js";
+import { clientConfigPath, detectClients, unwrapProxy, withoutLatchEnv, writeClientConfig, type ClientId, type ClientServerEntry, type ProxyLaunch } from "../config/clients.js";
 import { emptyLockfile, writeLockfile } from "../store/lockfile.js";
 import { runInit } from "./init.js";
 import { configPlace, plural, printable, problemWarning } from "./text.js";
@@ -51,7 +51,7 @@ export interface SetupOptions {
  *    so latch review and verify find it from any directory without asking.
  * 2. When the client's config exists, runs `latch init` for that client (or all), non-interactively: every
  *    stdio server is pinned (trust on first use; tools with hidden-intent findings are held for
- *    review) and its entry rewritten to start `latch proxy`, with a .bak of the config.
+ *    review) and its entry rewritten to start `latch proxy` (command and args only; env is never touched).
  *
  * Safe to run again: pinned servers stay as pinned and wrapped entries are left alone. When the
  * client is not installed yet it says so and resolves 0, so an installer never fails over it; run
@@ -126,8 +126,6 @@ function listOf(items: readonly string[]): string {
   return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
-/** Variables latch init adds to a wrapped entry's env; unlinking removes exactly these. */
-const LATCH_ENTRY_ENV = ["LATCH_LOCKFILE_PATH", "LATCH_STATE_DIR"] as const;
 
 export interface UnlinkOptions {
   /** The client to unlink, or undefined for every client (`--remove --all`, as uninstallers run it). */
@@ -139,8 +137,8 @@ export interface UnlinkOptions {
 /**
  * `latch setup --remove`: undo the link, as uninstallers run it before removing latch. Every entry
  * in the client's config that starts `latch proxy` gets its real command and arguments back, and
- * loses the LATCH_* variables init added; its other env and keys stay. The config keeps a .bak
- * copy. latch.lock is not touched, so reinstalling keeps the approvals.
+ * loses the LATCH_* variables older versions of init added; its other env and keys stay. latch.lock
+ * is not touched, so reinstalling keeps the approvals.
  *
  * Resolves 0 when the config was restored or had nothing to restore (or the client is not
  * installed), 1 when the config could not be rewritten.
@@ -180,7 +178,7 @@ export async function runUnlink(options: UnlinkOptions): Promise<number> {
       continue;
     }
     if (options.dryRun) {
-      say(`would restore ${plural(ids.length, "server")} in ${configPlace(config)}, keeping a .bak copy: ${printable(ids.join(", "))}`);
+      say(`would restore ${plural(ids.length, "server")} in ${configPlace(config)}: ${printable(ids.join(", "))}`);
       continue;
     }
     try {
@@ -191,18 +189,10 @@ export async function runUnlink(options: UnlinkOptions): Promise<number> {
       continue;
     }
     restoredClients.add(config.client);
-    say(`${pc.green("✔")} restored ${plural(ids.length, "server")} in ${configPlace(config)} (the previous file is kept as a .bak copy): ${printable(ids.join(", "))}`);
+    say(`${pc.green("✔")} restored ${plural(ids.length, "server")} in ${configPlace(config)}: ${printable(ids.join(", "))}`);
   }
   if (restoredClients.size > 0) {
     say(`next: restart ${listOf([...restoredClients].map((id) => CLIENT_NAMES[id]))}. latch.lock is kept, so linking again later keeps your approvals.`);
   }
   return code;
-}
-
-/** `entry` without the env variables latch init added; an env left empty is dropped. */
-function withoutLatchEnv(entry: ClientServerEntry): ClientServerEntry {
-  if (typeof entry.env !== "object" || entry.env === null) return entry;
-  const env = Object.fromEntries(Object.entries(entry.env).filter(([key]) => !(LATCH_ENTRY_ENV as readonly string[]).includes(key)));
-  const { env: _dropped, ...rest } = entry;
-  return Object.keys(env).length > 0 ? { ...rest, env } : rest;
 }

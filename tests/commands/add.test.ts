@@ -89,11 +89,11 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
 
   it("pins one server and adds it wrapped by absolute path, leaving the rest of the config alone", async () => {
     const other: ClientServerEntry = { command: "node", args: ["other.js"], env: { KEY: "keep" } };
-    const before = await writeConfig({ mcpServers: { other }, preferences: { x: 1 } });
+    await writeConfig({ mcpServers: { other }, preferences: { x: 1 } });
     const { code, text } = await add();
     expect(code).toBe(0);
     expect(text).toContain("✔ weather: pinned 2 tools: get_forecast, get_alerts");
-    expect(text).toContain("(the original is kept as a .bak copy)");
+    expect(text).not.toContain(".bak");
     expect(text).toContain("next: restart claude-desktop");
 
     expect(await configOnDisk()).toEqual({
@@ -101,14 +101,12 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
         other,
         weather: {
           command: INSTALL_LAUNCH.command,
-          args: [...INSTALL_LAUNCH.args, "proxy", "--server", "weather", "--", ...weather],
-          env: { LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: stateDir() },
+          args: [...INSTALL_LAUNCH.args, "--lockfile", lockfilePath, "--state-dir", stateDir(), "proxy", "--server", "weather", "--", ...weather],
         },
       },
       preferences: { x: 1 },
     });
-    const backup = (await readdir(dirname(configPath))).find((file) => file.endsWith(".bak"))!;
-    expect(await readFile(join(dirname(configPath), backup), "utf8")).toBe(before);
+    expect(await readdir(dirname(configPath))).toEqual([configPath.split("/").pop()]);
 
     const lock = await lockOnDisk();
     expect(Object.keys(lock.servers)).toEqual(["weather"]);
@@ -128,12 +126,7 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     const { code, text } = await add({ env: ["TOKEN", "MODE=demo"], sourceEnv: { TOKEN: "s3cret-token" } });
     expect(code).toBe(0);
     expect(text).not.toContain("s3cret-token");
-    expect((await configOnDisk()).mcpServers.weather.env).toEqual({
-      TOKEN: "s3cret-token",
-      MODE: "demo",
-      LATCH_LOCKFILE_PATH: lockfilePath,
-      LATCH_STATE_DIR: stateDir(),
-    });
+    expect((await configOnDisk()).mcpServers.weather.env).toEqual({ TOKEN: "s3cret-token", MODE: "demo" });
   });
 
   it("refuses a name the client config already has, even for an HTTP server, and writes nothing", async () => {
@@ -193,7 +186,7 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     expect(code).toBe(0);
     expect(text).toContain("✔ weather: would pin 2 tools");
     expect(text).toContain(`would write ${lockfilePath} and add weather to ${configPath}:`);
-    expect(text).toContain(`${INSTALL_LAUNCH.command} ${INSTALL_LAUNCH.args.join(" ")} proxy --server weather -- `);
+    expect(text).toContain(`${INSTALL_LAUNCH.command} ${INSTALL_LAUNCH.args.join(" ")} --lockfile ${lockfilePath} --state-dir ${stateDir()} proxy --server weather -- `);
     expect(await readFile(configPath, "utf8")).toBe(before);
     expect(await exists(lockfilePath)).toBe(false);
   });

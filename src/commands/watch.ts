@@ -34,7 +34,7 @@ export function describeSync(result: SyncResult): string[] {
     for (const held of pinned.held) lines.push(pc.yellow(`  ! ${printable(held.name)} held back for review: ${printable(held.reason)}`));
   }
   for (const wrapped of result.wrapped) {
-    lines.push(`${pc.green("✔")} linked ${printable(wrapped.serverIds.join(", "))} in ${configPlace(wrapped)} (the original is kept as a .bak copy)`);
+    lines.push(`${pc.green("✔")} linked ${printable(wrapped.serverIds.join(", "))} in ${configPlace(wrapped)}`);
   }
   for (const failure of result.failed) lines.push(pc.red(`✖ ${printable(failure.serverId)}: ${printable(failure.reason)}`));
   for (const skip of result.skipped) lines.push(pc.yellow(`! skipped ${printable(skip.serverId)}: ${printable(skip.reason)}`));

@@ -63,7 +63,7 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
     expect(first.failed).toEqual([]);
     const entry = (await servers(path)).weather!;
     expect(entry.args!.slice(0, INSTALL_LAUNCH.args.length)).toEqual(INSTALL_LAUNCH.args);
-    expect(entry.env).toEqual({ LATCH_LOCKFILE_PATH: options.lockfilePath, LATCH_STATE_DIR: options.stateDir });
+    expect(entry).toEqual(wrapWithProxy("weather", stub("w"), INSTALL_LAUNCH, { lockfilePath: options.lockfilePath, stateDir: options.stateDir }));
     expect((await lockOnDisk()).servers.weather!.tools.map((tool) => tool.approvedBy)).toEqual(["sync@example.com", "sync@example.com"]);
 
     const before = await readFile(path, "utf8");
@@ -88,7 +88,7 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
     const result = await syncClients(options);
     expect(result.pinned).toEqual([]);
     expect(result.wrapped).toEqual([{ client: "cursor", path, serverIds: ["weather"] }]);
-    expect(unwrapProxy((await servers(path)).weather!)).toEqual({ ...stub("w"), env: { LATCH_LOCKFILE_PATH: options.lockfilePath, LATCH_STATE_DIR: options.stateDir } });
+    expect(unwrapProxy((await servers(path)).weather!)).toEqual(stub("w"));
     expect(await readFile(options.lockfilePath, "utf8")).toBe(lockBefore);
   });
 

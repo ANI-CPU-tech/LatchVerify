@@ -52,7 +52,7 @@ const config = (client: ClientId, servers: Record<string, ClientServerEntry>): C
   path: `/fake/${client}.json`,
   serversPath: ["mcpServers"],
   servers,
-  raw: { mcpServers: servers },
+  serverIds: Object.keys(servers),
 });
 
 const weather: ClientServerEntry = { command: "npx", args: ["tsx", "demo/weather-server.ts"] };
@@ -249,10 +249,8 @@ describe.skipIf(process.platform === "win32")("runInit", { timeout: 30_000 }, ()
 
   const files = async (path: string) => (await readdir(dirname(path))).sort();
   const lockOnDisk = async () => LockFileSchema.parse(JSON.parse(await readFile(lockfilePath, "utf8")));
-  const expectedEntry = (entry: ClientServerEntry, serverId = "weather") => ({
-    ...wrapWithProxy(serverId, entry, INSTALL_LAUNCH),
-    env: { ...entry.env, LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: join(home, "repo", ".latch") },
-  });
+  const paths = () => ({ lockfilePath, stateDir: join(home, "repo", ".latch") });
+  const expectedEntry = (entry: ClientServerEntry, serverId = "weather") => wrapWithProxy(serverId, entry, INSTALL_LAUNCH, paths());
 
   it("dry run plans everything and writes nothing (task Verify)", async () => {
     const config = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry }, other: 1 });
@@ -262,16 +260,15 @@ describe.skipIf(process.platform === "win32")("runInit", { timeout: 30_000 }, ()
     expect(text).toContain("(dry run: nothing is written)");
     expect(text).toContain("✔ weather: would pin 2 tools: get_forecast, get_alerts");
     expect(text).toContain(`would write ${lockfilePath} with 1 server`);
-    expect(text).toContain(`would rewrite ${config}, keeping a .bak copy:`);
-    expect(text).toContain(`  weather: ${[INSTALL_LAUNCH.command, ...INSTALL_LAUNCH.args].join(" ")} proxy --server weather -- `);
+    expect(text).toContain(`would rewrite ${config}:`);
+    expect(text).toContain(`  weather: ${[INSTALL_LAUNCH.command, ...INSTALL_LAUNCH.args].join(" ")} --lockfile ${lockfilePath} --state-dir ${join(home, "repo", ".latch")} proxy --server weather -- `);
     expect(await readFile(config, "utf8")).toBe(before);
     expect(await files(config)).toEqual(["claude_desktop_config.json"]);
     await expect(readdir(join(home, "repo"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("wraps the server, keeps other keys and a .bak, and pins every tool (task Verify)", async () => {
+  it("wraps the server, keeps other keys, makes no copy of the config, and pins every tool (task Verify)", async () => {
     const config = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry }, other: 1 });
-    const before = await readFile(config, "utf8");
     const { code, text } = await init({ client: "claude-desktop" });
     expect(code).toBe(0);
     expect(text).toContain("✔ weather: pinned 2 tools: get_forecast, get_alerts");
@@ -280,9 +277,7 @@ describe.skipIf(process.platform === "win32")("runInit", { timeout: 30_000 }, ()
     expect(text).toContain("next: restart claude-desktop");
 
     expect(JSON.parse(await readFile(config, "utf8"))).toEqual({ mcpServers: { weather: expectedEntry(weatherEntry) }, other: 1 });
-    const [, backup] = await files(config);
-    expect(backup).toMatch(/^claude_desktop_config\.json\..+\.bak$/);
-    expect(await readFile(join(dirname(config), backup!), "utf8")).toBe(before);
+    expect(await files(config)).toEqual(["claude_desktop_config.json"]);
 
     const lock = await lockOnDisk();
     expect(lock.servers.weather!).toMatchObject({ transport: "stdio", command: weatherEntry.command, args: weatherEntry.args });
@@ -292,11 +287,13 @@ describe.skipIf(process.platform === "win32")("runInit", { timeout: 30_000 }, ()
     ]);
   });
 
-  it("writes an explicit state directory into the wrapped entry", async () => {
-    const config = await writeConfig("claude-desktop", { mcpServers: { weather: weatherEntry } });
+  it("writes an explicit state directory into the wrapped entry's args, never its env", async () => {
+    const config = await writeConfig("claude-desktop", { mcpServers: { weather: { ...weatherEntry, env: { KEY: "secret" } } } });
     const stateDir = join(home, "state");
     expect((await init({ client: "claude-desktop", stateDir })).code).toBe(0);
-    expect(JSON.parse(await readFile(config, "utf8")).mcpServers.weather.env).toEqual({ LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: stateDir });
+    const entry = JSON.parse(await readFile(config, "utf8")).mcpServers.weather as ClientServerEntry;
+    expect(entry.args).toEqual(expect.arrayContaining(["--lockfile", lockfilePath, "--state-dir", stateDir]));
+    expect(entry.env).toEqual({ KEY: "secret" });
   });
 
   it("changes nothing when run a second time (task Verify)", async () => {
@@ -460,7 +457,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     expect(entry.command).toBe(process.execPath);
     const launch = INSTALL_LAUNCH.args.length;
     expect(entry.args!.slice(0, launch)).toEqual(INSTALL_LAUNCH.args);
-    expect(entry.args!.slice(launch, launch + 4)).toEqual(["proxy", "--server", "weather", "--"]);
+    expect(entry.args!.slice(launch, launch + 8)).toEqual(["--lockfile", lockfilePath, "--state-dir", join(home, "repo", ".latch"), "proxy", "--server", "weather", "--"]);
   });
 
   it("writes the launch it is given", async () => {
@@ -480,18 +477,19 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     expect(Object.keys((await lockOnDisk()).servers)).toEqual(["weather"]);
     const entry = JSON.parse(await readFile(config, "utf8")).mcpServers.weather as ClientServerEntry;
     // Its own launch (another install that exists) is kept; only the lockfile and state directory are added.
-    expect(entry).toEqual({ ...byHand, env: { LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: join(home, "repo", ".latch") } });
+    expect(entry).toEqual(wrapWithProxy("weather", weatherEntry, { command: process.execPath, args: [otherInstall] }, paths()));
   });
 
   it("moves an entry of this install to the current launch, and repairs one whose install is gone", async () => {
+    // Written by an older version: the paths in env, no node flags.
     const env = { LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: join(home, "repo", ".latch") };
     const flagless = { ...wrapWithProxy("weather", weatherEntry, { command: INSTALL_LAUNCH.command, args: [INSTALL_LAUNCH.args.at(-1)!] }), env };
     const gone = { ...wrapWithProxy("forecast", weatherEntry, { command: "/opt/removed/node", args: ["/opt/removed/cli.js"] }), env };
     const config = await writeConfig("cursor", { mcpServers: { weather: flagless, forecast: gone } });
     expect((await init()).code).toBe(0);
     const servers = JSON.parse(await readFile(config, "utf8")).mcpServers as Record<string, ClientServerEntry>;
-    expect(servers.weather).toEqual({ ...wrapWithProxy("weather", weatherEntry, INSTALL_LAUNCH), env });
-    expect(servers.forecast).toEqual({ ...wrapWithProxy("forecast", weatherEntry, INSTALL_LAUNCH), env });
+    expect(servers.weather).toEqual(expectedEntry(weatherEntry));
+    expect(servers.forecast).toEqual(expectedEntry(weatherEntry, "forecast"));
   });
 });
 

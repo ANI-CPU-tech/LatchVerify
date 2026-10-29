@@ -7,7 +7,6 @@ import {
   clientLocations,
   detectClients,
   writeClientConfig,
-  valueAt,
   type ClientConfig,
   type ClientId,
   type ClientServerEntry,
@@ -76,8 +75,8 @@ export function parseEnv(values: readonly string[], source: NodeJS.ProcessEnv): 
  * 2. Starts the server and pins its tools (pinServer, the same trust on first use as `latch
  *    init`: tools with critical findings are held back for review).
  * 3. Writes latch.lock, then adds the server to the client config, wrapped with `latch proxy`
- *    by absolute path (proxiedEntry). The config keeps a timestamped .bak copy and every other
- *    server and key. Env values are written to the config but never printed.
+ *    by absolute path (proxiedEntry). Every other server and key of the config stays as it is.
+ *    Env values are written to the config but never printed.
  *
  * Resolves with 0 on success (or a dry run that would succeed), 1 when refused or the server's
  * tools cannot be captured.
@@ -110,11 +109,10 @@ export async function runAdd(options: AddOptions): Promise<number> {
   const problem = detection.problems.find((found) => found.client === client);
   if (problem !== undefined) return fail(`${problem.path} ${problem.message}; fix it before adding a server to it`);
   const detected = detection.configs.find((found) => found.client === client);
-  const config: ClientConfig = detected ?? { client, ...clientLocations(client)[0]!, servers: {}, raw: {} };
+  const config: ClientConfig = detected ?? { client, ...clientLocations(client)[0]!, servers: {}, serverIds: [] };
   say(pc.bold(`latch add ${printable(name)}: ${printable(lockfilePath)}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
-  // The raw map, not config.servers: an HTTP server of that name must not be replaced either.
-  const existing = valueAt(config.raw, config.serversPath);
-  if (typeof existing === "object" && existing !== null && Object.hasOwn(existing, name)) {
+  // Every id in the map, not just config.servers: an HTTP server of that name must not be replaced either.
+  if (config.serverIds.includes(name)) {
     return fail(`${name} is already in ${config.path}; pick another name, or remove it there first`);
   }
   if (Object.hasOwn(lock.servers, name)) {
@@ -162,7 +160,7 @@ export async function runAdd(options: AddOptions): Promise<number> {
   } catch (error) {
     return fail(`could not add ${name} to ${config.path}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  say(`${pc.green("✔")} added ${printable(name)} to ${printable(config.path)}${detected === undefined ? "" : " (the original is kept as a .bak copy)"}`);
+  say(`${pc.green("✔")} added ${printable(name)} to ${printable(config.path)}`);
   say(`next: commit ${printable(lockfilePath)} so the pins are reviewed like code`);
   say(`next: restart ${client} to start ${printable(name)}`);
   return 0;

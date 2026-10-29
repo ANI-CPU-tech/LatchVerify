@@ -60,7 +60,7 @@ describe.skipIf(process.platform === "win32")("runSetup", { timeout: 30_000 }, (
 
     expect(JSON.parse(await readFile(config, "utf8"))).toEqual({
       mcpServers: {
-        weather: { ...wrapWithProxy("weather", weather, INSTALL_LAUNCH), env: { LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: join(dirname(lockfilePath), ".latch") } },
+        weather: wrapWithProxy("weather", weather, INSTALL_LAUNCH, { lockfilePath, stateDir: join(dirname(lockfilePath), ".latch") }),
       },
       numStartups: 3,
     });

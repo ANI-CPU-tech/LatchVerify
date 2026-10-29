@@ -11,6 +11,7 @@ import {
   proxyLaunchOf,
   replacesLaunch,
   unwrapProxy,
+  withoutLatchEnv,
   wrapWithProxy,
   writeClientConfig,
   type ClientConfig,
@@ -215,12 +216,10 @@ function stringEnv(env: unknown): Record<string, string> {
  *    not have yet (pinServer), under the reviewer. A server already in latch.lock is left as pinned:
  *    changes to it go through `latch review`, never through a re-run of init.
  * 3. Writes latch.lock, then rewrites each client entry to run `latch proxy` (by absolute path,
- *    see INSTALL_LAUNCH), with
- *    LATCH_LOCKFILE_PATH and LATCH_STATE_DIR in its env so the proxy finds this lockfile and
- *    state directory (`stateDir`, by default <lockfile dir>/.latch) whatever directory the client
- *    starts it in. Each rewritten config
- *    keeps a timestamped .bak copy. The lockfile goes first: a config is only ever wrapped
- *    around pins that exist.
+ *    see INSTALL_LAUNCH) with --lockfile and --state-dir (`stateDir`, by default
+ *    <lockfile dir>/.latch), so the proxy finds them whatever directory the client starts it in.
+ *    Only the entry's command and args change; its env, which holds the server's keys, is never
+ *    touched. The lockfile goes first: a config is only ever wrapped around pins that exist.
  *
  * A server whose tools cannot be captured is reported and neither pinned nor wrapped. Running
  * init again changes nothing. With `dryRun`, servers are still queried to show what would be
@@ -333,7 +332,7 @@ export async function runInit(options: InitOptions): Promise<number> {
   if (options.dryRun) {
     if (lockChanged) say(`would write ${printable(lockfilePath)} with ${plural(Object.keys(next.servers).length, "server")}`);
     for (const { config, servers: entries } of rewrites) {
-      say(`would rewrite ${configPlace(config)}, keeping a .bak copy:`);
+      say(`would rewrite ${configPlace(config)}:`);
       for (const [serverId, entry] of Object.entries(entries)) {
         say(`  ${printable(serverId)}: ${commandLine(entry.command, entry.args ?? [])}`);
       }
@@ -358,7 +357,7 @@ export async function runInit(options: InitOptions): Promise<number> {
   for (const { config, servers: entries } of rewrites) {
     try {
       await writeClientConfig({ ...config, servers: entries });
-      say(`${pc.green("✔")} wrapped ${plural(Object.keys(entries).length, "server")} in ${configPlace(config)} (the original is kept as a .bak copy)`);
+      say(`${pc.green("✔")} wrapped ${plural(Object.keys(entries).length, "server")} in ${configPlace(config)}`);
     } catch (error) {
       say(pc.red(`✖ could not rewrite ${configPlace(config)}: ${printable(error instanceof Error ? error.message : String(error))}`));
       failed = true;
@@ -374,8 +373,10 @@ export async function runInit(options: InitOptions): Promise<number> {
 }
 
 /**
- * `entry` wrapped with `latch proxy` (wrapWithProxy) and given LATCH_LOCKFILE_PATH and
- * LATCH_STATE_DIR, so the proxy finds this lockfile whatever directory the client starts it in.
+ * `entry` wrapped with `latch proxy` (wrapWithProxy) with --lockfile and --state-dir, so the proxy
+ * finds this lockfile whatever directory the client starts it in. The entry's env is the user's
+ * (it holds the server's keys) and is left as it is, except that LATCH_LOCKFILE_PATH and
+ * LATCH_STATE_DIR, which older versions put there, are taken out.
  */
 export function proxiedEntry(
   serverId: string,
@@ -384,9 +385,7 @@ export function proxiedEntry(
   stateDir: string,
   launch: ProxyLaunch,
 ): ClientServerEntry {
-  const wrapped = wrapWithProxy(serverId, entry, launch);
-  const env = typeof wrapped.env === "object" && wrapped.env !== null ? wrapped.env : {};
-  return { ...wrapped, env: { ...env, LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: stateDir } };
+  return withoutLatchEnv(wrapWithProxy(serverId, entry, launch, { lockfilePath, stateDir }));
 }
 
 /**
@@ -394,9 +393,10 @@ export function proxiedEntry(
  * Entries already in that state are left out, and configs with nothing left are dropped, which
  * makes a second init a no-op.
  *
- * An entry that already runs latch keeps its own launch unless replacesLaunch says it must give
- * way to `launch`: then it is rewritten from its original command, so an entry of this install
- * gains the current node flags and one of a moved or removed install starts again.
+ * Every target is built from the entry's original command (unwrapProxy), so an entry written by
+ * an older version (paths in env, no node flags) is brought up to date. An entry that already runs
+ * latch keeps its own launch unless replacesLaunch says it must give way to `launch`: an entry of
+ * this install gains the current node flags, and one of a moved or removed install starts again.
  */
 export function planRewrites(
   configs: readonly ClientConfig[],
@@ -412,10 +412,8 @@ export function planRewrites(
       if (!Object.hasOwn(config.servers, server.serverId)) continue;
       const current = config.servers[server.serverId]!;
       const own = proxyLaunchOf(current);
-      const target =
-        own !== undefined && replacesLaunch(own, launch)
-          ? proxiedEntry(server.serverId, unwrapProxy(current), lockfilePath, stateDir, launch)
-          : proxiedEntry(server.serverId, current, lockfilePath, stateDir, launch);
+      const keep = own !== undefined && !replacesLaunch(own, launch) ? own : launch;
+      const target = proxiedEntry(server.serverId, unwrapProxy(current), lockfilePath, stateDir, keep);
       if (!isDeepStrictEqual(target, current)) entries.push([server.serverId, target]);
     }
     return entries.length > 0 ? [{ config, servers: Object.fromEntries(entries) }] : [];

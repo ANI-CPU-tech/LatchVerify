@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { replaceFile } from "../store/replace.js";
@@ -31,9 +31,10 @@ export interface ClientConfig extends ClientLocation {
   client: ClientId;
   /** Which part of the file, for people, when it is not the whole client: "project /home/me/app". */
   scope?: string;
+  /** The stdio entries latch can wrap. They hold the servers' env; never log, store or send them anywhere. */
   servers: Record<string, ClientServerEntry>;
-  /** The full parsed file. Written out only when the file has disappeared by the time it is rewritten. */
-  raw: Record<string, unknown>;
+  /** Every server id in the map, stdio or not, so a new name never replaces an HTTP server. */
+  serverIds: string[];
 }
 
 /** A client config that exists but cannot be used, and why. It is left untouched. */
@@ -176,9 +177,9 @@ export async function detectClients(): Promise<Detection> {
   return detection;
 }
 
-/** Claude Code's per-project configs in the ~/.claude.json `user` config, in file order. */
-function claudeCodeProjects(user: ClientConfig): Array<ClientConfig | ConfigProblem> {
-  const projects = user.raw.projects;
+/** Claude Code's per-project configs in ~/.claude.json (`root`, the parsed file; `user`, its user-scope config), in file order. */
+function claudeCodeProjects(user: ClientConfig, root: Record<string, unknown>): Array<ClientConfig | ConfigProblem> {
+  const projects = root.projects;
   if (!isPlainObject(projects)) return [];
   return Object.entries(projects).flatMap(([project, settings]): Array<ClientConfig | ConfigProblem> => {
     const map = isPlainObject(settings) ? settings.mcpServers : undefined;
@@ -186,7 +187,7 @@ function claudeCodeProjects(user: ClientConfig): Array<ClientConfig | ConfigProb
     const serversPath = ["projects", project, "mcpServers"];
     if (!isPlainObject(map)) return [{ client: user.client, path: user.path, message: `keeps "${serversPath.join(".")}" as something other than an object` }];
     if (Object.keys(map).length === 0) return [];
-    return [{ ...user, serversPath, scope: `project ${project}`, servers: stdioServers(map) }];
+    return [{ ...user, serversPath, scope: `project ${project}`, servers: stdioServers(map), serverIds: Object.keys(map) }];
   });
 }
 
@@ -204,8 +205,8 @@ async function readClientConfig(client: ClientId, { path, serversPath }: ClientL
   if (!isPlainObject(parsed.value)) return [{ client, path, message: "is not a JSON object" }];
   const map = valueAt(parsed.value, serversPath);
   if (map !== undefined && !isPlainObject(map)) return [{ client, path, message: `keeps "${serversPath.join(".")}" as something other than an object` }];
-  const config: ClientConfig = { client, path, serversPath, servers: stdioServers(map), raw: parsed.value };
-  return client === "claude-code" ? [config, ...claudeCodeProjects(config)] : [config];
+  const config: ClientConfig = { client, path, serversPath, servers: stdioServers(map), serverIds: isPlainObject(map) ? Object.keys(map) : [] };
+  return client === "claude-code" ? [config, ...claudeCodeProjects(config, parsed.value)] : [config];
 }
 
 function stdioServers(value: unknown): Record<string, ClientServerEntry> {
@@ -258,10 +259,22 @@ export const PROXY_NODE_FLAGS: readonly string[] = ["--max-semi-space-size=1"];
  */
 export const INSTALL_LAUNCH: ProxyLaunch = { command: process.execPath, args: [...PROXY_NODE_FLAGS, fileURLToPath(new URL("../cli.js", import.meta.url))] };
 
+/** Where a wrapped entry's proxy finds latch.lock and its state directory, given as latch options. */
+export interface ProxyPaths {
+  lockfilePath: string;
+  stateDir: string;
+}
+
+/** latch's global options a wrapped entry may carry between the launch and "proxy", each with a value. */
+const PATH_OPTIONS: ReadonlySet<string> = new Set(["--lockfile", "--state-dir"]);
+
 /**
  * Rewrite one server entry so the client launches `latch proxy` instead of the real server:
- * command `launch.command`, args [...launch.args, "proxy", "--server", serverId, "--",
- * original.command, ...original.args]. env and unknown keys are kept, in their original order. Pure.
+ * command `launch.command`, args [...launch.args, "--lockfile", <path>, "--state-dir", <dir>,
+ * "proxy", "--server", serverId, "--", original.command, ...original.args], the two options only
+ * with `paths`. Only `command` and `args` change: env (which holds the server's API keys) and
+ * unknown keys are kept as they are, in their original order. The paths travel as options, not as
+ * env, for that reason. Pure.
  *
  * Idempotent: an entry that already runs `latch proxy` is returned unchanged (the same object),
  * so re-running `latch init` never nests proxies.
@@ -269,7 +282,7 @@ export const INSTALL_LAUNCH: ProxyLaunch = { command: process.execPath, args: [.
  * @throws TypeError when serverId is empty or starts with "-" (the proxy's option parser would
  * misread it), or the entry has no command to wrap.
  */
-export function wrapWithProxy(serverId: string, original: ClientServerEntry, launch: ProxyLaunch = PATH_LAUNCH): ClientServerEntry {
+export function wrapWithProxy(serverId: string, original: ClientServerEntry, launch: ProxyLaunch = PATH_LAUNCH, paths?: ProxyPaths): ClientServerEntry {
   if (isProxyInvocation(original)) return original;
   if (serverId === "" || serverId.startsWith("-")) {
     throw new TypeError(`cannot wrap server ${JSON.stringify(serverId)}: the id must be non-empty and not start with "-"`);
@@ -277,7 +290,8 @@ export function wrapWithProxy(serverId: string, original: ClientServerEntry, lau
   if (typeof original.command !== "string" || original.command === "") {
     throw new TypeError(`cannot wrap server ${JSON.stringify(serverId)}: it has no command`);
   }
-  return withCommand(original, launch.command, [...launch.args, "proxy", "--server", serverId, "--", original.command, ...(original.args ?? [])]);
+  const options = paths === undefined ? [] : ["--lockfile", paths.lockfilePath, "--state-dir", paths.stateDir];
+  return withCommand(original, launch.command, [...launch.args, ...options, "proxy", "--server", serverId, "--", original.command, ...(original.args ?? [])]);
 }
 
 /**
@@ -297,13 +311,13 @@ export function unwrapProxy(entry: ClientServerEntry): ClientServerEntry {
 }
 
 /**
- * How a wrapped entry starts latch: its command and the arguments before "proxy". Undefined for
- * an entry that does not run `latch proxy`.
+ * How a wrapped entry starts latch: its command and the arguments before latch's own options and
+ * "proxy" (node flags and cli.js, or nothing for `latch` itself). Undefined for an entry that does
+ * not run `latch proxy`.
  */
 export function proxyLaunchOf(entry: ClientServerEntry): ProxyLaunch | undefined {
-  if (!isProxyInvocation(entry)) return undefined;
-  const args = entry.args!;
-  return { command: entry.command, args: args.slice(0, args.indexOf("proxy")) };
+  const at = latchArgsStart(entry);
+  return at === undefined ? undefined : { command: entry.command, args: entry.args!.slice(0, at) };
 }
 
 /**
@@ -326,14 +340,40 @@ export function replacesLaunch(own: ProxyLaunch, launch: ProxyLaunch, exists: (p
  * the flags (entries written before PROXY_NODE_FLAGS existed have none).
  */
 function isProxyInvocation(entry: ClientServerEntry): boolean {
-  if (typeof entry.command !== "string" || !Array.isArray(entry.args)) return false;
-  const [first] = entry.args;
-  const script = entry.args.findIndex((arg) => typeof arg !== "string" || !arg.startsWith("-"));
-  const [cli, second, third] = script === -1 ? [] : entry.args.slice(script);
-  if (typeof cli === "string" && baseName(cli) === "cli.js" && second === "proxy" && third === "--server") return true;
-  if (first !== "proxy") return false;
+  return latchArgsStart(entry) !== undefined;
+}
+
+/**
+ * For an entry that runs `latch proxy`, the index in its args where latch's own arguments start
+ * (any --lockfile/--state-dir options, then "proxy --server"): 0 for `latch ...`, just after
+ * cli.js for `<node> [node flags] <path>/cli.js ...`. Undefined for any other entry.
+ */
+function latchArgsStart(entry: ClientServerEntry): number | undefined {
+  if (typeof entry.command !== "string" || !Array.isArray(entry.args)) return undefined;
+  const args = entry.args;
+  const proxyAt = (start: number): boolean => {
+    let at = start;
+    while (typeof args[at] === "string" && PATH_OPTIONS.has(args[at] as string)) at += 2;
+    return args[at] === "proxy" && args[at + 1] === "--server";
+  };
+  const script = args.findIndex((arg) => typeof arg !== "string" || !arg.startsWith("-"));
+  const cli = script === -1 ? undefined : args[script];
+  if (typeof cli === "string" && baseName(cli) === "cli.js" && proxyAt(script + 1)) return script + 1;
   const executable = baseName(entry.command);
-  return executable === PROXY_COMMAND || executable === `${PROXY_COMMAND}.cmd` || executable === `${PROXY_COMMAND}.exe`;
+  const isLatch = executable === PROXY_COMMAND || executable === `${PROXY_COMMAND}.cmd` || executable === `${PROXY_COMMAND}.exe`;
+  return isLatch && proxyAt(0) ? 0 : undefined;
+}
+
+/** Variables older versions of latch init put in a wrapped entry's env; relinking and unlinking remove exactly these. */
+export const LATCH_ENTRY_ENV = ["LATCH_LOCKFILE_PATH", "LATCH_STATE_DIR"] as const;
+
+/** `entry` without the variables of LATCH_ENTRY_ENV; an env left empty by that is dropped. Other variables are kept. */
+export function withoutLatchEnv(entry: ClientServerEntry): ClientServerEntry {
+  if (typeof entry.env !== "object" || entry.env === null) return entry;
+  if (!LATCH_ENTRY_ENV.some((key) => Object.hasOwn(entry.env!, key))) return entry;
+  const env = Object.fromEntries(Object.entries(entry.env).filter(([key]) => !(LATCH_ENTRY_ENV as readonly string[]).includes(key)));
+  const { env: _dropped, ...rest } = entry;
+  return Object.keys(env).length > 0 ? { ...rest, env } : (rest as ClientServerEntry);
 }
 
 function baseName(path: string): string {
@@ -358,20 +398,21 @@ function withCommand(entry: ClientServerEntry, command: string, args: string[]):
 }
 
 /**
- * Write `config.servers` into the client's config file, after a timestamped `.bak` copy of the
- * file as it was (the MAX_BACKUPS newest are kept). Resolves once the new file is flushed to disk.
+ * Write `config.servers` into the client's config file. Resolves once the new file is flushed to
+ * disk.
  *
- * - Only the entries of `config.servers` that differ are edited, in place (setJsonc). Every
- *   other byte of the file stays as it is: other servers (HTTP servers, servers the user did not
- *   pick), unrelated keys, comments, trailing commas, indentation, line endings and the final
- *   newline (or its absence). The diff shows only the changed entries.
- * - The edit starts from the file as it is now, not from `config.raw`: clients rewrite their
- *   config while they run (Claude Code updates ~/.claude.json constantly), and `latch init` may
- *   sit on a prompt between detecting and writing. `config.raw` is used only if the file is gone.
- * - Nothing is written, and no backup made, when every entry already holds the given value,
- *   so re-running init is a no-op.
- * - The backup and the new file get the original file's permission bits (a new file gets 0600):
- *   configs often hold API tokens in `env`.
+ * - Only the values that differ are edited, field by field and in place (setJsonc): for a
+ *   wrapped server that is its `command` and `args`, and the LATCH_* variables older versions put
+ *   in its env. The rest of the entry, its other env variables (the server's API keys) included,
+ *   and every other byte of the file stay as they are: other servers, unrelated keys, comments,
+ *   trailing commas, indentation, line endings and the final newline (or its absence).
+ * - No copy of the file is made: it holds the user's keys, and the original command of a wrapped
+ *   entry stays in its own args after "--", which is all unlinking needs.
+ * - The edit starts from the file as it is now: clients rewrite their config while they run
+ *   (Claude Code updates ~/.claude.json constantly), and `latch init` may sit on a prompt between
+ *   detecting and writing. When the file is gone, it is created with just these servers.
+ * - Nothing is written when every value is already as given, so re-running init is a no-op.
+ * - The new file keeps the original's permission bits (a new file gets 0600).
  * - A symlinked config (dotfile managers) stays a symlink; its target is rewritten.
  * - The new content goes to a temp file that is fsynced and renamed over the target, so the
  *   client never reads half a config.
@@ -382,7 +423,7 @@ function withCommand(entry: ClientServerEntry, command: string, args: string[]):
 export async function writeClientConfig(config: ClientConfig): Promise<void> {
   const target = await resolveSymlinks(config.path);
   const current = await readIfExists(target);
-  const before = current?.text ?? `${JSON.stringify(config.raw, null, 2)}\n`;
+  const before = current?.text ?? "{}\n";
   const parsed = parseJsonc(before);
   if (!parsed.ok || !isPlainObject(parsed.value)) {
     throw new Error(`${config.path} is no longer a JSON object; not rewriting it`);
@@ -394,14 +435,12 @@ export async function writeClientConfig(config: ClientConfig): Promise<void> {
 
   let text = before;
   for (const [serverId, entry] of Object.entries(config.servers)) {
-    // Compare values, not text: a hand-formatted entry is not reformatted when nothing changed.
-    if (map !== undefined && Object.hasOwn(map, serverId) && isDeepStrictEqual(map[serverId], entry)) continue;
-    text = setJsonc(text, [...config.serversPath, serverId], entry);
+    const now = map !== undefined && Object.hasOwn(map, serverId) ? map[serverId] : undefined;
+    for (const [path, value] of edits(now, entry, [...config.serversPath, serverId])) text = setJsonc(text, path, value);
   }
   if (current !== undefined && text === current.text) return;
 
   const mode = current === undefined ? 0o600 : current.mode;
-  if (current !== undefined) await writeBackup(config.path, current.text, mode);
   await mkdir(dirname(target), { recursive: true });
   await writeFileAtomic(target, text, mode);
 }
@@ -425,45 +464,21 @@ async function readIfExists(path: string): Promise<{ text: string; mode: number 
   }
 }
 
-/** Backups kept per config file; older ones are deleted after each new one. */
-export const MAX_BACKUPS = 5;
-
 /**
- * `<path>.<UTC timestamp>.bak`, never overwriting an earlier backup. Then only the MAX_BACKUPS
- * newest backups of `path` are kept: the background sync rewrites configs often, and an
- * unbounded pile of copies (which may hold tokens) helps nobody.
+ * The edits that turn `current` into `target`, as key paths under `path` and the values to put
+ * there (undefined removes the key). Plain objects are compared key by key, so a value that did
+ * not change, an env variable for instance, is never rewritten. Values compare by content: a
+ * hand-formatted entry is not reformatted when nothing changed.
  */
-async function writeBackup(path: string, text: string, mode: number): Promise<void> {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  for (let attempt = 0; ; attempt++) {
-    const backup = `${path}.${stamp}${attempt === 0 ? "" : `-${attempt}`}.bak`;
-    try {
-      await writeFile(backup, text, { encoding: "utf8", flag: "wx", mode });
-      break;
-    } catch (error) {
-      if (!isErrno(error, "EEXIST") || attempt >= 99) throw error;
-    }
+function edits(current: unknown, target: unknown, path: string[]): Array<[string[], unknown]> {
+  if (isDeepStrictEqual(current, target)) return [];
+  if (isPlainObject(current) && isPlainObject(target)) {
+    const keys = new Set([...Object.keys(current), ...Object.keys(target)]);
+    return [...keys].flatMap((key) =>
+      edits(Object.hasOwn(current, key) ? current[key] : undefined, Object.hasOwn(target, key) ? target[key] : undefined, [...path, key]),
+    );
   }
-  await pruneBackups(path);
-}
-
-/** Deletes all but the MAX_BACKUPS newest of `path`'s backups. Never fails the write that made one. */
-async function pruneBackups(path: string): Promise<void> {
-  const name = basename(path);
-  const pattern = /^\.(\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z)(?:-(\d+))?\.bak$/;
-  let names: string[];
-  try {
-    names = await readdir(dirname(path));
-  } catch {
-    return;
-  }
-  const backups = names.flatMap((file) => {
-    const match = file.startsWith(name) ? pattern.exec(file.slice(name.length)) : null;
-    return match ? [{ file, stamp: match[1]!, attempt: Number(match[2] ?? 0) }] : [];
-  });
-  // Newest first: by timestamp, then by the -N suffix taken within one millisecond.
-  backups.sort((a, b) => (a.stamp === b.stamp ? b.attempt - a.attempt : a.stamp < b.stamp ? 1 : -1));
-  await Promise.all(backups.slice(MAX_BACKUPS).map(({ file }) => rm(join(dirname(path), file), { force: true }).catch(() => undefined)));
+  return [[path, target]];
 }
 
 /** Temp file, fsync, rename: the target holds either the old or the new content, never a mix. */
