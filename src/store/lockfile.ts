@@ -2,7 +2,9 @@ import { randomBytes } from "node:crypto";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { z } from "zod";
-import { LOCKFILE_VERSION, LockFileSchema, type LockFile, type PendingChange, type ToolRecord } from "../schema/index.js";
+import { launchHash, programName } from "../analyze/hash.js";
+import { LOCKFILE_VERSION, LockFileSchema, type LockFile, type PendingChange, type ServerEntry, type ToolRecord } from "../schema/index.js";
+import { LockIntegrity } from "./integrity.js";
 import { replaceFile } from "./replace.js";
 
 /** Any failure to read, validate or write latch.lock. The message always names the file. */
@@ -30,11 +32,32 @@ const errorCode = (error: unknown): string | undefined =>
   error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
 
 /**
+ * Lockfiles written before ServerEntry had `program` and `launch` kept each server's `command` and
+ * `args`, launch line and all. Such an entry is read as the new shape: its program name and the
+ * hash of its launch line (launchHash); the line itself is dropped, and the next write leaves it
+ * out of the file. Anything else is returned untouched, for the schema to judge.
+ */
+function withoutLaunchLines(data: unknown): unknown {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return data;
+  const servers = (data as { servers?: unknown }).servers;
+  if (typeof servers !== "object" || servers === null || Array.isArray(servers)) return data;
+  const converted = Object.fromEntries(
+    Object.entries(servers).map(([id, entry]) => {
+      if (typeof entry !== "object" || entry === null || "launch" in entry) return [id, entry];
+      const { command, args, ...rest } = entry as Record<string, unknown>;
+      if (typeof command !== "string" || !Array.isArray(args) || !args.every((arg) => typeof arg === "string")) return [id, entry];
+      return [id, { ...rest, program: programName(command), launch: launchHash(command, args as string[]) }];
+    }),
+  );
+  return { ...data, servers: converted };
+}
+
+/**
  * Validates parsed JSON as a lockfile this version of latch understands. Throws LockfileError
  * listing every schema problem with its field path, or an unsupported version.
  */
 function validateLockfile(path: string, data: unknown): LockFile {
-  const result = LockFileSchema.safeParse(data);
+  const result = LockFileSchema.safeParse(withoutLaunchLines(data));
   if (!result.success) throw new LockfileError(path, `invalid lockfile\n${z.prettifyError(result.error)}`, { cause: result.error });
   if (result.data.version !== LOCKFILE_VERSION) {
     throw new LockfileError(path, `unsupported lockfile version "${result.data.version}" (this latch reads version "${LOCKFILE_VERSION}")`);
@@ -49,14 +72,27 @@ function validateLockfile(path: string, data: unknown): LockFile {
  * file: a lockfile that cannot be trusted must never be treated as empty.
  */
 export async function readLockfile(path: string): Promise<LockFile> {
-  let text: string;
+  const text = await readLockfileText(path);
+  return text === undefined ? emptyLockfile() : parseLockfile(path, text);
+}
+
+/**
+ * The raw text of latch.lock, or undefined when the file does not exist, for callers that check
+ * the exact bytes (tamper detection) before parsing them with parseLockfile.
+ *
+ * @throws LockfileError when the file exists but cannot be read.
+ */
+export async function readLockfileText(path: string): Promise<string | undefined> {
   try {
-    text = await readFile(path, "utf8");
+    return await readFile(path, "utf8");
   } catch (error) {
-    if (errorCode(error) === "ENOENT") return emptyLockfile();
+    if (errorCode(error) === "ENOENT") return undefined;
     throw new LockfileError(path, `cannot read lockfile (${error instanceof Error ? error.message : String(error)})`, { cause: error });
   }
+}
 
+/** Parse and validate lockfile text read from `path`, as readLockfile does. */
+export function parseLockfile(path: string, text: string): LockFile {
   let data: unknown;
   try {
     data = JSON.parse(text.startsWith("\ufeff") ? text.slice(1) : text);
@@ -104,13 +140,22 @@ async function syncDirectory(dir: string): Promise<void> {
  * Validates `lock` and writes it atomically: the serialized text goes to a new temporary file in
  * the same directory, is flushed to disk, then renamed over `path`. Readers and crashes see
  * either the old lockfile or the new one, never a partial write. Parent directories are created.
- * Throws LockfileError, leaving any existing file untouched, when `lock` is invalid or the write
- * fails.
+ *
+ * Before the rename, the new content is recorded as trusted (LockIntegrity.trustContent), so
+ * proxies accept it and treat any edit made outside LatchVerify as tampering.
+ *
+ * Throws LockfileError, leaving any existing file untouched, when `lock` is invalid, its
+ * integrity cannot be recorded, or the write fails.
  */
 export async function writeLockfile(path: string, lock: LockFile): Promise<void> {
   const text = serializeLockfile(validateLockfile(path, lock));
   const dir = dirname(path);
   const temp = join(dir, `.${basename(path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+  try {
+    await new LockIntegrity(path).trustContent(text);
+  } catch (error) {
+    throw new LockfileError(path, `cannot record the lockfile's integrity (${error instanceof Error ? error.message : String(error)})`, { cause: error });
+  }
   try {
     await mkdir(dir, { recursive: true });
     const handle = await open(temp, "wx");
@@ -172,4 +217,91 @@ export function applyApproval(lock: LockFile, change: PendingChange, approvedBy:
   const result = LockFileSchema.safeParse(next);
   if (!result.success) throw new Error(`applyApproval: the approved lockfile would be invalid\n${z.prettifyError(result.error)}`);
   return result.data;
+}
+
+/**
+ * Adds the servers `serverIds` of `pinned` to `current`, the lockfile as it is on disk now, for
+ * commands that pin servers outside the state lock and write under it (init, add, the background
+ * sync). A server `current` already has was pinned or approved by someone else meanwhile: it is
+ * kept as it is and reported in `taken`, never overwritten. Pure.
+ */
+export function mergeServers(current: LockFile, pinned: LockFile, serverIds: readonly string[]): { lock: LockFile; added: string[]; taken: string[] } {
+  const added: string[] = [];
+  const taken: string[] = [];
+  const servers = { ...current.servers };
+  for (const id of serverIds) {
+    if (!Object.hasOwn(pinned.servers, id)) throw new Error(`mergeServers: server "${id}" is not in the pinned lockfile`);
+    if (Object.hasOwn(servers, id)) {
+      taken.push(id);
+      continue;
+    }
+    servers[id] = structuredClone(pinned.servers[id]!);
+    added.push(id);
+  }
+  if (added.length === 0) return { lock: current, added, taken };
+  return { lock: { ...current, generatedAt: pinned.generatedAt, servers }, added, taken };
+}
+
+/**
+ * `lock` with `serverId` linked: its launch command and no tools, marked trustOnFirstUse, so the
+ * proxy pins the tools the first time the server lists them (pinFirstRun). Linking starts nothing,
+ * so it never needs the keys in the client's config. Pure.
+ *
+ * @throws Error when `lock` already has the server: its pins are changed through review, never by
+ * linking again.
+ */
+export function linkServer(lock: LockFile, serverId: string, command: string, args: readonly string[], now: Date): LockFile {
+  if (Object.hasOwn(lock.servers, serverId)) throw new Error(`linkServer: server "${serverId}" is already in the lockfile`);
+  return {
+    ...lock,
+    generatedAt: now.toISOString(),
+    servers: {
+      ...lock.servers,
+      [serverId]: { transport: "stdio", program: programName(command), launch: launchHash(command, args), tools: [], trustOnFirstUse: true },
+    },
+  };
+}
+
+/** True when `server` is pinned for exactly this launch line. */
+export function launchesAs(server: ServerEntry, command: string, args: readonly string[]): boolean {
+  return server.transport === "stdio" && server.launch === launchHash(command, args);
+}
+
+/**
+ * Trust on first use, for a server linked with linkServer: approves every change in `changes`
+ * (the server's first tool list) that has no critical finding, under `approvedBy`, and clears
+ * trustOnFirstUse. A tool with a critical finding (hidden instructions, invisible or bidi text, a
+ * reference to another server) is left out, for the proxy to queue for review. Pure; a server
+ * that is not marked trustOnFirstUse is returned unchanged with nothing pinned.
+ */
+export function pinFirstRun(
+  lock: LockFile,
+  serverId: string,
+  changes: readonly PendingChange[],
+  approvedBy: string,
+  now: Date,
+): { lock: LockFile; pinned: string[]; held: string[] } {
+  const server = Object.hasOwn(lock.servers, serverId) ? lock.servers[serverId]! : undefined;
+  if (server?.trustOnFirstUse !== true) return { lock, pinned: [], held: [] };
+  let next = lock;
+  const pinned: string[] = [];
+  const held: string[] = [];
+  for (const change of changes) {
+    if (change.serverId !== serverId) continue;
+    if (change.findings.some((finding) => finding.severity === "critical")) {
+      held.push(change.toolName);
+      continue;
+    }
+    next = applyApproval(next, change, approvedBy, now);
+    pinned.push(change.toolName);
+  }
+  const { trustOnFirstUse: _done, ...linked } = next.servers[serverId]!;
+  return { lock: { ...next, generatedAt: now.toISOString(), servers: { ...next.servers, [serverId]: linked } }, pinned, held };
+}
+
+/** `lock` without the server `serverId` and its pins; the same object when it has none. Pure. */
+export function removeServer(lock: LockFile, serverId: string): LockFile {
+  if (!Object.hasOwn(lock.servers, serverId)) return lock;
+  const servers = Object.fromEntries(Object.entries(lock.servers).filter(([id]) => id !== serverId));
+  return { ...lock, servers };
 }

@@ -123,7 +123,7 @@ describe("latch proxy (CLI)", () => {
     );
     expect(code).toBe(7);
     expect(stdout).toBe("");
-  });
+  }, 30_000);
 
   it("fails on stderr only when the server cannot start or the lockfile is malformed", async () => {
     const missing = await latch(
@@ -140,7 +140,7 @@ describe("latch proxy (CLI)", () => {
     expect(malformed.code).toBe(1);
     expect(malformed.stdout).toBe("");
     expect(malformed.stderr).toContain(bad);
-  });
+  }, 30_000);
 });
 
 describe("latch proxy paths from the environment", () => {
@@ -201,6 +201,6 @@ describe("latch proxy paths from the environment", () => {
     });
     // No latch.lock in the working directory: the server is unpinned, so the call is blocked.
     expect(blockedId2(stdout)).toBe(true);
-    expect(await readFile(join(dir, ".latch", "events.jsonl"), "utf8")).toContain('"toolName":"get_alerts","reason":"unpinned"');
+    expect(await readFile(join(dir, ".latch", "events.jsonl"), "utf8")).toContain('"toolName":"get_alerts","reason":"server_unpinned"');
   }, 30_000);
 });

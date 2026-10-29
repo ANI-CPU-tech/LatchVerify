@@ -1,15 +1,21 @@
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseJsonc } from "../../src/config/jsonc.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   INSTALL_LAUNCH,
   PROXY_COMMAND,
+  PROXY_NODE_FLAGS,
+  proxyLaunchOf,
+  replacesLaunch,
   SUPPORTED_CLIENTS,
   clientConfigPath,
+  clientLocations,
   detectClients,
-  serversKey,
   unwrapProxy,
+  withoutLatchEnv,
   wrapWithProxy,
   writeClientConfig,
   type ClientConfig,
@@ -20,6 +26,12 @@ import {
 // os.homedir() follows HOME only on POSIX hosts.
 const onWindows = process.platform === "win32";
 
+/** A server entry as it is on disk: command and args, plus whatever else the client keeps (env, type, cwd...). */
+type DiskEntry = { command: string; args?: string[] } & Record<string, unknown>;
+
+/** The key of a client's main server map ("mcpServers", "servers" or "context_servers"). */
+const mapKey = (client: ClientId): string => clientLocations(client)[0]!.serversPath[0]!;
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -28,12 +40,28 @@ describe("clientConfigPath", () => {
   it.skipIf(onWindows)("uses the documented locations on Linux", () => {
     vi.stubEnv("HOME", "/home/dev");
     vi.stubEnv("XDG_CONFIG_HOME", undefined);
-    expect(SUPPORTED_CLIENTS.map((client) => clientConfigPath(client, "linux"))).toEqual([
-      "/home/dev/.config/Claude/claude_desktop_config.json",
-      "/home/dev/.claude.json",
-      "/home/dev/.cursor/mcp.json",
-      "/home/dev/.config/Code/User/mcp.json",
-    ]);
+    expect(Object.fromEntries(SUPPORTED_CLIENTS.map((client) => [client, clientLocations(client, "linux")]))).toEqual({
+      "claude-desktop": [{ path: "/home/dev/.config/Claude/claude_desktop_config.json", serversPath: ["mcpServers"] }],
+      "claude-code": [{ path: "/home/dev/.claude.json", serversPath: ["mcpServers"] }],
+      cursor: [{ path: "/home/dev/.cursor/mcp.json", serversPath: ["mcpServers"] }],
+      vscode: [{ path: "/home/dev/.config/Code/User/mcp.json", serversPath: ["servers"] }],
+      "vscode-insiders": [{ path: "/home/dev/.config/Code - Insiders/User/mcp.json", serversPath: ["servers"] }],
+      vscodium: [{ path: "/home/dev/.config/VSCodium/User/mcp.json", serversPath: ["servers"] }],
+      cline: [
+        { path: "/home/dev/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json", serversPath: ["mcpServers"] },
+      ],
+      "cline-cli": [{ path: "/home/dev/.cline/data/settings/cline_mcp_settings.json", serversPath: ["mcpServers"] }],
+      "gemini-cli": [{ path: "/home/dev/.gemini/settings.json", serversPath: ["mcpServers"] }],
+      zed: [{ path: "/home/dev/.config/zed/settings.json", serversPath: ["context_servers"] }],
+      "lm-studio": [{ path: "/home/dev/.lmstudio/mcp.json", serversPath: ["mcpServers"] }],
+      "amazon-q": [
+        { path: "/home/dev/.aws/amazonq/mcp.json", serversPath: ["mcpServers"] },
+        { path: "/home/dev/.aws/amazonq/default.json", serversPath: ["mcpServers"] },
+      ],
+    });
+    expect(SUPPORTED_CLIENTS.map((client) => clientConfigPath(client, "linux"))).toEqual(
+      SUPPORTED_CLIENTS.map((client) => clientLocations(client, "linux")[0]!.path),
+    );
   });
 
   it.skipIf(onWindows)("honours an absolute XDG_CONFIG_HOME on Linux and ignores a relative one", () => {
@@ -42,6 +70,8 @@ describe("clientConfigPath", () => {
     expect(clientConfigPath("claude-desktop", "linux")).toBe("/data/config/Claude/claude_desktop_config.json");
     expect(clientConfigPath("vscode", "linux")).toBe("/data/config/Code/User/mcp.json");
     expect(clientConfigPath("cursor", "linux")).toBe("/home/dev/.cursor/mcp.json");
+    expect(clientConfigPath("zed", "linux")).toBe("/data/config/zed/settings.json");
+    expect(clientConfigPath("cline", "linux")).toBe("/data/config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json");
     vi.stubEnv("XDG_CONFIG_HOME", "relative/config");
     expect(clientConfigPath("claude-desktop", "linux")).toBe("/home/dev/.config/Claude/claude_desktop_config.json");
   });
@@ -49,12 +79,11 @@ describe("clientConfigPath", () => {
   it.skipIf(onWindows)("uses Application Support on macOS", () => {
     vi.stubEnv("HOME", "/Users/dev");
     vi.stubEnv("XDG_CONFIG_HOME", "/ignored");
-    expect(SUPPORTED_CLIENTS.map((client) => clientConfigPath(client, "darwin"))).toEqual([
-      "/Users/dev/Library/Application Support/Claude/claude_desktop_config.json",
-      "/Users/dev/.claude.json",
-      "/Users/dev/.cursor/mcp.json",
-      "/Users/dev/Library/Application Support/Code/User/mcp.json",
-    ]);
+    expect(clientConfigPath("claude-desktop", "darwin")).toBe("/Users/dev/Library/Application Support/Claude/claude_desktop_config.json");
+    expect(clientConfigPath("vscode", "darwin")).toBe("/Users/dev/Library/Application Support/Code/User/mcp.json");
+    expect(clientConfigPath("cursor", "darwin")).toBe("/Users/dev/.cursor/mcp.json");
+    // Zed keeps ~/.config on macOS too.
+    expect(clientConfigPath("zed", "darwin")).toBe("/Users/dev/.config/zed/settings.json");
   });
 
   it.skipIf(onWindows)("uses %APPDATA% and Windows separators on Windows", () => {
@@ -63,6 +92,18 @@ describe("clientConfigPath", () => {
     expect(clientConfigPath("vscode", "win32")).toBe("C:\\Users\\dev\\AppData\\Roaming\\Code\\User\\mcp.json");
     expect(clientConfigPath("cursor", "win32").endsWith("\\.cursor\\mcp.json")).toBe(true);
     expect(clientConfigPath("claude-code", "win32").endsWith("\\.claude.json")).toBe(true);
+    expect(clientConfigPath("vscode-insiders", "win32")).toBe("C:\\Users\\dev\\AppData\\Roaming\\Code - Insiders\\User\\mcp.json");
+    expect(clientConfigPath("vscodium", "win32")).toBe("C:\\Users\\dev\\AppData\\Roaming\\VSCodium\\User\\mcp.json");
+    expect(clientConfigPath("cline", "win32")).toBe(
+      "C:\\Users\\dev\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\settings\\cline_mcp_settings.json",
+    );
+    expect(clientConfigPath("zed", "win32")).toBe("C:\\Users\\dev\\AppData\\Roaming\\Zed\\settings.json");
+    expect(clientConfigPath("lm-studio", "win32").endsWith("\\.lmstudio\\mcp.json")).toBe(true);
+    expect(clientConfigPath("gemini-cli", "win32").endsWith("\\.gemini\\settings.json")).toBe(true);
+    expect(clientLocations("amazon-q", "win32").map((location) => location.path.split("\\").slice(-3).join("/"))).toEqual([
+      ".aws/amazonq/mcp.json",
+      ".aws/amazonq/default.json",
+    ]);
   });
 
   it.skipIf(onWindows)("falls back to AppData/Roaming under the home directory without %APPDATA%", () => {
@@ -77,12 +118,12 @@ describe("clientConfigPath", () => {
   });
 
   it("rejects an unknown client at runtime", () => {
-    expect(() => clientConfigPath("zed" as ClientId)).toThrow('unknown MCP client "zed"');
+    expect(() => clientConfigPath("windsurf" as ClientId)).toThrow('unknown MCP client "windsurf"');
   });
 });
 
 describe("wrapWithProxy", () => {
-  const orig: ClientServerEntry = { command: "node", args: ["w.js"], env: { A: "1" }, extra: true };
+  const orig: DiskEntry = { command: "node", args: ["w.js"], env: { A: "1" }, extra: true };
 
   it("launches latch proxy with the real command after --", () => {
     expect(wrapWithProxy("weather", orig)).toEqual({
@@ -142,11 +183,24 @@ describe("wrapWithProxy", () => {
     });
   });
 
-  it("launches this install by absolute path with INSTALL_LAUNCH", () => {
+  it("launches this install by absolute path with INSTALL_LAUNCH, with the proxy's node flags first", () => {
     expect(INSTALL_LAUNCH.command).toBe(process.execPath);
-    expect(INSTALL_LAUNCH.args).toHaveLength(1);
-    expect(isAbsolute(INSTALL_LAUNCH.args[0]!)).toBe(true);
-    expect(basename(INSTALL_LAUNCH.args[0]!)).toBe("cli.js");
+    expect(PROXY_NODE_FLAGS).toEqual(["--max-semi-space-size=1"]);
+    expect(INSTALL_LAUNCH.args.slice(0, -1)).toEqual(PROXY_NODE_FLAGS);
+    expect(isAbsolute(INSTALL_LAUNCH.args.at(-1)!)).toBe(true);
+    expect(basename(INSTALL_LAUNCH.args.at(-1)!)).toBe("cli.js");
+  });
+
+  it("recognizes a wrapped entry with or without node flags before cli.js", () => {
+    const real = { command: "tsx", args: ["demo/evil-server.ts"] };
+    const flagged = wrapWithProxy("weather", real, INSTALL_LAUNCH);
+    expect(flagged.args!.slice(0, 2)).toEqual(["--max-semi-space-size=1", INSTALL_LAUNCH.args.at(-1)]);
+    expect(wrapWithProxy("weather", flagged, INSTALL_LAUNCH)).toBe(flagged);
+    expect(unwrapProxy(flagged)).toEqual(real);
+    // Written before the flag existed: still recognized, never wrapped twice.
+    const old = { command: process.execPath, args: [INSTALL_LAUNCH.args.at(-1)!, "proxy", "--server", "weather", "--", "tsx", "demo/evil-server.ts"] };
+    expect(wrapWithProxy("weather", old, INSTALL_LAUNCH)).toBe(old);
+    expect(unwrapProxy(old)).toEqual(real);
   });
 
   it("recognizes an entry wrapped as <node> <path>/cli.js proxy, so it is never wrapped twice", () => {
@@ -197,6 +251,30 @@ describe("wrapWithProxy", () => {
   });
 });
 
+describe("proxyLaunchOf and replacesLaunch", () => {
+  const launch = { command: "/usr/bin/node", args: ["--max-semi-space-size=1", "/opt/latch/dist/cli.js"] };
+  const exists = (path: string) => path.startsWith("/usr/") || path.startsWith("/opt/latch/");
+
+  it("reads the launch before proxy, for every wrapped form", () => {
+    expect(proxyLaunchOf(wrapWithProxy("w", { command: "x" }, launch))).toEqual(launch);
+    expect(proxyLaunchOf(wrapWithProxy("w", { command: "x" }))).toEqual({ command: "latch", args: [] });
+    expect(proxyLaunchOf({ command: "x", args: ["proxy"] })).toBeUndefined();
+  });
+
+  it("replaces this install's launch when only the flags differ, never when it is already current", () => {
+    expect(replacesLaunch({ command: "/usr/bin/node", args: ["/opt/latch/dist/cli.js"] }, launch, exists)).toBe(true);
+    expect(replacesLaunch(launch, launch, exists)).toBe(false);
+  });
+
+  it("replaces a launch whose node or cli.js is gone, and keeps one that still works", () => {
+    expect(replacesLaunch({ command: "/gone/node", args: ["/opt/latch/dist/cli.js"] }, launch, exists)).toBe(true);
+    expect(replacesLaunch({ command: "/usr/bin/node", args: ["/gone/cli.js"] }, launch, exists)).toBe(true);
+    expect(replacesLaunch({ command: "/usr/bin/node", args: ["/opt/latch/other/cli.js"] }, launch, exists)).toBe(false);
+    // latch on PATH cannot be checked, so it is the user's choice.
+    expect(replacesLaunch({ command: "latch", args: [] }, launch, exists)).toBe(false);
+  });
+});
+
 describe("unwrapProxy", () => {
   it("reverses wrapWithProxy exactly (task Verify)", () => {
     const orig = { command: "node", args: ["w.js"], env: { A: "1" }, extra: true };
@@ -205,7 +283,7 @@ describe("unwrapProxy", () => {
   });
 
   it("round-trips entries of every shape", () => {
-    const entries: ClientServerEntry[] = [
+    const entries: DiskEntry[] = [
       { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] },
       { type: "stdio", command: "uvx", args: ["mcp-server-git", "--", "x"], env: { N: "1" }, cwd: "/srv" },
       { command: "server" },
@@ -272,35 +350,49 @@ describe.skipIf(onWindows)("detectClients", () => {
 
   it("finds nothing in an empty home", async () => {
     home = await fakeHome();
-    expect(await detectClients()).toEqual([]);
+    expect(await detectClients()).toEqual({ configs: [], problems: [] });
   });
 
   it("returns every client whose config exists, in SUPPORTED_CLIENTS order", async () => {
     home = await fakeHome();
     const weather = { command: "npx", args: ["tsx", "demo/weather-server.ts"] };
     for (const client of [...SUPPORTED_CLIENTS].reverse()) {
-      await writeConfig(client, { [serversKey(client)]: { weather }, other: 1 });
+      await writeConfig(client, { [mapKey(client)]: { weather }, other: 1 });
     }
-    const found = await detectClients();
+    const { configs: found, problems } = await detectClients();
+    expect(problems).toEqual([]);
     expect(found.map((config) => config.client)).toEqual([...SUPPORTED_CLIENTS]);
     for (const config of found) {
       expect(config.path).toBe(clientConfigPath(config.client));
       expect(config.servers).toEqual({ weather });
-      expect(config.raw).toEqual({ [serversKey(config.client)]: { weather }, other: 1 });
+      expect(config.serverIds).toEqual(["weather"]);
     }
   });
 
   it("reads VS Code servers from servers and the others from mcpServers", async () => {
     home = await fakeHome();
-    expect(SUPPORTED_CLIENTS.map(serversKey)).toEqual(["mcpServers", "mcpServers", "mcpServers", "servers"]);
+    expect(SUPPORTED_CLIENTS.map(mapKey)).toEqual([
+      "mcpServers",
+      "mcpServers",
+      "mcpServers",
+      "servers",
+      "servers",
+      "servers",
+      "mcpServers",
+      "mcpServers",
+      "mcpServers",
+      "context_servers",
+      "mcpServers",
+      "mcpServers",
+    ]);
     await writeConfig("vscode", { mcpServers: { a: { command: "a" } }, servers: { b: { type: "stdio", command: "b" } } });
     await writeConfig("cursor", { servers: { a: { command: "a" } }, mcpServers: { b: { command: "b" } } });
-    const found = await detectClients();
-    expect(found.find((c) => c.client === "vscode")?.servers).toEqual({ b: { type: "stdio", command: "b" } });
+    const { configs: found } = await detectClients();
+    expect(found.find((c) => c.client === "vscode")?.servers).toEqual({ b: { command: "b" } });
     expect(found.find((c) => c.client === "cursor")?.servers).toEqual({ b: { command: "b" } });
   });
 
-  it("keeps only wrappable stdio servers, leaving the rest in raw", async () => {
+  it("keeps only wrappable stdio servers, and the names of all", async () => {
     home = await fakeHome();
     const mcpServers = {
       ok: { command: "node", args: ["x.js"], env: { A: "1" }, extra: true },
@@ -316,55 +408,173 @@ describe.skipIf(onWindows)("detectClients", () => {
       nothing: null,
     };
     await writeConfig("claude-desktop", { mcpServers });
-    const [config] = await detectClients();
-    expect(config!.servers).toEqual({ ok: mcpServers.ok, typed: mcpServers.typed });
-    expect(config!.raw).toEqual({ mcpServers });
+    const [config] = (await detectClients()).configs;
+    // Reduced to command, args and env variable names: no value, no other key.
+    expect(config!.servers).toEqual({ ok: { command: "node", args: ["x.js"], envNames: ["A"] }, typed: { command: "uvx" } });
+    expect(config!.serverIds).toEqual(Object.keys(mcpServers));
+  });
+
+  it("keeps no env value: only the names of the variables", async () => {
+    home = await fakeHome();
+    await writeConfig("cursor", { mcpServers: { s: { command: "node", env: { API_KEY: "sk-secret", OTHER: "x" } } } });
+    const detection = await detectClients();
+    expect(detection.configs[0]!.servers.s).toEqual({ command: "node", envNames: ["API_KEY", "OTHER"] });
+    expect(JSON.stringify(detection)).not.toContain("sk-secret");
   });
 
   it("detects a config without servers, with an empty server map", async () => {
     home = await fakeHome();
     await writeConfig("cursor", { theme: "dark" });
-    await writeConfig("claude-code", { mcpServers: [] });
-    expect((await detectClients()).map((c) => [c.client, c.servers])).toEqual([
-      ["claude-code", {}],
-      ["cursor", {}],
-    ]);
+    expect((await detectClients()).configs.map((c) => [c.client, c.servers])).toEqual([["cursor", {}]]);
   });
 
-  it("skips files that are not one JSON object, including JSONC", async () => {
+  it("reads JSONC: comments and trailing commas", async () => {
+    home = await fakeHome();
+    await writeConfig("vscode", '{\n  // mine\n  "servers": {\n    "a": { "type": "stdio", "command": "a", }, /* b */\n  },\n}\n');
+    expect((await detectClients()).configs.map((c) => [c.client, c.servers])).toEqual([["vscode", { a: { command: "a" } }]]);
+  });
+
+  it("reports files it cannot use instead of skipping them silently", async () => {
     home = await fakeHome();
     await writeConfig("claude-desktop", "{ not json");
     await writeConfig("claude-code", "[1, 2]");
-    await writeConfig("cursor", '{\n  // comment\n  "mcpServers": {}\n}');
+    await writeConfig("cursor", { mcpServers: [] });
     await writeConfig("vscode", "");
-    expect(await detectClients()).toEqual([]);
+    expect(await detectClients()).toEqual({
+      configs: [],
+      problems: [
+        { client: "claude-desktop", path: clientConfigPath("claude-desktop"), message: "is not valid JSON: InvalidSymbol at line 1, column 3" },
+        { client: "claude-code", path: clientConfigPath("claude-code"), message: "is not a JSON object" },
+        { client: "cursor", path: clientConfigPath("cursor"), message: 'keeps "mcpServers" as something other than an object' },
+        { client: "vscode", path: clientConfigPath("vscode"), message: "is not valid JSON: ValueExpected at line 1, column 1" },
+      ],
+    });
   });
 
-  it("skips a config path that is a directory", async () => {
+  it("reports a config path it cannot read", async () => {
     home = await fakeHome();
     await mkdir(clientConfigPath("cursor"), { recursive: true });
-    expect(await detectClients()).toEqual([]);
+    expect(await detectClients()).toEqual({ configs: [], problems: [{ client: "cursor", path: clientConfigPath("cursor"), message: "cannot be read (EISDIR)" }] });
+  });
+
+  it("reads Claude Code's per-project servers as one more config per project", async () => {
+    home = await fakeHome();
+    const user = { a: { command: "a" } };
+    const app = { b: { command: "b" }, remote: { type: "http", url: "https://mcp.example" } };
+    await writeConfig("claude-code", { mcpServers: user, projects: { "/srv/app": { mcpServers: app }, "/srv/empty": { mcpServers: {} }, "/srv/none": {} } });
+    const { configs, problems } = await detectClients();
+    expect(problems).toEqual([]);
+    expect(configs.map(({ client, serversPath, scope, servers }) => ({ client, serversPath, scope, servers }))).toEqual([
+      { client: "claude-code", serversPath: ["mcpServers"], scope: undefined, servers: user },
+      { client: "claude-code", serversPath: ["projects", "/srv/app", "mcpServers"], scope: "project /srv/app", servers: { b: { command: "b" } } },
+    ]);
+  });
+
+  it("reports a Claude Code project whose servers are not an object, and still reads the rest", async () => {
+    home = await fakeHome();
+    await writeConfig("claude-code", { mcpServers: { a: { command: "a" } }, projects: { "/srv/app": { mcpServers: ["x"] } } });
+    const { configs, problems } = await detectClients();
+    expect(configs.map((config) => config.serversPath)).toEqual([["mcpServers"]]);
+    expect(problems).toEqual([{ client: "claude-code", path: clientConfigPath("claude-code"), message: 'keeps "projects./srv/app.mcpServers" as something other than an object' }]);
   });
 
   it("accepts a leading byte-order mark", async () => {
     home = await fakeHome();
     await writeConfig("cursor", `\uFEFF${JSON.stringify({ mcpServers: { a: { command: "a" } } })}`);
-    expect((await detectClients())[0]?.servers).toEqual({ a: { command: "a" } });
+    expect((await detectClients()).configs[0]?.servers).toEqual({ a: { command: "a" } });
   });
 
   it("keeps a server named __proto__ as a plain key", async () => {
     home = await fakeHome();
     await writeConfig("cursor", '{"mcpServers":{"__proto__":{"command":"node"}}}');
-    const [config] = await detectClients();
+    const [config] = (await detectClients()).configs;
     expect(Object.hasOwn(config!.servers, "__proto__")).toBe(true);
     expect(Object.getPrototypeOf(config!.servers)).toBe(Object.prototype);
+  });
+});
+
+/** Each client's documented example config: tests/fixtures/clients/<client>/<file name>. */
+const fixture = (client: ClientId, path: string): string =>
+  fileURLToPath(new URL(`../fixtures/clients/${client}/${basename(path)}`, import.meta.url));
+
+/** The stdio servers each fixture holds, per file: the ones latch wraps. */
+const FIXTURE_SERVERS: Record<ClientId, string[][]> = {
+  "claude-desktop": [["filesystem"]],
+  "claude-code": [["airtable"], ["database-tools"]],
+  cursor: [["server-name"]],
+  vscode: [["Perplexity", "fetch"]],
+  "vscode-insiders": [["Perplexity", "fetch"]],
+  vscodium: [["Perplexity", "fetch"]],
+  cline: [["my-server"]],
+  "cline-cli": [["my-server"]],
+  "gemini-cli": [["pythonTools"]],
+  zed: [["local-mcp-server"]],
+  "lm-studio": [["time"]],
+  "amazon-q": [["awslabs.aws-documentation-mcp-server"], ["git"]],
+};
+
+describe.skipIf(onWindows)("every supported client, on its documented example config", () => {
+  let home: string | undefined;
+
+  afterEach(async () => {
+    if (home !== undefined) await rm(home, { recursive: true, force: true });
+    home = undefined;
+  });
+
+  it("has a fixture for each of its config files", async () => {
+    for (const client of SUPPORTED_CLIENTS) {
+      for (const location of clientLocations(client)) {
+        await expect(stat(fixture(client, location.path)), `${client}: ${basename(location.path)}`).resolves.toBeDefined();
+      }
+    }
+    expect(Object.keys(FIXTURE_SERVERS).sort()).toEqual([...SUPPORTED_CLIENTS].sort());
+  });
+
+  it("is detected, wrapped and unwrapped, keeping every comment and every other entry", async () => {
+    home = await fakeHome();
+    const originals = new Map<string, string>();
+    for (const client of SUPPORTED_CLIENTS) {
+      for (const location of clientLocations(client)) {
+        const text = await readFile(fixture(client, location.path), "utf8");
+        await mkdir(dirname(location.path), { recursive: true });
+        await writeFile(location.path, text);
+        originals.set(location.path, text);
+      }
+    }
+
+    const { configs, problems } = await detectClients();
+    expect(problems).toEqual([]);
+    for (const client of SUPPORTED_CLIENTS) {
+      expect(configs.filter((config) => config.client === client).map((config) => Object.keys(config.servers)), client).toEqual(FIXTURE_SERVERS[client]);
+    }
+
+    for (const config of configs) await writeClientConfig({ ...config, servers: Object.fromEntries(Object.entries(config.servers).map(([id, entry]) => [id, wrapWithProxy(id, entry)])) });
+    const wrapped = (await detectClients()).configs;
+    for (const config of wrapped) {
+      for (const entry of Object.values(config.servers)) expect(entry.args?.[0], config.path).toBe("proxy");
+      await writeClientConfig({ ...config, servers: Object.fromEntries(Object.entries(config.servers).map(([id, entry]) => [id, unwrapProxy(entry)])) });
+    }
+
+    let checkedComments = 0;
+    for (const config of configs) {
+      const original = originals.get(config.path)!;
+      const restored = await readFile(config.path, "utf8");
+      // Comments in the fixtures start their line or are /* blocks */, so no URL inside a string is mistaken for one.
+      const comments = original.match(/^[ \t]*\/\/.*$|\/\*[\s\S]*?\*\//gm) ?? [];
+      for (const comment of comments) expect(restored, config.path).toContain(comment.trim());
+      checkedComments += comments.length;
+      // unwrapProxy gives back `args: []` as no args key; clients treat the two the same.
+      const dropEmptyArgs = (value: unknown) => JSON.parse(JSON.stringify(value, (key, v) => (key === "args" && Array.isArray(v) && v.length === 0 ? undefined : v)));
+      expect(parseJsonc(restored), config.path).toEqual({ ok: true, value: dropEmptyArgs((parseJsonc(original) as { value: unknown }).value) });
+    }
+    // VS Code's three fixtures carry 3 comments each, Zed's 4.
+    expect(checkedComments).toBe(13);
   });
 });
 
 describe.skipIf(onWindows)("writeClientConfig", () => {
   let home: string;
   const weather = { command: "npx", args: ["tsx", "demo/weather-server.ts"] };
-  const BACKUP = /\.\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z(-\d+)?\.bak$/;
 
   afterEach(async () => {
     vi.useRealTimers();
@@ -375,7 +585,7 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
   async function detected(contents: unknown, client: ClientId = "claude-desktop"): Promise<ClientConfig> {
     home = await fakeHome();
     await writeConfig(client, contents);
-    const config = (await detectClients()).find((c) => c.client === client);
+    const config = (await detectClients()).configs.find((c) => c.client === client);
     if (config === undefined) throw new Error("config not detected");
     return config;
   }
@@ -386,36 +596,44 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
   });
 
   const filesBeside = async (path: string) => (await readdir(dirname(path))).sort();
-  const backups = async (path: string) => (await filesBeside(path)).filter((name) => BACKUP.test(name));
 
-  it("wraps the servers, keeps unknown keys and leaves one .bak with the original bytes", async () => {
-    const original = { mcpServers: { weather }, other: 1 };
-    const config = await detected(original);
-    const before = await readFile(config.path, "utf8");
+  it("wraps the servers, keeps unknown keys and makes no copy of the file, which holds the user's keys", async () => {
+    const config = await detected({ mcpServers: { weather }, other: 1 });
     await writeClientConfig(wrapAll(config));
-
     expect(JSON.parse(await readFile(config.path, "utf8"))).toEqual({ mcpServers: { weather: wrapWithProxy("weather", weather) }, other: 1 });
-    const [backup, ...more] = await backups(config.path);
-    expect(more).toEqual([]);
-    expect(backup!.startsWith("claude_desktop_config.json.")).toBe(true);
-    expect(await readFile(join(dirname(config.path), backup!), "utf8")).toBe(before);
-    expect(await filesBeside(config.path)).toEqual(["claude_desktop_config.json", backup]);
+    expect(await filesBeside(config.path)).toEqual(["claude_desktop_config.json"]);
   });
 
-  it("is a no-op, with no new backup, when nothing changes", async () => {
+  it("changes only command and args, never an env variable or another key of the entry", async () => {
+    const keyed = { command: "npx", args: ["-y", "server"], env: { API_KEY: "sk-secret", OTHER: "x" }, disabled: false };
+    const text = `{\n  "mcpServers": {\n    "keyed": {\n      "command": "npx",\n      "args": ["-y", "server"],\n      "env": { "API_KEY": "sk-secret",   "OTHER": "x" },\n      "disabled": false\n    }\n  }\n}\n`;
+    const config = await detected(text);
+    await writeClientConfig({ ...config, servers: { keyed: wrapWithProxy("keyed", keyed, { command: "/n", args: ["/cli.js"] }, { lockfilePath: "/l", stateDir: "/s" }) } });
+    const written = await readFile(config.path, "utf8");
+    // The env line is byte for byte the user's, odd spacing included.
+    expect(written).toContain('      "env": { "API_KEY": "sk-secret",   "OTHER": "x" },\n      "disabled": false\n');
+    expect(JSON.parse(written).mcpServers.keyed.args).toEqual(["/cli.js", "--lockfile", "/l", "--state-dir", "/s", "proxy", "--server", "keyed", "--", "npx", "-y", "server"]);
+  });
+
+  it("removes only LatchVerify's own variables from an entry written by an older version", async () => {
+    const old = { command: "latch", args: ["proxy", "--server", "w", "--", "npx", "w"], env: { API_KEY: "sk-secret", LATCH_LOCKFILE_PATH: "/l", LATCH_STATE_DIR: "/s" } };
+    const config = await detected({ mcpServers: { w: old } });
+    await writeClientConfig({ ...config, servers: { w: withoutLatchEnv(old) } });
+    expect(JSON.parse(await readFile(config.path, "utf8")).mcpServers.w).toEqual({ command: "latch", args: old.args, env: { API_KEY: "sk-secret" } });
+  });
+
+  it("is a no-op when nothing changes", async () => {
     const config = wrapAll(await detected({ mcpServers: { weather }, other: 1 }));
     await writeClientConfig(config);
     const after = await readFile(config.path, "utf8");
-    await writeClientConfig(wrapAll((await detectClients())[0]!));
+    await writeClientConfig(wrapAll((await detectClients()).configs[0]!));
     expect(await readFile(config.path, "utf8")).toBe(after);
-    expect(await backups(config.path)).toHaveLength(1);
   });
 
   it("does not reformat a hand-formatted file when nothing changes", async () => {
     const config = await detected('{"mcpServers": {"weather": {"command": "npx", "args": ["tsx", "demo/weather-server.ts"]}}}');
     await writeClientConfig(config);
     expect(await readFile(config.path, "utf8")).toBe('{"mcpServers": {"weather": {"command": "npx", "args": ["tsx", "demo/weather-server.ts"]}}}');
-    expect(await backups(config.path)).toEqual([]);
   });
 
   it("keeps servers it was not given, including HTTP servers", async () => {
@@ -448,11 +666,11 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
     expect(await filesBeside(config.path)).toEqual(["claude_desktop_config.json"]);
   });
 
-  it("writes from config.raw, with no backup and mode 0600, when the file is gone", async () => {
+  it("creates the file with just these servers, mode 0600, when it is gone", async () => {
     const config = await detected({ mcpServers: { weather }, other: 1 });
     await rm(dirname(config.path), { recursive: true });
     await writeClientConfig(wrapAll(config));
-    expect(JSON.parse(await readFile(config.path, "utf8"))).toEqual({ mcpServers: { weather: wrapWithProxy("weather", weather) }, other: 1 });
+    expect(JSON.parse(await readFile(config.path, "utf8"))).toEqual({ mcpServers: { weather: wrapWithProxy("weather", weather) } });
     expect((await stat(config.path)).mode & 0o777).toBe(0o600);
     expect(await filesBeside(config.path)).toEqual(["claude_desktop_config.json"]);
   });
@@ -482,13 +700,65 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
     }
   });
 
-  it("keeps the original permissions on the new file and the backup", async () => {
+  it("edits a JSONC config in place: comments, trailing commas and other entries survive byte for byte", async () => {
+    const original = `{
+  // Servers for this machine.
+  "servers": {
+    "weather": { "type": "stdio", "command": "npx", "args": ["tsx", "demo/weather-server.ts"] },
+    /* remote one, not wrapped */
+    "remote": { "type": "http", "url": "https://mcp.example", },
+  },
+  "inputs": [],
+}
+`;
+    const config = await detected(original, "vscode");
+    await writeClientConfig(wrapAll(config));
+    const written = await readFile(config.path, "utf8");
+    // Only the values of command and args are replaced; the entry keeps its own one-line layout.
+    expect(written).toBe(`{
+  // Servers for this machine.
+  "servers": {
+    "weather": { "type": "stdio", "command": "latch", "args": [
+        "proxy",
+        "--server",
+        "weather",
+        "--",
+        "npx",
+        "tsx",
+        "demo/weather-server.ts"
+      ] },
+    /* remote one, not wrapped */
+    "remote": { "type": "http", "url": "https://mcp.example", },
+  },
+  "inputs": [],
+}
+`);
+    expect(await filesBeside(config.path)).toEqual(["mcp.json"]);
+  });
+
+  it("writes a Claude Code project's servers under that project only", async () => {
+    home = await fakeHome();
+    const path = await writeConfig("claude-code", { mcpServers: { weather }, projects: { "/srv/app": { mcpServers: { weather }, allowedTools: [] } } });
+    const project = (await detectClients()).configs.find((config) => config.scope === "project /srv/app")!;
+    await writeClientConfig(wrapAll(project));
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      mcpServers: { weather },
+      projects: { "/srv/app": { mcpServers: { weather: wrapWithProxy("weather", weather) }, allowedTools: [] } },
+    });
+  });
+
+  it("refuses to rewrite a file whose server map stopped being an object", async () => {
+    const config = await detected({ mcpServers: { weather } });
+    await writeFile(config.path, '{"mcpServers": "gone"}');
+    await expect(writeClientConfig(wrapAll(config))).rejects.toThrow(`${config.path} no longer keeps "mcpServers" as an object; not rewriting it`);
+    expect(await readFile(config.path, "utf8")).toBe('{"mcpServers": "gone"}');
+  });
+
+  it("keeps the original permissions on the new file", async () => {
     const config = await detected({ mcpServers: { weather }, token: "secret" });
     await chmod(config.path, 0o600);
     await writeClientConfig(wrapAll(config));
     expect((await stat(config.path)).mode & 0o777).toBe(0o600);
-    const [backup] = await backups(config.path);
-    expect((await stat(join(dirname(config.path), backup!))).mode & 0o777).toBe(0o600);
   });
 
   it("rewrites the target of a symlinked config and keeps the link", async () => {
@@ -501,17 +771,5 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
     await writeClientConfig(wrapAll(config));
     expect((await lstat(config.path)).isSymbolicLink()).toBe(true);
     expect(JSON.parse(await readFile(real, "utf8")).mcpServers.weather.command).toBe("latch");
-  });
-
-  it("never overwrites an earlier backup taken in the same millisecond", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-10-23T09:00:00.000Z"));
-    const config = await detected({ mcpServers: { weather } });
-    await writeClientConfig(wrapAll(config));
-    await writeClientConfig({ ...config, servers: { weather: { command: "other" } } });
-    expect(await backups(config.path)).toEqual([
-      "claude_desktop_config.json.2026-10-23T09-00-00-000Z-1.bak",
-      "claude_desktop_config.json.2026-10-23T09-00-00-000Z.bak",
-    ]);
   });
 });

@@ -2,7 +2,7 @@ import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { EVENTS_FILE, appendEvent, readEvents, type LatchEvent } from "../../src/store/events.js";
+import { EVENTS_FILE, ROTATED_EVENTS_FILE, appendEvent, readEvents, type LatchEvent } from "../../src/store/events.js";
 
 const at = "2026-10-21T09:00:00.000Z";
 
@@ -188,5 +188,44 @@ describe("readEvents", () => {
     await appendFile(join(dir, EVENTS_FILE), "garbage\n");
     expect(await readEvents(dir)).toEqual([allKinds[1]]);
     expect(await readdir(dir)).toEqual([EVENTS_FILE]);
+  });
+});
+
+describe("log rotation", () => {
+  const listed = (toolCount: number): LatchEvent => ({ kind: "tools_listed", at, serverId: "weather", toolCount });
+
+  it("moves a full log to events.1.jsonl and starts a new one", async () => {
+    const maxBytes = 200;
+    for (let i = 0; i < 6; i++) await appendEvent(dir, listed(i), { maxBytes });
+    const rotated = (await readFile(join(dir, ROTATED_EVENTS_FILE), "utf8")).trim().split("\n");
+    const current = await logLines(dir);
+    expect(rotated.length + current.length).toBe(6);
+    expect(Buffer.byteLength(rotated.join("\n"))).toBeGreaterThanOrEqual(maxBytes - 100);
+    expect((await readdir(dir)).sort()).toEqual([ROTATED_EVENTS_FILE, EVENTS_FILE]);
+  });
+
+  it("reads the rotated log first, so events stay in order and limit takes the newest", async () => {
+    for (let i = 0; i < 10; i++) await appendEvent(dir, listed(i), { maxBytes: 300 });
+    expect((await readEvents(dir)).map((e) => (e.kind === "tools_listed" ? e.toolCount : -1))).toEqual(
+      [...Array(10).keys()].slice(-(await readEvents(dir)).length),
+    );
+    expect((await readEvents(dir, 3)).map((e) => (e.kind === "tools_listed" ? e.toolCount : -1))).toEqual([7, 8, 9]);
+  });
+
+  it("keeps only one rotated log", async () => {
+    for (let i = 0; i < 30; i++) await appendEvent(dir, listed(i), { maxBytes: 150 });
+    expect((await readdir(dir)).sort()).toEqual([ROTATED_EVENTS_FILE, EVENTS_FILE]);
+    expect((await readEvents(dir)).at(-1)).toEqual(listed(29));
+  });
+
+  it("rotates once when writers race at the limit", async () => {
+    // A full log, and fewer new bytes than the limit: exactly one rotation is due.
+    for (let i = 0; i < 5; i++) await appendEvent(dir, listed(i));
+    const maxBytes = Buffer.byteLength(await readFile(join(dir, EVENTS_FILE)));
+    await Promise.all([0, 1, 2].map((i) => appendEvent(dir, listed(100 + i), { maxBytes })));
+    const counts = (await readEvents(dir)).map((e) => (e.kind === "tools_listed" ? e.toolCount : -1));
+    // A second rotation would have replaced events.1.jsonl and lost the first five.
+    expect(counts.slice(0, 5)).toEqual([0, 1, 2, 3, 4]);
+    expect(counts.slice(5).sort()).toEqual([100, 101, 102]);
   });
 });

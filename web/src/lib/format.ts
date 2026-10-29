@@ -1,4 +1,4 @@
-import type { CapabilitySet, LatchEvent, LockFile, PendingChange, Tier, Transport } from "@schema/index.js";
+import type { CapabilitySet, ClientReport, ClientServerState, ClientsReport, LatchEvent, LockFile, PendingChange, Tier, Transport } from "@schema/index.js";
 
 /** Semantic color of a badge, dot or row. Maps to theme tokens in components/ui.tsx. */
 export type Tone = "neutral" | "success" | "warning" | "destructive" | "info";
@@ -165,6 +165,7 @@ const EVENT_TITLES: Record<LatchEvent["kind"], string> = {
   call_blocked: "Call blocked",
   approved: "Change approved",
   rejected: "Change rejected",
+  lock_tampered: "latch.lock changed outside LatchVerify",
 };
 
 export const EVENT_KINDS = Object.keys(EVENT_TITLES) as Array<LatchEvent["kind"]>;
@@ -194,6 +195,13 @@ export function describeEvent(event: LatchEvent): { title: string; subject: stri
       return { title, subject: `${event.serverId} / ${event.toolName}`, detail: `Approved by ${event.approvedBy}`, tone: "success" };
     case "rejected":
       return { title, subject: `${event.serverId} / ${event.toolName}`, detail: "Rejected; the tool stays blocked", tone: "neutral" };
+    case "lock_tampered":
+      return {
+        title,
+        subject: event.serverId,
+        detail: `${event.path}: the proxy kept the last version LatchVerify wrote. Run \`latch lock accept\` if the edit was yours, or \`latch lock restore\`.`,
+        tone: "destructive",
+      };
   }
 }
 
@@ -225,8 +233,8 @@ export interface ServerSummary {
   /** False for a server that appears in the queue or log but not in latch.lock. */
   pinned: boolean;
   transport: Transport | null;
-  /** Command and args (stdio) or URL (http), as recorded in latch.lock. */
-  command: string | null;
+  /** The program the server runs, as latch.lock names it ("npx"); latch.lock never keeps its arguments. */
+  program: string | null;
   approvedTools: number;
   pending: number;
   highestPendingTier: Tier | null;
@@ -237,8 +245,6 @@ export interface ServerSummary {
   blockedCalls: number;
   status: { label: string; tone: Tone };
 }
-
-const quoteArg = (arg: string): string => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : JSON.stringify(arg));
 
 /**
  * Per-server summaries, latch.lock servers first (sorted by id), then servers that only appear
@@ -265,14 +271,16 @@ export function serverSummaries(lock: LockFile | null, pending: PendingChange[],
         ? { label: "High-risk change", tone: "destructive" }
         : highest !== null
           ? { label: "Review needed", tone: "warning" }
-          : entry
-            ? { label: "Matches latch.lock", tone: "success" }
-            : { label: "Not pinned", tone: "neutral" };
+          : entry?.trustOnFirstUse === true
+            ? { label: "Linked, waiting for first run", tone: "neutral" }
+            : entry
+              ? { label: "Matches latch.lock", tone: "success" }
+              : { label: "Not pinned", tone: "neutral" };
     return {
       id,
       pinned: entry !== undefined,
       transport: entry?.transport ?? null,
-      command: entry ? [entry.command, ...entry.args].map(quoteArg).join(" ") : null,
+      program: entry?.program ?? null,
       approvedTools: entry?.tools.length ?? 0,
       pending: queued.length,
       highestPendingTier: highest,
@@ -298,4 +306,39 @@ export function lastApproval(lock: LockFile): { at: string; by: string; tool: st
     }
   }
   return latest;
+}
+
+/** How a client's state reads on the dashboard. */
+export function clientAnswer(answer: ClientReport["answer"]): { label: string; tone: Tone } {
+  switch (answer) {
+    case "connected":
+      return { label: "Connected", tone: "success" };
+    case "declined":
+      return { label: "Not connected", tone: "neutral" };
+    case "unasked":
+      return { label: "Not connected yet", tone: "warning" };
+  }
+}
+
+/**
+ * What one server of a client is, for its row: protected (with what latch.lock and the queue say),
+ * waiting for its first run, or not protected and why. `summary` is the server's serverSummaries
+ * entry, when latch.lock or the logs know it.
+ */
+export function clientServerStatus(server: ClientServerState, answer: ClientReport["answer"], summary: ServerSummary | undefined): { label: string; tone: Tone; detail: string } {
+  if (!server.linked) {
+    return answer === "connected"
+      ? { label: "Not linked", tone: "warning", detail: "LatchVerify links it on its next sync, unless latch.lock pinned it with another launch." }
+      : { label: "Not protected", tone: "neutral", detail: "The client starts it directly. Connect the client to put it behind latch." };
+  }
+  if (server.pin === "absent") return { label: "Not in latch.lock", tone: "warning", detail: "Linked, but latch.lock does not list it: every call is blocked until it is pinned." };
+  if (server.pin === "first_run") return { label: "Pinned on first run", tone: "neutral", detail: "Its tools are pinned the first time the client starts it." };
+  if (summary !== undefined && summary.pending > 0) return { ...summary.status, detail: `${summary.pending} ${summary.pending === 1 ? "change waits" : "changes wait"} for review.` };
+  return { label: "Protected", tone: "success", detail: `${server.tools} ${server.tools === 1 ? "tool" : "tools"} pinned in latch.lock.` };
+}
+
+/** Servers latch.lock (or the logs) know that no client on this machine starts, for their own section. */
+export function unclaimedServers(summaries: readonly ServerSummary[], report: ClientsReport | null): ServerSummary[] {
+  const claimed = new Set(report?.clients.flatMap((client) => client.servers.map((server) => server.id)) ?? []);
+  return summaries.filter((summary) => !claimed.has(summary.id));
 }

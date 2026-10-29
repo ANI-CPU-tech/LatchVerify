@@ -1,12 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
-import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createAdaptorServer } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { loadDotEnv, loadEnv } from "../config/env.js";
+import { defaultReviewer } from "../config/reviewer.js";
 import { createRoutes, type RouteDeps } from "./routes.js";
 
 /** The only interface the review server listens on: the API can approve changes. */
@@ -72,20 +71,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServerH
   };
 }
 
-/** `git config user.email` in the current directory, or undefined when git or the setting is missing. */
-function gitUserEmail(): string | undefined {
-  try {
-    const email = execFileSync("git", ["config", "user.email"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2_000 });
-    return email.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Who approvals are recorded as: LATCH_REVIEWER, else the git user.email, else the OS user name. */
-export function defaultReviewer(env: NodeJS.ProcessEnv = process.env): string {
-  return env.LATCH_REVIEWER?.trim() || gitUserEmail() || userInfo().username;
-}
+export { defaultReviewer };
 
 // `pnpm ui` runs this file directly; Vite proxies /api here.
 async function main(): Promise<void> {
@@ -94,7 +80,7 @@ async function main(): Promise<void> {
   const reviewer = defaultReviewer();
   let handle: UiServerHandle;
   try {
-    handle = await startUiServer({ port: env.uiPort, lockfilePath: env.lockfilePath, stateDir: env.stateDir, reviewer });
+    handle = await startUiServer({ port: env.uiPort, lockfilePath: env.lockfilePath, stateDir: env.stateDir, reviewer, dev: env.dev });
   } catch (error) {
     // No fallback here: Vite proxies /api to LATCH_UI_PORT, so the API must be on that port.
     if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
@@ -106,6 +92,7 @@ async function main(): Promise<void> {
     throw error;
   }
   console.error(`[latch ui] review API on ${handle.url} (approvals recorded as ${reviewer})`);
+  if (!env.dev) console.error("[latch ui] development mode is off: set LATCH_DEV=1 in .env for the Simulation page");
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => void handle.close().finally(() => process.exit(0)));
   }

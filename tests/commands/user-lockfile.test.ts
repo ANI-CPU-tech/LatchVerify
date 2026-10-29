@@ -54,7 +54,7 @@ describe.skipIf(process.platform === "win32")("the per-user lockfile from latch 
 
   it("is where latch setup links and creates the lockfile, wherever the installer runs it", async () => {
     const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: join(dir, "xdg"), LATCH_LOCKFILE_PATH: "", LATCH_STATE_DIR: "", NO_COLOR: "1" };
-    const output = execFileSync(process.execPath, ["--import", tsx, cli, "setup"], { cwd: join(dir, "anywhere"), encoding: "utf8", env });
+    const output = execFileSync(process.execPath, ["--import", tsx, cli, "setup", "--client", "claude-code"], { cwd: join(dir, "anywhere"), encoding: "utf8", env });
     const user = join(dir, "xdg", "latchverify", "latch.lock");
     expect(output).toContain(`linking Claude Code to ${user}`);
     expect(output).toContain(`created ${user}`);

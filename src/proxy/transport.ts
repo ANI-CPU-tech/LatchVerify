@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
+import crossSpawn from "cross-spawn";
 
 // Raw line-delimited JSON-RPC. Deliberately NOT the MCP SDK: a transparent
 // proxy must forward fields it does not model, and SDKs normalize them away.
@@ -80,6 +81,23 @@ export function serialize(message: JsonRpcMessage): string {
 }
 
 /**
+ * Longest line readFrames accepts, in bytes. readline buffers a line until its terminator, so a
+ * peer that never sends one would otherwise grow memory without bound. Generous on purpose: a
+ * resources/read result can carry a large file as base64 on a single line.
+ */
+export const MAX_LINE_BYTES = 64 * 1024 * 1024;
+
+export interface ReadFramesOptions {
+  /** Defaults to MAX_LINE_BYTES. */
+  maxLineBytes?: number;
+  /**
+   * Called once when a line grows past maxLineBytes; the reader has stopped by then. The default
+   * destroys `input`, so a peer cannot keep writing into a pipe nobody reads.
+   */
+  onOverflow?: () => void;
+}
+
+/**
  * Read `input` line by line and call onFrame with each parsed line, in order. A final line
  * without a terminator is delivered when the stream ends. Multi-byte UTF-8 characters split
  * across chunks are decoded correctly.
@@ -87,11 +105,16 @@ export function serialize(message: JsonRpcMessage): string {
  * "\n", "\r\n" and a lone "\r" all end a line (readline's rule); the terminator is not part of
  * Frame.raw, so writeLine re-terminates every forwarded line with "\n".
  *
+ * A line longer than `maxLineBytes` stops the reader and calls `onOverflow`. Nothing from the
+ * chunk that brought it is delivered: the stream is being torn down at that point.
+ *
  * Returns a function that stops the reader: no frame is delivered after it is called, even for
  * lines already buffered. Errors on `input` are left to the caller's own "error" listener.
  * onFrame runs inside the stream's data handler and must not throw.
  */
-export function readFrames(input: Readable, onFrame: (frame: Frame) => void): () => void {
+export function readFrames(input: Readable, onFrame: (frame: Frame) => void, options: ReadFramesOptions = {}): () => void {
+  const maxLineBytes = options.maxLineBytes ?? MAX_LINE_BYTES;
+  const onOverflow = options.onOverflow ?? (() => input.destroy());
   // terminal: false, or a TTY stdin would get line editing and echo.
   const reader = createInterface({ input, crlfDelay: Infinity, terminal: false });
   // readline re-emits input errors on the interface; without a listener that is an uncaught
@@ -102,10 +125,35 @@ export function readFrames(input: Readable, onFrame: (frame: Frame) => void): ()
   reader.on("line", (line) => {
     if (!closed) onFrame(parseLine(line));
   });
-  return () => {
+
+  // Bytes received since the last line terminator. Runs before readline's own listener, so an
+  // oversized line is caught before readline delivers it.
+  let unterminated = 0;
+  const measure = (chunk: Buffer | string) => {
+    if (closed) return;
+    const bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+    let start = 0;
+    let longest = 0;
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] !== 0x0a && bytes[i] !== 0x0d) continue;
+      longest = Math.max(longest, unterminated + i - start);
+      unterminated = 0;
+      start = i + 1;
+    }
+    unterminated += bytes.length - start;
+    if (Math.max(longest, unterminated) > maxLineBytes) {
+      stop();
+      onOverflow();
+    }
+  };
+  input.prependListener("data", measure);
+
+  const stop = () => {
     closed = true;
+    input.off("data", measure);
     reader.close();
   };
+  return stop;
 }
 
 /**
@@ -129,30 +177,50 @@ export async function writeLine(output: Writable, line: string): Promise<void> {
   });
 }
 
+/** Prefix of every variable LatchVerify itself reads. None of them is meant for the server. */
+const OWN_ENV_PREFIX = "LATCH_";
+
+/**
+ * The environment a guarded server is started with: `env` merged over `base` (as MCP clients do
+ * with a server's `env` block, a key set to undefined removes that variable), minus every
+ * LATCH_* variable from either. Those carry the LLM API key and the paths of latch.lock and the
+ * review queue, and a server that knows where its own approvals live could edit them.
+ */
+export function serverEnvironment(base: NodeJS.ProcessEnv, env?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const merged: NodeJS.ProcessEnv = env === undefined ? { ...base } : { ...base, ...env };
+  for (const name of Object.keys(merged)) {
+    if (merged[name] === undefined || name.toUpperCase().startsWith(OWN_ENV_PREFIX)) delete merged[name];
+  }
+  return merged;
+}
+
+/** cross-spawn's command resolution (exported, untyped): `file` is the resolved path, or empty when not found. */
+type CrossSpawnParse = { _parse(command: string, args: string[], options: object): { file?: string } };
+
 /**
  * Spawn the real server with piped stdio. Its stderr is copied to our stderr untouched (and our
  * stderr stays open when it exits); stdout is the protocol channel, so the caller wires the
  * child's stdout and stdin to readFrames and writeLine.
  *
- * No shell is involved: `command` is resolved on PATH and `args` reach the server literally.
- * `env` is merged over process.env, as MCP clients do with a server's `env` block; a key set to
- * undefined removes that variable.
+ * `command` is resolved on PATH and `args` reach the server literally. On POSIX no shell is
+ * involved. On Windows, cross-spawn resolves PATHEXT, and runs a .cmd or .bat shim (npx, pnpm,
+ * uvx installed by npm) through cmd.exe with every argument escaped for it, since Node refuses to
+ * start batch files without a shell. The environment is serverEnvironment(process.env, env):
+ * LatchVerify's own LATCH_* variables never reach the server.
  *
  * Never throws for a bad command: spawn failures (ENOENT, EACCES) arrive as the child's "error"
- * event, which the caller must handle.
+ * event, which the caller must handle. On Windows a command cross-spawn cannot find on PATH would
+ * go to cmd.exe, which starts, prints "not recognized" and exits 1; it is spawned directly instead,
+ * so it fails with ENOENT before "spawn", as on POSIX.
  */
-// shortcut: Windows cannot spawn .cmd shims (npx, pnpm) without a shell; use node plus the
-// script path there, or add cross-spawn if Windows support is needed.
 export function spawnUpstream(
   command: string,
   args: string[],
   env?: NodeJS.ProcessEnv,
 ): ChildProcessWithoutNullStreams {
-  const child = spawn(command, args, {
-    stdio: "pipe",
-    env: env === undefined ? process.env : { ...process.env, ...env },
-    windowsHide: true,
-  });
+  const options = { stdio: "pipe", env: serverEnvironment(process.env, env), windowsHide: true } as const;
+  const missing = process.platform === "win32" && !(crossSpawn as unknown as CrossSpawnParse)._parse(command, args, options).file;
+  const child = (missing ? spawn(command, args, options) : crossSpawn(command, args, options)) as ChildProcessWithoutNullStreams;
   child.stderr.pipe(process.stderr, { end: false });
   return child;
 }

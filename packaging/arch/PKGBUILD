@@ -11,7 +11,7 @@ _debver=0.0.0
 pkgrel=1
 pkgdesc="Capability-diffing security proxy for MCP servers; links Claude Code on install"
 arch=('x86_64')
-url="https://github.com/vinayakkam/LatchVerify"
+url="https://github.com/ANI-CPU-tech/LatchVerify"
 license=('MIT')
 # What the bundled Node.js links against.
 depends=('glibc' 'gcc-libs' 'hicolor-icon-theme')
@@ -29,5 +29,7 @@ package() {
   bsdtar -xf "${srcdir}"/data.tar.* -C "${pkgdir}"
   # Arch keeps licenses in /usr/share/licenses, not /usr/share/doc.
   rm -rf "${pkgdir}/usr/share/doc"
+  # The same files as the deb, installed by pacman: updates must come as pacman packages.
+  printf 'pacman\n' > "${pkgdir}/usr/lib/latchverify/install-kind"
   install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

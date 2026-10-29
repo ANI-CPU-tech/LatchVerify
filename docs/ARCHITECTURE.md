@@ -19,18 +19,22 @@ every message in between and steps in at three points.
                               └────────────────────┘
 ```
 
-`latch init` (or `latch add`, for one server) rewrites each server entry in the client
-config. This:
+`latch init`, `latch setup` (or `latch add`, for one server) and the background sync rewrite each
+server entry of a client the user connected. This:
 
 ```json
-{ "command": "node", "args": ["weather.js"] }
+{ "command": "node", "args": ["weather.js"], "env": { "API_KEY": "..." } }
 ```
 
 becomes this:
 
 ```json
-{ "command": "/usr/bin/node", "args": ["/path/to/latchverify/dist/cli.js", "proxy", "--server", "weather", "--", "node", "weather.js"] }
+{ "command": "/usr/bin/node", "args": ["--max-semi-space-size=1", "/path/to/latchverify/dist/cli.js", "--lockfile", "/home/me/.config/latchverify/latch.lock", "--state-dir", "/home/me/.config/latchverify/.latch", "proxy", "--server", "weather", "--", "node", "weather.js"], "env": { "API_KEY": "..." } }
 ```
+
+Only `command` and `args` change, edited in place in the file; the entry's `env` is never read
+into LatchVerify's data or written. Unlinking needs nothing but the args after `--`, so no copy of
+the config is kept.
 
 The entry names node and `dist/cli.js` by absolute path: clients start servers without
 the user's shell setup, so a `latch` on the user's PATH (or a shell function) may not be
@@ -45,7 +49,7 @@ never stdout, because stdout is the protocol.
 
 | Message | Direction | What LatchVerify does |
 |---|---|---|
-| `tools/list` response | server → client | Capture every tool, extract capabilities, diff against `latch.lock`, queue changes. The list is still forwarded. |
+| `tools/list` response | server → client | Capture every tool, extract capabilities, diff against `latch.lock`, queue changes. The list is still forwarded, except that a tier-3 tool reaches the client as its name and a "withheld" notice, never its own description or schema. |
 | `tools/call` request | client → server | Block when the tool is unpinned or has a pending tier-2+ change. Otherwise forward. |
 | `notifications/tools/list_changed` | server → client | The rug-pull signal. Re-fetch `tools/list` from the server and analyze it before the client acts on the change. Then forward the notification. |
 
@@ -114,8 +118,113 @@ proxy detects tier-2 change ─► .latch/pending.json ─► latch review (term
       ─► merge ─► every machine's proxy now allows the new definition
 ```
 
+Rejecting a change instead records its definition (server, tool and composite hash) in
+`.latch/rejected.json`. The proxy blocks calls to the tool, whatever the tier, for as long as
+the server serves that exact definition, and does not queue it again, even after a restart.
+Delete the entry from `rejected.json` to take a rejection back.
+
 `latch verify` runs the same capture → tier pipeline in CI against every server in
 `latch.lock` and exits non-zero on tier-2+ drift. See [LOCKFILE.md](LOCKFILE.md).
+
+## Linking: consent, first run and the background sync
+
+- **Consent per client.** Nothing is linked until the user connects that client: `latch setup`
+  asks in a terminal, `--client` and `--all` (and the Windows installer's checkbox) are the
+  answer, and the MCP Servers page has Connect and Disconnect. The answers live in
+  `settings.json` (true, false, or not asked). A client never asked about is only reported.
+- **Pin on first run.** Linking records a server in `latch.lock` with its program name, a hash of
+  its launch line and `trustOnFirstUse`, and starts nothing. The proxy, which the client starts
+  with the client's own env, pins the tools of the server's first complete `tools/list`
+  (`pinFirstRun`), holding back any with a critical finding as a tier-3 change, and only if the
+  `latch.lock` it reads is one the integrity record vouches for.
+- **Background sync.** `latch watch` (`src/daemon/`) watches the folders of the client configs,
+  syncs one second after a change and every minute: new servers of connected clients are linked,
+  entries a client turned back are re-wrapped, entries of a moved install are repaired. It reads
+  only the bytes appended to `events.jsonl` and shows desktop notifications (notify-send on Linux,
+  a toast on Windows) for changes waiting at start, each change a proxy queues, blocked calls
+  (repeats summed per minute) and clients found but not asked about. One watcher runs per state
+  directory.
+
+## The app and updates
+
+- **The app** (`src/desktop/`, Electron) runs the same review server (`startUiServer`, loopback,
+  port 0) and watcher as `latch review --ui` and `latch watch`, in one process, with a tray icon and
+  native notifications. The proxies stay plain Node processes started by the MCP clients: one
+  Electron process per machine, not per server. The window is sandboxed with context isolation;
+  it may load only its own server's origin, opens no other window, and the preload exposes only
+  the version and the two update calls. Closing it keeps the app in the tray. An installed app
+  starts at login: an XDG autostart entry on Linux, a Run value named after the AppUserModelID on
+  Windows; Settings turns it off. Only one instance runs. When a client starts a protected server
+  and the installed app is not running (its `app.pid` is not alive), the proxy starts it hidden in
+  the tray, with only the desktop session's variables: the server's env, keys included, stays in
+  the proxy. A copy started while one runs exits, and a hidden start never shows the window.
+- **Updates** (`src/update/`). Each release publishes `latest.json`: the version, notes and, per
+  install kind (`windows-x86_64-inno`, `linux-x86_64-deb`, `linux-x86_64-pacman`,
+  `linux-x86_64-tarball`), the installer's https URL, sha256 and an ed25519 signature over
+  `latchverify-update\n{version}\n{platform}\n{sha256}\n`. The public key is built in
+  (`src/update/key.ts`); the private key exists only as the release workflow's secret. The app
+  reads its install kind from the `install-kind` file its installer wrote, so a source checkout
+  never updates. A manifest is capped at 1 MB and must parse; a bad signature is an error, a
+  pre-release is never offered. The installer is downloaded only after the user clicks Install
+  (capped at 512 MB), its sha256 is checked, and it is run: the Inno installer silently (it starts
+  the app again), `pkexec apt-get install` or `pkexec pacman -U`, or the new archive's `install.sh`
+  into the same prefix. Running proxies keep their files until their client restarts them.
+  `LATCH_UPDATE_URL` replaces the manifest URL only in development mode.
+
+## Keys in client configs
+
+Client configs hold the servers' API keys, in `env` and sometimes in arguments. LatchVerify
+reads configs but never touches keys:
+
+- Env values are dropped right after a config is parsed: detection keeps each entry's command,
+  arguments and env variable names only. Edits write `command` and `args`, and delete only the
+  two `LATCH_*` variables older versions added, by name.
+- `latch.lock` holds a hash of each launch line and the program's name, never arguments.
+  Messages, logs, the API and the dashboard show the program name only.
+- LatchVerify never starts a server with a client's env: pinning happens on the first run,
+  inside the proxy the client starts.
+- No copy of a config is made. Copies earlier versions left (`<config>.<date>.bak`) are listed by
+  `latch setup` and `latch init` for the user to delete.
+- `tests/canary.test.ts` puts a fake key in the env and the arguments of every server of four
+  clients, runs every command, the proxy and the API, and fails if the key appears in any
+  output or any file LatchVerify wrote.
+
+The one place a key passes through LatchVerify is the proxy the client starts: it receives the
+server's env from the client and hands it to the server, in memory, as the client itself does.
+
+## Threat model: what the proxy protects against, and what it does not
+
+LatchVerify stands between a client and a server that may turn hostile after it was
+approved: a rug pull through `list_changed`, a hidden instruction in a description, a new
+capability. Within that, it also protects against the guarded server itself, which runs as
+the same OS user as LatchVerify and can read and write the same files:
+
+- **Its own approvals.** No `LATCH_*` variable reaches the server's environment, so it is
+  not told where `latch.lock`, the review queue or the LLM API key are. Every lockfile
+  LatchVerify writes is recorded in an HMAC-signed integrity record under a per-user key
+  (`store/integrity.ts`), kept in the per-user LatchVerify directory, not in the state
+  directory. A proxy refuses a `latch.lock` the record does not vouch for, keeps the version
+  it trusts, and logs `lock_tampered`. `latch lock accept` trusts an edit made by a person
+  (a `git pull`, a merge); `latch lock restore` undoes it.
+- **Its tool descriptions.** A tier-3 tool reaches the model as its name and a "withheld"
+  notice, never its own text.
+- **The review queue.** Editing `pending.json` does not unblock a tier-2 or tier-3 change:
+  the proxy re-derives every change from the server's own tool list, and a change it has
+  seen stays blocked in memory for the session. Deleting an entry from `rejected.json` takes
+  that rejection back, so the definition is queued again; a tier-2 or tier-3 one stays
+  blocked, a tier-0 or tier-1 one auto-passes as it would have without the rejection.
+
+What it cannot do:
+
+- **Prevent a same-user attacker.** A program written against LatchVerify can read the
+  integrity key, forge a record, or delete one before any proxy has seen it (a proxy accepts
+  a lockfile with no record, so lockfiles written before integrity records existed keep
+  working). Tamper detection stops generic and scripted edits, and `latch verify` in CI still
+  catches a forged approval in the committed `latch.lock`. Real prevention needs the proxy
+  to run as a separate OS account, which needs admin rights and changes how clients start
+  servers.
+- **Guard servers it does not wrap.** HTTP and SSE servers in a client config are left
+  alone; bridge them to stdio (for example with `mcp-remote`) to put them behind the proxy.
 
 ## Why raw JSON-RPC instead of the MCP SDK
 
@@ -135,20 +244,26 @@ into typed objects and re-serialize them. For a proxy that causes three problems
 So `proxy/transport.ts` reads stdin and the child's stdout with `readline`, one
 JSON-RPC message per line, and keeps the original line (`Frame.raw`). Untouched
 frames are written back byte-for-byte. Only messages the proxy rewrites or creates
-(block errors, its own `tools/list` re-fetch) are serialized.
+(block errors, its own `tools/list` re-fetch, a tool list with tier-3 tools withheld) are
+serialized.
 
 ## Module map
 
 | Path | Responsibility |
 |---|---|
 | `src/schema/` | zod schemas and inferred types. The shared contract. |
-| `src/proxy/transport.ts` | JSON-RPC types, line framing, spawning the child |
+| `src/proxy/transport.ts` | JSON-RPC types, line framing (capped at 64 MiB a line), spawning the child without LatchVerify's own variables |
 | `src/proxy/interceptor.ts` | Routing frames to the three interception handlers |
 | `src/proxy/blocker.ts` | Block verdict and the JSON-RPC error |
-| `src/proxy/index.ts` | `startProxy` lifecycle and signal forwarding |
+| `src/proxy/index.ts` | `startProxy` lifecycle, signal forwarding, SIGTERM/SIGKILL escalation, lockfile integrity checks |
 | `src/analyze/*` | Hashing, capability extraction, detectors, diff, tiers, LLM pass |
-| `src/store/*` | `latch.lock`, pending queue, event log |
+| `src/store/*` | `latch.lock` and its integrity records, pending queue, rejections, event log (rotated at 5 MB), the shared file lock |
+| `src/log.ts` | Leveled stderr logging (`LATCH_LOG_LEVEL`) |
 | `src/commands/*` | One file per CLI command |
-| `src/config/*` | Env loading and MCP client config detection and rewriting |
-| `src/ui/*` | hono review API, bound to 127.0.0.1 |
+| `src/config/*` | Env loading, MCP client config detection and rewriting (env values dropped at parse) |
+| `src/daemon/*` | Background sync (`sync.ts`), watcher (`watch.ts`) and desktop notifications (`notify.ts`) |
+| `src/desktop/*` | The Electron app: window, tray, login start, update dialogs; pure helpers in `shell.ts` |
+| `src/update/*` | Update manifest schema, signature check, download and install per package kind |
+| `src/dev/*` | Demo presets for the Dev Tools page and `pnpm demo:add` (development only) |
+| `src/ui/*` | hono review API, bound to 127.0.0.1, with the clients and settings endpoints |
 | `web/` | React review UI |

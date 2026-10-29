@@ -116,7 +116,7 @@ describe("LockFileSchema", () => {
   const lock = (tools: ToolRecord[]) => ({
     version: "1",
     generatedAt: "2026-10-01T12:00:00.000Z",
-    servers: { weather: { transport: "stdio", command: "node", args: ["weather.js"], tools } },
+    servers: { weather: { transport: "stdio", program: "node", launch: "c".repeat(64), tools } },
   });
 
   it("parses latch.lock.example", () => {

@@ -7,12 +7,12 @@ Depends: libc6 (>= 2.28), libstdc++6, libgcc-s1
 Recommends: git
 Installed-Size: @INSTALLED_SIZE@
 Maintainer: @MAINTAINER@
-Homepage: https://github.com/vinayakkam/LatchVerify
+Homepage: https://github.com/ANI-CPU-tech/LatchVerify
 Description: capability-diffing security proxy for MCP servers
  LatchVerify pins Model Context Protocol tool definitions in latch.lock and
  blocks tools/call when a tool gains capabilities without review.
  .
- Installing it links Claude Code for the installing user: their MCP servers
+ After installing, run `latch setup` to choose which MCP clients to connect: their servers
  start behind the latch proxy and their tools are pinned in a per-user
- latch.lock. Set LATCH_SKIP_SETUP=1 to skip that, or run `latch setup` later.
+ latch.lock. Nothing is connected without your say-so.
  Includes its own Node.js runtime and a desktop launcher for the review UI.

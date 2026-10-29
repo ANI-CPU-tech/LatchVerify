@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "node",
+      "args": ["/path/to/server.js"],
+      "env": { "API_KEY": "your_api_key" },
+      "autoApprove": ["tool1"],
+      "disabled": false
+    },
+    "remote": { "url": "https://mcp.example.com/sse", "disabled": false }
+  }
+}

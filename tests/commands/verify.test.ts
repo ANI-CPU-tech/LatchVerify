@@ -1,3 +1,4 @@
+import { launchHash, programName } from "../../src/analyze/hash.js";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -14,8 +15,11 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 const example = (): LockFile => LockFileSchema.parse(JSON.parse(readFileSync(join(root, "latch.lock.example"), "utf8")));
 const benignTools = JSON.parse(readFileSync(join(root, "tests/fixtures/benign-tools.json"), "utf8")).tools as Array<Record<string, unknown>>;
 
+/** How a server is started: what an MCP config holds, and latch.lock only as a hash. */
+type Launch = { command: string; args: string[] };
+
 /** A stub server that answers initialize and lists `tools`. */
-const listing = (tools: unknown[]): Pick<ServerEntry, "command" | "args"> => ({
+const listing = (tools: unknown[]): Launch => ({
   command: process.execPath,
   args: [
     "-e",
@@ -29,7 +33,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
   ],
 });
 
-const demo = (script: string): Pick<ServerEntry, "command" | "args"> => ({
+const demo = (script: string): Launch => ({
   command: process.execPath,
   args: ["--import", "tsx", join(root, "demo", script)],
 });
@@ -47,13 +51,21 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-/** latch.lock.example with the weather server launched as `weather`, plus any `extra` servers. */
-async function lockfile(weather: Pick<ServerEntry, "command" | "args">, extra: Record<string, ServerEntry> = {}): Promise<string> {
+const pinnedFor = (launch: Launch) => ({ program: programName(launch.command), launch: launchHash(launch.command, launch.args) });
+
+/**
+ * latch.lock.example with the weather server pinned for `weather`'s launch, plus `extra` stdio
+ * servers (no tools) and `other` entries as given. The launch lines go into mcp.json beside it,
+ * which verify() passes as --config, since latch.lock keeps only their hash.
+ */
+async function lockfile(weather: Launch, extra: Record<string, Launch> = {}, other: Record<string, ServerEntry> = {}): Promise<string> {
   const lock = example();
-  Object.assign(lock.servers.weather!, weather);
-  Object.assign(lock.servers, extra);
+  Object.assign(lock.servers.weather!, pinnedFor(weather));
+  for (const [id, launch] of Object.entries(extra)) lock.servers[id] = { transport: "stdio", ...pinnedFor(launch), tools: [] };
+  Object.assign(lock.servers, other);
   const path = join(dir, "latch.lock");
   await writeFile(path, JSON.stringify(lock));
+  await writeFile(join(dir, "mcp.json"), JSON.stringify({ mcpServers: { weather, ...extra } }));
   return path;
 }
 
@@ -62,7 +74,7 @@ async function verify(lockfilePath: string, json = false) {
   const output = new PassThrough();
   let text = "";
   output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
-  const code = await runVerify({ lockfilePath, json, output, timeoutMs: 20_000 });
+  const code = await runVerify({ lockfilePath, json, output, timeoutMs: 20_000, configs: [join(dir, "mcp.json")] });
   return { code, text: text.replace(/\x1b\[[0-9;]*m/g, "") };
 }
 
@@ -128,7 +140,7 @@ describe("runVerify", () => {
   });
 
   it("checks every server and exits with the worst outcome", async () => {
-    const broken: ServerEntry = { transport: "stdio", command: "latch-no-such-binary-for-test", args: [], tools: [] };
+    const broken: Launch = { command: "latch-no-such-binary-for-test", args: [] };
     vi.stubEnv("DEMO_MUTATE", "1");
     const { code, text } = await verify(await lockfile(demo("evil-server.ts"), { broken }));
     expect(code).toBe(VERIFY_EXIT.error);
@@ -137,8 +149,8 @@ describe("runVerify", () => {
   });
 
   it("reports a server with an unsupported transport as an error", async () => {
-    const remote: ServerEntry = { transport: "http", command: "https://mcp.example", args: [], tools: [] };
-    const { code, text } = await verify(await lockfile(demo("weather-server.ts"), { remote }));
+    const remote: ServerEntry = { transport: "http", program: "https://mcp.example", launch: "a".repeat(64), tools: [] };
+    const { code, text } = await verify(await lockfile(demo("weather-server.ts"), {}, { remote }));
     expect(code).toBe(VERIFY_EXIT.error);
     expect(text).toContain('could not verify: transport "http" is not supported');
   });
@@ -154,9 +166,27 @@ describe("runVerify", () => {
   it("exits 0 for a lockfile with no servers", async () => {
     const path = join(dir, "empty.lock");
     await writeFile(path, JSON.stringify({ version: "1", generatedAt: "2026-10-23T09:00:00.000Z", servers: {} }));
+    await writeFile(join(dir, "mcp.json"), "{}");
     const { code, text } = await verify(path);
     expect(code).toBe(VERIFY_EXIT.ok);
     expect(text).toContain("latch verify: 0 servers in");
+  });
+
+  it("takes each launch from the config, only when it is the launch latch.lock pinned", async () => {
+    const path = await lockfile(demo("weather-server.ts"));
+    await writeFile(join(dir, "mcp.json"), JSON.stringify({ mcpServers: { weather: demo("evil-server.ts") } }));
+    const changed = await verifyJson(path);
+    expect(changed.code).toBe(VERIFY_EXIT.error);
+    expect(changed.report.servers[0]!.error).toBe(`${join(dir, "mcp.json")} starts it differently than latch.lock pinned it; review the change with \`latch init\` or fix the config`);
+    await writeFile(join(dir, "mcp.json"), JSON.stringify({ mcpServers: {} }));
+    expect((await verifyJson(path)).report.servers[0]!.error).toMatch(/^no launch line for it: latch\.lock keeps only a hash of it/);
+  });
+
+  it("never shows a server's arguments, which may hold a key", async () => {
+    const keyed = { command: process.execPath, args: [...demo("weather-server.ts").args, "--token", "sk-CANARY-verify"] };
+    const { text } = await verify(await lockfile(keyed));
+    expect(text).not.toContain("sk-CANARY-verify");
+    expect((await verify(await lockfile(keyed), true)).text).not.toContain("sk-CANARY-verify");
   });
 
   it("never prints a server's control characters to the terminal", async () => {
@@ -181,8 +211,7 @@ describe("runVerify --json", () => {
       servers: [
         {
           serverId: "weather",
-          command: process.execPath,
-          args: demo("weather-server.ts").args,
+          program: programName(process.execPath),
           status: "ok",
           specVersion: "2025-06-18",
           tools: [

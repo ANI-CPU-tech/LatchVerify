@@ -4,19 +4,18 @@ import type { Writable } from "node:stream";
 import pc from "picocolors";
 import {
   INSTALL_LAUNCH,
-  clientConfigPath,
+  clientLocations,
   detectClients,
-  serversKey,
   writeClientConfig,
   type ClientConfig,
   type ClientId,
-  type ClientServerEntry,
+  type NewServerEntry,
   type ProxyLaunch,
 } from "../config/clients.js";
-import { readLockfile, writeLockfile } from "../store/lockfile.js";
-import { defaultReviewer } from "../ui/server.js";
-import { commandLine, pinServer, proxiedEntry } from "./init.js";
-import { plural, printable } from "./text.js";
+import { linkServer, mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
+import { withStateLock } from "../store/pending.js";
+import { programOf, proxiedEntry } from "./init.js";
+import { printable } from "./text.js";
 
 export interface AddOptions {
   /** Server id: the key in the client config and in latch.lock. */
@@ -27,15 +26,11 @@ export interface AddOptions {
   client: ClientId;
   /** `KEY=VALUE` sets a variable; a bare `KEY` copies it from `sourceEnv`. */
   env: string[];
-  /** Capture and report, but write nothing. */
+  /** Report, but write nothing. */
   dryRun: boolean;
   lockfilePath: string;
-  /** State directory written into the entry's env. Defaults to .latch next to the lockfile. */
+  /** State directory written into the entry's args. Defaults to .latch next to the lockfile. */
   stateDir?: string;
-  /** Who the pins are recorded as. Defaults to defaultReviewer(). */
-  reviewer?: string;
-  /** Deadline for capturing the server's tools. Defaults to DEFAULT_CAPTURE_TIMEOUT_MS. */
-  timeoutMs?: number;
   /** Where progress is written. Defaults to process.stdout. */
   output?: Writable;
   /** How the entry starts latch. Defaults to INSTALL_LAUNCH. */
@@ -72,14 +67,14 @@ export function parseEnv(values: readonly string[], source: NodeJS.ProcessEnv): 
  * 1. Reads latch.lock and the client's config. Refuses, writing nothing, when the name is already
  *    in either: an existing server is never overwritten, and changes to a pinned one go through
  *    `latch review`.
- * 2. Starts the server and pins its tools (pinServer, the same trust on first use as `latch
- *    init`: tools with critical findings are held back for review).
+ * 2. Links it in latch.lock (linkServer): its tools are pinned by the proxy the first time the
+ *    client starts it, trust on first use with critical findings held for review. Nothing is
+ *    started here, so the --env values are never used by latch itself.
  * 3. Writes latch.lock, then adds the server to the client config, wrapped with `latch proxy`
- *    by absolute path (proxiedEntry). The config keeps a timestamped .bak copy and every other
- *    server and key. Env values are written to the config but never printed.
+ *    by absolute path (proxiedEntry). Every other server and key of the config stays as it is.
+ *    Env values are written to the config but never printed.
  *
- * Resolves with 0 on success (or a dry run that would succeed), 1 when refused or the server's
- * tools cannot be captured.
+ * Resolves with 0 on success (or a dry run that would succeed), 1 when refused.
  *
  * @throws LockfileError when latch.lock exists but is malformed.
  */
@@ -95,64 +90,56 @@ export async function runAdd(options: AddOptions): Promise<number> {
   if (command === undefined || command === "") return fail("no server command given; put it after --");
 
   let env: Record<string, string>;
-  let entry: ClientServerEntry;
+  let entry: NewServerEntry;
   try {
     env = parseEnv(options.env, options.sourceEnv ?? process.env);
     // Built before the server starts, so an id the proxy cannot take fails without spawning anything.
-    entry = proxiedEntry(name, { command, args, ...(Object.keys(env).length > 0 ? { env } : {}) }, lockfilePath, stateDir, launch);
+    // The env goes into the new entry as the user gave it; latch itself never uses it.
+    entry = { ...proxiedEntry(name, { command, args }, lockfilePath, stateDir, launch), ...(Object.keys(env).length > 0 ? { env } : {}) };
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
   }
 
   const lock = await readLockfile(lockfilePath);
-  const detected = (await detectClients()).find((found) => found.client === client);
-  const config: ClientConfig = detected ?? { client, path: clientConfigPath(client), servers: {}, raw: {} };
+  const detection = await detectClients();
+  const problem = detection.problems.find((found) => found.client === client);
+  if (problem !== undefined) return fail(`${problem.path} ${problem.message}; fix it before adding a server to it`);
+  const detected = detection.configs.find((found) => found.client === client);
+  const config: ClientConfig = detected ?? { client, ...clientLocations(client)[0]!, servers: {}, serverIds: [] };
   say(pc.bold(`latch add ${printable(name)}: ${printable(lockfilePath)}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
-  // The raw map, not config.servers: an HTTP server of that name must not be replaced either.
-  const existing = config.raw[serversKey(client)];
-  if (typeof existing === "object" && existing !== null && Object.hasOwn(existing, name)) {
+  // Every id in the map, not just config.servers: an HTTP server of that name must not be replaced either.
+  if (config.serverIds.includes(name)) {
     return fail(`${name} is already in ${config.path}; pick another name, or remove it there first`);
   }
   if (Object.hasOwn(lock.servers, name)) {
     return fail(`${name} is already in latch.lock; changes to a pinned server go through \`latch review\``);
   }
 
-  say(`  starting ${commandLine(command, args)} to read its tools`);
-  let outcome;
-  try {
-    outcome = await pinServer(
-      { serverId: name, command, args, env, clients: [client] },
-      lock,
-      options.reviewer ?? defaultReviewer(),
-      new Date(),
-      options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
-    );
-  } catch (error) {
-    return fail(`${name}: ${error instanceof Error ? error.message : String(error)}; nothing written`);
-  }
-
+  const linked = linkServer(lock, name, command, args, new Date());
   const verb = (done: string, planned: string) => (options.dryRun ? planned : done);
-  const names = outcome.pinned.length > 0 ? `: ${printable(outcome.pinned.join(", "))}` : "";
-  say(`${pc.green("✔")} ${printable(name)}: ${verb("pinned", "would pin")} ${plural(outcome.pinned.length, "tool")}${names}`);
-  for (const held of outcome.held) {
-    say(pc.yellow(`  ! ${printable(held.name)} ${verb("held back", "would be held back")} for \`latch review\`: ${printable(held.reason)}`));
-  }
+  say(`${pc.green("✔")} ${printable(name)}: ${verb("linked", "would link")}; its tools are pinned the first time ${client} starts it`);
   if (options.dryRun) {
     say(`would write ${printable(lockfilePath)} and add ${printable(name)} to ${printable(config.path)}:`);
-    say(`  ${commandLine(entry.command, entry.args ?? [])}`);
+    say(`  ${programOf(command)}, started through latch proxy`);
     return 0;
   }
 
   // The lockfile goes first: a config is only ever wrapped around pins that exist.
   await mkdir(dirname(lockfilePath), { recursive: true });
-  await writeLockfile(lockfilePath, outcome.lock);
+  // Merged into latch.lock as it is now, under the state lock: a pin or approval made meanwhile is kept.
+  const taken = await withStateLock(stateDir, async () => {
+    const merged = mergeServers(await readLockfile(lockfilePath), linked, [name]);
+    if (merged.added.length > 0) await writeLockfile(lockfilePath, merged.lock);
+    return merged.taken.length > 0;
+  });
+  if (taken) return fail(`${name} was added to latch.lock by someone else meanwhile; nothing else written`);
   say(`${pc.green("✔")} wrote ${printable(lockfilePath)}`);
   try {
     await writeClientConfig({ ...config, servers: { [name]: entry } });
   } catch (error) {
     return fail(`could not add ${name} to ${config.path}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  say(`${pc.green("✔")} added ${printable(name)} to ${printable(config.path)}${detected === undefined ? "" : " (the original is kept as a .bak copy)"}`);
+  say(`${pc.green("✔")} added ${printable(name)} to ${printable(config.path)}`);
   say(`next: commit ${printable(lockfilePath)} so the pins are reviewed like code`);
   say(`next: restart ${client} to start ${printable(name)}`);
   return 0;

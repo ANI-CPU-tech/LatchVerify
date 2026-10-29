@@ -15,8 +15,13 @@ Commands are written for bash or zsh; fish equivalents are noted where they diff
 | Installers (Windows, deb, Arch, tar.gz) | Build installers workflow, see `INSTALL.md` | built and smoke-tested in CI |
 | Add one server and pin its tools | `latch add <name> -- <command>` (`--dry-run`) | works |
 | Approve or reject queued changes | `latch review` (terminal) | works |
-| Browser review screen | `latch review --ui`, or `pnpm ui` for development | works |
-| Demo servers (benign and rug pull) | `pnpm demo:benign`, `pnpm demo:evil` | works |
+| LatchVerify app (tray, window, notifications, login start) | `latchverify-desktop`, or `pnpm desktop` from a checkout | works on Linux; Windows built in CI only |
+| Signed updates | the app, or `latch update` (`--check`) | built; no release published yet |
+| Review UI on a local port | `latch review --ui`, or `pnpm ui` for development | works |
+| Demo servers (benign and rug pull), development only | `pnpm demo:benign`, `pnpm demo:evil` | works |
+| Simulation and Dev Tools pages, development only | `--dev` or `LATCH_DEV=1` for the app, `LATCH_DEV=1` with `pnpm ui` or `latch review --ui` | works |
+| Add a demo server to a client | `pnpm demo:add <preset> --client <id>` | works |
+| Background sync and desktop notifications | `latch watch` (`--once`, `--no-notify`) | works |
 | LLM advisory pass | — | built in `src/analyze/llm.ts`, **not wired in yet** |
 
 ## 1. Install (once)
@@ -27,43 +32,35 @@ The steps below build from source and require Node 22+ and pnpm 11.
 ```sh
 npm i -g pnpm@11.20.0          # or: corepack enable
 pnpm install
-pnpm build                                        # CLI → dist/
-pnpm exec vite build --config web/vite.config.ts  # web UI → dist/web, needed by `latch review --ui`
-pnpm link --global                                # puts `latch` on PATH
-pnpm typecheck && pnpm test                       # everything should pass
+pnpm build                     # CLI → dist/, web UI → dist/web (served by `latch review --ui`)
+pnpm link --global             # puts `latch` on PATH
+pnpm typecheck && pnpm test    # everything should pass
 ```
 
-`pnpm build` only compiles the CLI; the web UI needs the separate `vite build` step.
 Client configs written by `latch init` and `latch add` start the proxy by absolute path,
 so they do not need `latch` on PATH. For the commands below, without
 `pnpm link --global`, run `node dist/cli.js` instead of `latch`.
 
 ## 2. Environment variables: none are required
 
-**Nothing reads a `.env` file.** `loadEnv()` exists in `src/config/env.ts` but is not
-called yet, and the review server reads `process.env` directly. Copying
-`.env.example` to `.env` has no effect unless you export the variables into your shell.
-Every variable has a working default:
+`latch` loads the `LATCH_*` lines of a `.env` file in the directory it runs in (copy
+`.env.example`); variables already set in the shell win, and every other line of the file is
+ignored. Every variable has a working default:
 
 | Variable | Default | Set it when |
 |---|---|---|
 | `LATCH_LOCKFILE_PATH` | `./latch.lock` | running `pnpm ui`, or `latch proxy` from another directory |
-| `LATCH_STATE_DIR` | `./.latch` | same |
+| `LATCH_STATE_DIR` | `.latch` next to the lockfile | same |
 | `LATCH_UI_PORT` | `7777` | `pnpm ui` should use another API port |
 | `LATCH_REVIEWER` | `git config user.email`, else the OS user | approvals should be recorded under another name |
+| `LATCH_LOG_LEVEL` | `info` | `debug` to see every frame the proxy holds, rewrites or answers; `warn` for a quieter stderr |
+| `LATCH_LLM_ENABLED`, `LATCH_LLM_API_KEY` | `false`, empty | you want the optional LLM advisory pass (any OpenAI-compatible API; see `LATCH_LLM_BASE_URL` and `LATCH_LLM_MODEL`) |
+| `LATCH_INTEGRITY_DIR` | `integrity` next to the per-user lockfile | tests: where lockfile integrity records and their key live |
+| `LATCH_DEV` | `false` | development: the review UI adds the Simulation and Dev Tools pages, and the API serves `POST /api/simulate` and `/api/dev/presets` |
 | `DEMO_MUTATE` | unset | `1` makes the evil demo server start already poisoned |
-| `ANTHROPIC_API_KEY`, `LATCH_LLM_ENABLED` | empty, `false` | no effect yet: the LLM pass is not wired in |
 
-To load a `.env` anyway:
-
-```sh
-cp .env.example .env
-set -a; . ./.env; set +a                                   # bash / zsh
-```
-
-```fish
-for l in (string match -rv '^\s*(#|$)' < .env); set -gx (string split -m1 = $l); end   # fish
-```
+No `LATCH_*` variable ever reaches a server behind the proxy: the proxy removes them all from
+the server's environment.
 
 `.env` is gitignored; never commit it.
 
@@ -123,7 +120,7 @@ git diff --no-index latch.lock.example "$W/latch.lock"   # shows an approval
 
 ## 4. Run the review UI
 
-**Built UI, one process** (needs the `vite build` step from section 1):
+**Built UI, one process** (needs `pnpm build` from section 1):
 
 ```sh
 latch --lockfile "$W/latch.lock" --state-dir "$W/.latch" review --ui --port 7777
@@ -140,13 +137,37 @@ LATCH_LOCKFILE_PATH="$W/latch.lock" LATCH_STATE_DIR="$W/.latch" pnpm ui
 
 Open `http://localhost:5173`; Vite proxies `/api` to the API. The top bar shows
 whether the API is reachable. If it is not, the Review Queue shows labeled sample
-data with Approve and Reject disabled, and the other pages show an error. Approving
+data with Approve and Reject disabled, and the other pages show an error. Only the Vite
+dev server does this: the built UI never shows sample data. Approving
 in the UI rewrites the lockfile; a running proxy applies the decision to its next call
 without a restart.
 
 The UI has seven pages: Overview, MCP Servers, Review Queue, Approved Tools, Audit
-Log, Git & CI, and Settings. Settings has six themes plus "Follow system"; the
+Log, Git & CI, and Settings. With `LATCH_DEV=1` set for the API (in `.env`, or before
+`pnpm ui` or `latch review --ui`), two more appear: Simulation rehearses the demo rug pull in
+memory, and Dev Tools adds the demo servers to an MCP client in one click. Settings has six themes plus "Follow system"; the
 choice is kept in the browser's local storage.
+
+### The LatchVerify app: normal and development mode
+
+The app runs one copy at a time. Starting it again only shows the window of the copy already
+running, in whatever mode that copy is in, so quit it first (tray icon, **Quit**, or
+`pkill -f latchverify-desktop`).
+
+```sh
+# Installed app
+~/.local/bin/latchverify-desktop --dev   # development mode (LATCH_DEV=1 does the same)
+~/.local/bin/latchverify-desktop         # normal mode, as the app menu and login start it
+
+# From this checkout (builds first)
+LATCH_DEV=1 pnpm desktop                 # development mode
+pnpm desktop                             # normal mode
+```
+
+Development mode lasts for that run only: nothing is saved, and the login start always uses
+normal mode. In an installed app the Dev Tools page says the demo servers are not there, since
+packages ship neither `demo/` nor `tsx`; run the app from the checkout to add them.
+`Failed to load module "appmenu-gtk-module"` on start is a harmless GTK message.
 
 ## 5. Use it with a real MCP client (optional)
 
@@ -155,19 +176,23 @@ latch --lockfile "$PWD/latch.lock" init --dry-run   # preview: writes nothing
 latch --lockfile "$PWD/latch.lock" init             # pins tools, wraps client configs
 ```
 
-`init` detects Claude Desktop, Claude Code, Cursor and VS Code configs, keeps a
-timestamped `.bak` next to every config it rewrites, and puts `LATCH_LOCKFILE_PATH` and
-`LATCH_STATE_DIR` into each wrapped entry so the proxy finds the lockfile wherever the
-client starts it. Restart the client afterwards, then commit `latch.lock`. To undo,
-restore the `.bak` copy.
+`init` detects the configs of every supported client (the list and paths are in
+[INSTALL.md](INSTALL.md#what-installing-does)), changes only the `command` and `args` of the
+entries it wraps (env, where keys live, and comments stay as they are), and passes `--lockfile` and
+`--state-dir` in those args so the proxy finds the lockfile wherever the client starts it. It
+starts no server: each is recorded in `latch.lock` and its tools are pinned the first time the
+client starts it. A config it cannot read is reported and left alone. Restart the client
+afterwards, then commit `latch.lock`. To undo, run `latch setup --remove --all`.
 
-Without a project, `latch setup` does the same for Claude Code in one step, with a
-per-user lockfile instead of `./latch.lock` (`~/.config/latchverify/latch.lock` on Linux):
+Without a project, `latch setup` does the same for the clients you choose, with a per-user
+lockfile instead of `./latch.lock` (`~/.config/latchverify/latch.lock` on Linux):
 
 ```sh
-latch setup --dry-run   # preview: writes nothing
-latch setup             # creates the per-user latch.lock, pins tools, wraps ~/.claude.json
-latch setup --remove    # gives Claude Code its original server entries back; keeps latch.lock
+latch setup                          # lists the clients found and asks which to connect
+latch setup --client claude-code     # connects one without asking (--all: every client)
+latch setup --dry-run --all          # preview: writes nothing
+latch setup --remove --client claude-code   # original entries back; keeps latch.lock
+latch watch                          # keeps connected clients linked, with desktop notifications
 ```
 
 `latch review` and `latch verify` open that lockfile from any directory without `./latch.lock`.
@@ -177,7 +202,7 @@ latch setup --remove    # gives Claude Code its original server entries back; ke
 | Symptom | Fix |
 |---|---|
 | `latch: command not found` | `pnpm link --global`, or use `node dist/cli.js` |
-| `latch review --ui`: "the review UI is not built" | `pnpm exec vite build --config web/vite.config.ts` |
-| Every tool call blocked as `unpinned` from a client | the proxy found no lockfile; set `LATCH_LOCKFILE_PATH` in the client entry (`latch init` does this) |
+| `latch review --ui`: "the review UI is not built" | `pnpm build` |
+| Every tool call blocked as `unpinned` from a client | the proxy found no lockfile; pass `--lockfile <path>` before `proxy` in the client entry (`latch init` and `latch setup` do this) |
 | `port 7777 is in use` | `--port <other>` or set `LATCH_UI_PORT` for `pnpm ui` |
 | The proxy Verify session does not block call 6 | the server started slowly; wait longer before sending call 6 |

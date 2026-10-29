@@ -1,17 +1,15 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
 import { Command, Option } from "commander";
 import pc from "picocolors";
-import { SUPPORTED_CLIENTS } from "./config/clients.js";
+import { SUPPORTED_CLIENTS } from "./config/client-ids.js";
 import { loadDotEnv, loadEnv, statePaths, type LatchEnv } from "./config/env.js";
 import { userLockfilePath } from "./config/paths.js";
-import { runAdd } from "./commands/add.js";
-import { runInit } from "./commands/init.js";
-import { runInspect } from "./commands/inspect.js";
-import { runProxy } from "./commands/proxy.js";
-import { runReview } from "./commands/review.js";
-import { runSetup, runUnlink } from "./commands/setup.js";
-import { VERIFY_EXIT, runVerify } from "./commands/verify.js";
+import { VERIFY_EXIT } from "./commands/exit-codes.js";
+import { VERSION } from "./version.js";
+
+// Each command's module is imported when that command runs, never at startup. Every wrapped MCP
+// server keeps a `latch proxy` process alive, and loading the review UI, prompts and HTTP server
+// it never uses would cost each one tens of MiB.
 
 /**
  * Run a command and turn its result (or thrown error) into the process exit code. The
@@ -28,13 +26,11 @@ async function run(command: (env: LatchEnv) => Promise<number>, failureCode = 1)
   }
 }
 
-/** This install's version: package.json sits one level above both src/cli.ts and dist/cli.js. */
-const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 
 const program = new Command()
   .name("latch")
   .description("Pin MCP tool capabilities in latch.lock and block unreviewed drift.")
-  .version(version)
+  .version(VERSION)
   .enablePositionalOptions()
   .option("--lockfile <path>", "path to latch.lock (default: $LATCH_LOCKFILE_PATH or ./latch.lock; review and verify fall back to the per-user lockfile from `latch setup`)")
   .option("--state-dir <path>", "local state directory (default: $LATCH_STATE_DIR or .latch next to the lockfile)");
@@ -52,7 +48,7 @@ program
   .addOption(new Option("--client <id>", "only configure this client").choices(SUPPORTED_CLIENTS))
   .option("--dry-run", "show planned changes without writing", false)
   .action((opts: { client?: (typeof SUPPORTED_CLIENTS)[number]; dryRun: boolean }) =>
-    run(() => runInit({ ...opts, ...globals() })),
+    run(async () => (await import("./commands/init.js")).runInit({ ...opts, ...globals() })),
   );
 
 /**
@@ -67,12 +63,21 @@ const setupGlobals = () => {
 
 program
   .command("setup")
-  .description("link Claude Code to latch with no questions: wrap its MCP servers and create the per-user latch.lock (installers run this)")
-  .addOption(new Option("--client <id>", "client to link").choices(SUPPORTED_CLIENTS).default("claude-code"))
-  .option("--remove", "unlink instead: give the client's servers their original commands back (latch.lock is kept)", false)
+  .description("find the MCP clients on this machine and connect the ones you choose: their servers start behind latch, pinned in the per-user latch.lock")
+  .addOption(new Option("--client <id>", "connect this client without asking").choices(SUPPORTED_CLIENTS))
+  .addOption(new Option("--all", "connect (or with --remove, disconnect) every MCP client found, without asking").conflicts("client"))
+  .option("--remove", "disconnect instead: give the client's servers their original commands back (latch.lock is kept)", false)
   .option("--dry-run", "show what would change without writing", false)
-  .action((opts: { client: (typeof SUPPORTED_CLIENTS)[number]; remove: boolean; dryRun: boolean }) =>
-    run(() => (opts.remove ? runUnlink(opts) : runSetup({ ...opts, ...setupGlobals() }))),
+  .action((opts: { client?: (typeof SUPPORTED_CLIENTS)[number]; all?: boolean; remove: boolean; dryRun: boolean }) =>
+    run(async () => {
+      const { runSetup, runSetupAsk, runUnlink } = await import("./commands/setup.js");
+      if (opts.remove) {
+        if (!opts.all && opts.client === undefined) throw new Error("latch setup --remove: name the client with --client <id>, or use --all");
+        return runUnlink({ client: opts.all ? undefined : opts.client, dryRun: opts.dryRun });
+      }
+      if (opts.all || opts.client !== undefined) return runSetup({ client: opts.all ? undefined : opts.client, dryRun: opts.dryRun, ...setupGlobals() });
+      return runSetupAsk({ dryRun: opts.dryRun, ...setupGlobals() });
+    }),
   );
 
 program
@@ -85,7 +90,7 @@ program
   .option("--env <KEY[=VALUE]>", "server environment variable; a bare KEY copies it from this shell (repeatable)", (value, previous: string[]) => [...previous, value], [])
   .option("--dry-run", "show what would be pinned and added without writing", false)
   .action((name: string, command: string[], opts: { client: (typeof SUPPORTED_CLIENTS)[number]; env: string[]; dryRun: boolean }) =>
-    run(() => runAdd({ ...opts, name, command, ...globals() })),
+    run(async () => (await import("./commands/add.js")).runAdd({ ...opts, name, command, ...globals() })),
   );
 
 program
@@ -94,12 +99,13 @@ program
   .option("--ui", "open the web review UI", false)
   .option("--port <port>", "web UI port (default: $LATCH_UI_PORT or 7777)", (v) => Number.parseInt(v, 10))
   .action((opts: { ui: boolean; port?: number }) =>
-    run((env) =>
-      runReview({
+    run(async (env) =>
+      (await import("./commands/review.js")).runReview({
         ...opts,
         port: opts.port ?? env.uiPort,
         // Only the built-in default may move to a free port; a port the user chose must not.
         portFallback: opts.port === undefined && !process.env.LATCH_UI_PORT?.trim(),
+        dev: env.dev,
         ...readingGlobals(),
       }),
     ),
@@ -109,8 +115,50 @@ program
   .command("verify")
   .description("CI check: exit non-zero if any server drifted from latch.lock")
   .option("--json", "machine-readable output", false)
+  .option(
+    "--config <file>",
+    "MCP config with the servers' launch lines (latch.lock keeps only their hash); repeatable. Default: ./.mcp.json, then this machine's client configs",
+    (value: string, previous: string[]) => [...previous, value],
+    [],
+  )
   // An unexpected failure is an error (3), never drift (1): CI must tell the two apart.
-  .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: readingGlobals().lockfilePath }), VERIFY_EXIT.error));
+  .action((opts: { json: boolean; config: string[] }) =>
+    run(
+      async () => (await import("./commands/verify.js")).runVerify({ json: opts.json, configs: opts.config, lockfilePath: readingGlobals().lockfilePath }),
+      VERIFY_EXIT.error,
+    ),
+  );
+
+program
+  .command("watch")
+  .description("keep every MCP client linked in the background: pin and wrap new servers as they appear, and notify about changes to review and blocked calls")
+  .option("--once", "sync a single time, print what changed and exit", false)
+  .option("--no-notify", "log notifications instead of showing them on the desktop")
+  .action((opts: { once: boolean; notify: boolean }) =>
+    run(async (env) => (await import("./commands/watch.js")).runWatch({ ...opts, ...setupGlobals(), logLevel: env.logLevel })),
+  );
+
+program
+  .command("update")
+  .description("install the newest LatchVerify release (signed); --check only says whether there is one")
+  .option("--check", "only check, install nothing", false)
+  .action((opts: { check: boolean }) => run(async () => (await import("./commands/update.js")).runUpdate(opts)));
+
+const lock = program
+  .command("lock")
+  .description("check latch.lock for edits made outside LatchVerify, and accept or undo them");
+lock
+  .command("status")
+  .description("say whether latch.lock is what LatchVerify last wrote (exit 1 when it was changed outside it)")
+  .action(() => run(async () => (await import("./commands/lock.js")).runLockStatus(readingGlobals())));
+lock
+  .command("accept")
+  .description("trust latch.lock as it is now, after a git pull, merge or hand edit")
+  .action(() => run(async () => (await import("./commands/lock.js")).runLockAccept(readingGlobals())));
+lock
+  .command("restore")
+  .description("put back the last version of latch.lock that LatchVerify wrote")
+  .action(() => run(async () => (await import("./commands/lock.js")).runLockRestore(readingGlobals())));
 
 program
   .command("inspect")
@@ -120,7 +168,7 @@ program
   .option("--json", "machine-readable output", false)
   .passThroughOptions()
   .action((server: string[], opts: { file?: string; json: boolean }) =>
-    run(() => runInspect({ ...opts, server: server.length > 0 ? server : undefined })),
+    run(async () => (await import("./commands/inspect.js")).runInspect({ ...opts, server: server.length > 0 ? server : undefined })),
   );
 
 // Internal: what `latch init` writes into client configs. Hidden from --help.
@@ -130,12 +178,13 @@ program
   .argument("<command...>", "real server command, after --")
   .passThroughOptions()
   .action((command: string[], opts: { server: string }) =>
-    run((env) =>
-      runProxy({
+    run(async (env) =>
+      (await import("./commands/proxy.js")).runProxy({
         serverId: opts.server,
         command,
         ...globals(),
         llm: env.llmEnabled ? { apiKey: env.llmApiKey!, baseUrl: env.llmBaseUrl, model: env.llmModel } : undefined,
+        logLevel: env.logLevel,
       }),
     ),
   );

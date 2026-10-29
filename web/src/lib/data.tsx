@@ -1,6 +1,18 @@
-import type { LatchEvent, LockFile } from "@schema/index.js";
+import type { ClientsReport, LatchEvent, LockFile, Settings } from "@schema/index.js";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ApiUnreachableError, fetchEvents, fetchLockfile, fetchLockfileGit, fetchPending, type LockfileGitStatus, type ReviewItem } from "./api";
+import {
+  ApiUnreachableError,
+  fetchClients,
+  fetchEvents,
+  fetchInfo,
+  fetchLockfile,
+  fetchLockfileGit,
+  fetchPending,
+  fetchSettings,
+  type ApiInfo,
+  type LockfileGitStatus,
+  type ReviewItem,
+} from "./api";
 
 /**
  * One API resource. While a reload runs, the last data (or error) stays on screen and
@@ -45,6 +57,17 @@ export interface AppData {
   lockfile: Resource<LockFile>;
   events: Resource<LatchEvent[]>;
   git: Resource<LockfileGitStatus>;
+  /** The MCP clients on this machine and their servers. */
+  clients: Resource<ClientsReport>;
+  /** The user's settings. */
+  settings: Resource<Settings>;
+  /** The API's version and mode. Fetched on load and on reload, not polled: it does not change. */
+  info: Resource<ApiInfo>;
+  /**
+   * Development mode (LATCH_DEV) as the API reports it. False until it answers, and false for an
+   * API without /api/info, so demo material never shows by mistake.
+   */
+  dev: boolean;
   /** Refetches everything: after a decision, or from the Refresh button. */
   reload: () => void;
   /** True while any resource is loading or refreshing. */
@@ -64,6 +87,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const lockfile = useResource(fetchLockfile, reloadKey, pollKey);
   const events = useResource((signal) => fetchEvents(undefined, signal), reloadKey, pollKey);
   const git = useResource(fetchLockfileGit, reloadKey, pollKey);
+  const clients = useResource(fetchClients, reloadKey, pollKey);
+  const settings = useResource(fetchSettings, reloadKey, pollKey);
+  const info = useResource(fetchInfo, reloadKey, 0);
   const reload = useCallback(() => setReloadKey((n) => n + 1), []);
 
   const api =
@@ -85,8 +111,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     lockfile,
     events,
     git,
+    clients,
+    settings,
+    info,
+    dev: info.status === "ready" && info.data.dev,
     reload,
-    busy: [pending, lockfile, events, git].some(isBusy),
+    busy: [pending, lockfile, events, git, clients, settings, info].some(isBusy),
     api,
   };
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

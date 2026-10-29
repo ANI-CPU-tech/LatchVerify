@@ -1,3 +1,4 @@
+import { launchHash, programName } from "../../src/analyze/hash.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { INITIAL_TOOLS, POISONED_TOOLS, callDevtoolsTool } from "../../demo/devtools-server.js";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
@@ -34,7 +35,7 @@ describe("first use", () => {
 describe("rug pull", () => {
   it("lands format_json at tier 3 against the pins latch add would write", () => {
     let lock = emptyLockfile();
-    lock.servers.devtools = { transport: "stdio", command: "devtools", args: [], tools: [] };
+    lock.servers.devtools = { transport: "stdio", program: programName("devtools"), launch: launchHash("devtools", []), tools: [] };
     for (const { change } of analyze(INITIAL_TOOLS, lock).changes) {
       if (change.toolName === "format_json") lock = applyApproval(lock, change, "dev@example.com", now);
     }

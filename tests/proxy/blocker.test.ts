@@ -50,11 +50,12 @@ describe("shouldBlock", () => {
     expect(shouldBlock("weather", "get_alerts", exampleLock(), [])).toEqual({ blocked: false });
   });
 
-  it("blocks a tool that is not in the lockfile", () => {
+  it("blocks a tool that is not in the lockfile, telling a missing server from a missing tool", () => {
     const unpinned = { blocked: true, reason: { kind: "unpinned" } };
-    expect(shouldBlock("weather", "get_forecast", emptyLock(), [])).toEqual(unpinned);
+    const serverUnpinned = { blocked: true, reason: { kind: "server_unpinned" } };
+    expect(shouldBlock("weather", "get_forecast", emptyLock(), [])).toEqual(serverUnpinned);
     expect(shouldBlock("weather", "read_config", exampleLock(), [])).toEqual(unpinned);
-    expect(shouldBlock("other", "get_forecast", exampleLock(), [])).toEqual(unpinned);
+    expect(shouldBlock("other", "get_forecast", exampleLock(), [])).toEqual(serverUnpinned);
   });
 
   it("matches tool and server names exactly", () => {
@@ -62,14 +63,13 @@ describe("shouldBlock", () => {
     for (const name of ["Get_Forecast", "get_forecast ", " get_forecast", "get_forecas", "get_forecast\u200b", ""]) {
       expect(shouldBlock("weather", name, exampleLock(), []), name).toEqual(unpinned);
     }
-    expect(shouldBlock("Weather", "get_forecast", exampleLock(), [])).toEqual(unpinned);
+    expect(shouldBlock("Weather", "get_forecast", exampleLock(), [])).toEqual({ blocked: true, reason: { kind: "server_unpinned" } });
   });
 
   it("does not resolve inherited object keys as servers or tools", () => {
-    const unpinned = { blocked: true, reason: { kind: "unpinned" } };
     for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
-      expect(shouldBlock(name, "get_forecast", exampleLock(), []), name).toEqual(unpinned);
-      expect(shouldBlock("weather", name, exampleLock(), []), name).toEqual(unpinned);
+      expect(shouldBlock(name, "get_forecast", exampleLock(), []), name).toEqual({ blocked: true, reason: { kind: "server_unpinned" } });
+      expect(shouldBlock("weather", name, exampleLock(), []), name).toEqual({ blocked: true, reason: { kind: "unpinned" } });
     }
   });
 
@@ -217,6 +217,18 @@ describe("buildBlockError", () => {
     expect(buildBlockError(1, "get_forecast", reasons[1]!).error?.message).toBe(
       "LatchVerify blocked \"get_forecast\" pending review — run `latch review`",
     );
+  });
+
+  it("points a call to a server that was never pinned at latch init, since a review cannot pin it", () => {
+    expect(buildBlockError(1, "get_forecast", { kind: "server_unpinned" })).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: {
+        code: BLOCK_ERROR_CODE,
+        message: "LatchVerify blocked \"get_forecast\": this MCP server is not pinned in latch.lock yet — run `latch init` to pin it",
+        data: { reason: { kind: "server_unpinned" } },
+      },
+    });
   });
 
   it("asks the model to retry a call made before the server's tools were verified", () => {

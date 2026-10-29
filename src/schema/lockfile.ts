@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolRecordSchema } from "./tool.js";
+import { Sha256HexSchema, ToolRecordSchema } from "./tool.js";
 
 /** Current latch.lock format version. Bump on breaking format changes. */
 export const LOCKFILE_VERSION = "1";
@@ -7,13 +7,24 @@ export const LOCKFILE_VERSION = "1";
 export const TransportSchema = z.enum(["stdio", "http"]);
 export type Transport = z.infer<typeof TransportSchema>;
 
-/** One upstream MCP server and its approved tools. */
+/**
+ * One upstream MCP server and its approved tools. latch.lock is committed to git, so it never holds
+ * a server's launch line: arguments may carry a key (`--token ...`). It keeps the program's name
+ * for people and a hash that ties the pins to exactly one launch (analyze/hash.ts launchHash).
+ */
 export const ServerEntrySchema = z.object({
   transport: TransportSchema,
-  /** Executable (stdio) or base URL (http) of the real server. */
-  command: z.string().min(1),
-  args: z.array(z.string()),
+  /** The program the server runs, for people: "npx", "uvx", "node". Never a path or an argument. */
+  program: z.string().min(1),
+  /** sha256 of the canonical JSON of [command, ...args]: the launch these pins belong to. */
+  launch: Sha256HexSchema,
   tools: z.array(ToolRecordSchema),
+  /**
+   * Linked but not run yet: the proxy pins the tools the first time the server lists them (trust
+   * on first use), holding back any with critical findings, and then removes this flag. Linking
+   * never starts a server itself, so it never handles the keys in the client's config.
+   */
+  trustOnFirstUse: z.literal(true).optional(),
 });
 export type ServerEntry = z.infer<typeof ServerEntrySchema>;
 

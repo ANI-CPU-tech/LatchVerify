@@ -1,3 +1,4 @@
+import { launchHash, programName } from "../../src/analyze/hash.js";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
@@ -9,7 +10,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startProxy, type ProxyOptions } from "../../src/proxy/index.js";
 import { readEvents } from "../../src/store/events.js";
-import { applyApproval, readLockfile, writeLockfile } from "../../src/store/lockfile.js";
+import { applyApproval, emptyLockfile, linkServer, readLockfile, serializeLockfile, writeLockfile } from "../../src/store/lockfile.js";
+import { runLockAccept } from "../../src/commands/lock.js";
 import { dequeue, readPending, writePending } from "../../src/store/pending.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -129,6 +131,72 @@ describe("startProxy", () => {
     expect(stderr.join("")).toContain("[evil-server] rug pull after 3 tools/call requests");
   }, 30_000);
 
+  it("starts the server without LatchVerify's LATCH_* variables", async () => {
+    vi.stubEnv("LATCH_LLM_API_KEY", "secret-key");
+    vi.stubEnv("LATCH_LOCKFILE_PATH", lockfilePath);
+    vi.stubEnv("LATCH_STATE_DIR", stateDir);
+    const envServer = `require("readline").createInterface({ input: process.stdin }).on("line", (line) => {
+      const m = JSON.parse(line);
+      const own = Object.keys(process.env).filter((k) => /^latch_/i.test(k));
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { own } }) + "\\n");
+    });`;
+    try {
+      const { messages } = await run({ args: ["-e", envServer] }, [request(1, "env/dump"), (out) => waitFor(() => out().includes('"id":1'))]);
+      expect(messages.find((m) => m.id === 1)).toEqual({ jsonrpc: "2.0", id: 1, result: { own: [] } });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("stops a server that writes a line longer than maxLineBytes", async () => {
+    const flood = `process.stdout.write('{"jsonrpc":"2.0","method":"x","pad":"' + "a".repeat(4096)); setInterval(() => {}, 1000);`;
+    const { code } = await run({ args: ["-e", flood] }, [(out) => waitFor(() => stderr.join("").includes("longer than"))], {
+      maxLineBytes: 1024,
+    });
+    expect(code).toBe(128 + 15);
+    expect(stderr.join("")).toContain("[latch] warning: the server wrote a line longer than 1024 bytes; stopping it");
+  });
+
+  it("sends SIGTERM to a server that keeps running after its input closed", async () => {
+    const { code } = await run({ args: ["-e", "setInterval(() => {}, 1000)"] }, [], { exitGraceMs: 100 });
+    expect(code).toBe(128 + 15);
+    expect(stderr.join("")).toContain("[latch] warning: the server is still running 100 ms after its input closed; sending SIGTERM");
+  });
+
+  // Windows has no catchable SIGTERM: child.kill() always terminates the process there.
+  it.skipIf(process.platform === "win32")("sends SIGKILL to a server that ignores SIGTERM", async () => {
+    const stubborn = 'process.on("SIGTERM", () => {}); process.stdout.write("{}\\n"); setInterval(() => {}, 1000)';
+    const { code } = await run({ args: ["-e", stubborn] }, [(out) => waitFor(() => out().includes("{}"))], { exitGraceMs: 100 });
+    expect(code).toBe(128 + 9);
+    expect(stderr.join("")).toContain("[latch] warning: the server is still running 100 ms after SIGTERM; sending SIGKILL");
+  });
+
+  it("never lets a tier-3 tool's description reach the client", async () => {
+    const poisoned = JSON.parse(readFileSync(join(root, "tests/fixtures/poisoned-tools.json"), "utf8")).tools as Array<{ name: string; description: string }>;
+    const { messages, text } = await run({ args: ["-e", echoServer(poisoned)] }, [request(1, "tools/list"), (out) => waitFor(() => out().includes('"id":1'))]);
+    const listed = (messages.find((m) => m.id === 1)!.result as { tools: Array<{ name: string; description: string }> }).tools;
+    const forecast = poisoned.find((t) => t.name === "get_forecast")!;
+    expect(listed.find((t) => t.name === "get_forecast")!.description).toMatch(/^\[LatchVerify\] This tool's definition was withheld/);
+    expect(text).not.toContain(forecast.description);
+  });
+
+  it("follows the log level: debug names frames, warn leaves out routine lines", async () => {
+    await run(echo, [request(1, "tools/call", { name: "nope", arguments: {} }), (out) => waitFor(() => out().includes('"id":1'))], {
+      logLevel: "debug",
+      holdTimeoutMs: 50,
+    });
+    const debug = stderr.join("");
+    expect(debug).toContain("[latch] debug: holding tools/call #1 until the server's tools are verified");
+    expect(debug).toContain("[latch] debug: client->server tools/call #1: respond");
+    stderr.length = 0;
+    await run(echo, [request(1, "tools/call", { name: "nope", arguments: {} }), (out) => waitFor(() => out().includes('"id":1'))], {
+      logLevel: "warn",
+      holdTimeoutMs: 50,
+    });
+    expect(stderr.join("")).not.toContain("[latch] blocked");
+    expect(stderr.join("")).toContain("[latch] warning: tools still unverified after 50 ms");
+  });
+
   it("forwards unknown fields byte-for-byte in both directions", async () => {
     const sent = '{"jsonrpc":"2.0",  "id":1, "method":"echo", "x-extra":{"kept":true}, "n":1.50}';
     const { messages, text } = await run(echo, [sent, (out) => waitFor(() => out().includes('"id":1'))]);
@@ -152,20 +220,51 @@ describe("startProxy", () => {
     expect(messages.map((m) => m.id ?? m.method).sort()).toEqual([1, 2, 3, 4, "notifications/custom"]);
   });
 
-  it("holds a call made before any tool list, then blocks it as unverified on timeout, in order", async () => {
+  it("holds calls made before any tool list, then blocks them as unverified on timeout, in order", async () => {
     const { messages } = await run(
       echo,
       [
         request(1, "tools/call", { name: "get_alerts", arguments: {} }),
         request(2, "ping"),
-        (out) => waitFor(() => out().includes('"id":2')),
+        request(3, "tools/call", { name: "get_alerts", arguments: {} }),
+        (out) => waitFor(() => out().includes('"id":3')),
       ],
       { holdTimeoutMs: 200 },
     );
     const replies = messages.filter((m) => m.id !== undefined);
-    expect(replies.map((m) => m.id)).toEqual([1, 2]);
-    expect(replies[0]).toMatchObject({ error: { code: -32001, data: { reason: { kind: "unverified" } } } });
+    // The ping is not a call, so it is not held behind them: only the two calls are released.
+    // Its reply's place among theirs depends on how fast the server starts, so it is not checked.
     expect(stderr.join("")).toContain("releasing 2 held client frames");
+    expect(replies.filter((m) => m.id === 2)).toEqual([expect.objectContaining({ result: { raw: expect.stringContaining('"method":"ping"') } })]);
+    const calls = replies.filter((m) => m.id !== 2);
+    expect(calls.map((m) => m.id)).toEqual([1, 3]);
+    for (const call of calls) expect(call).toMatchObject({ error: { code: -32001, data: { reason: { kind: "unverified" } } } });
+  });
+
+  it("passes the client's answer to a server request while a call is held", async () => {
+    // Asks the client for its roots and lists its tools only once it has the answer.
+    const asking = `const tools = ${JSON.stringify(benignTools)};
+let answered = false;
+const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n");
+send({ jsonrpc: "2.0", id: "roots-1", method: "roots/list" });
+require("readline").createInterface({ input: process.stdin }).on("line", (line) => {
+  const m = JSON.parse(line);
+  if (m.id === "roots-1") { answered = true; return; }
+  if (m.method === "tools/list") return answered ? send({ jsonrpc: "2.0", id: m.id, result: { tools } }) : send({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "no roots yet" } });
+  if (m.method === "tools/call") send({ jsonrpc: "2.0", id: m.id, result: { content: [], isError: false } });
+});`;
+    const { messages } = await run(
+      { args: ["-e", asking] },
+      [
+        (out) => waitFor(() => out().includes("roots/list")),
+        request(1, "tools/call", { name: "get_alerts", arguments: {} }),
+        line({ jsonrpc: "2.0", id: "roots-1", result: { roots: [] } }),
+        request(2, "tools/list"),
+        (out) => waitFor(() => out().includes('"id":1')),
+      ],
+      { holdTimeoutMs: 10_000 },
+    );
+    expect(messages.find((m) => m.id === 1)).toEqual({ jsonrpc: "2.0", id: 1, result: { content: [], isError: false } });
   });
 
   it("verifies on notifications/initialized so an early call goes through", async () => {
@@ -209,6 +308,58 @@ describe("startProxy", () => {
     const bad = join(stateDir, "latch.lock");
     await writeFile(bad, "{ nope");
     await expect(run(echo, [], { lockfilePath: bad })).rejects.toThrow();
+  });
+});
+
+describe("tamper detection", () => {
+  it("keeps blocking when latch.lock is edited behind LatchVerify's back, until the edit is accepted", async () => {
+    const lock = join(stateDir, "latch.lock");
+    await writeLockfile(lock, await readLockfile(lockfilePath));
+    const readConfig = (JSON.parse(readFileSync(join(root, "tests/fixtures/poisoned-tools.json"), "utf8")).tools as Array<{ name: string }>).find(
+      (t) => t.name === "read_config",
+    )!;
+    const callReadConfig = (id: number) => request(id, "tools/call", { name: "read_config", arguments: {} });
+    const { messages } = await run(
+      { args: ["-e", echoServer([...benignTools, readConfig])] },
+      [
+        request(1, "tools/list"),
+        (out) => waitFor(() => out().includes('"id":1')),
+        // A server running as the same user approves its own change by editing latch.lock.
+        async () => {
+          const [change] = await readPending(stateDir);
+          const approved = applyApproval(await readLockfile(lock), change!, "attacker", new Date());
+          await writeFile(lock, serializeLockfile(approved));
+        },
+        callReadConfig(2),
+        (out) => waitFor(() => out().includes('"id":2')),
+        async () => {
+          expect(await runLockAccept({ lockfilePath: lock, output: new PassThrough() })).toBe(0);
+        },
+        callReadConfig(3),
+        (out) => waitFor(() => out().includes('"id":3')),
+      ],
+      { lockfilePath: lock },
+    );
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { code: -32001, data: { reason: { kind: "pending_review" } } } });
+    expect(messages.find((m) => m.id === 3)).toMatchObject({ result: { raw: expect.stringContaining("read_config") } });
+    expect(stderr.join("")).toContain(`[latch] warning: ${lock} was changed outside LatchVerify`);
+    expect((await readEvents(stateDir)).filter((e) => e.kind === "lock_tampered")).toEqual([
+      { kind: "lock_tampered", at: expect.any(String), serverId: "weather", path: lock },
+    ]);
+  });
+
+  it("starts from the last trusted copy when latch.lock was edited while no proxy ran", async () => {
+    const lock = join(stateDir, "latch.lock");
+    const trusted = await readLockfile(lockfilePath);
+    await writeLockfile(lock, trusted);
+    const emptied = { ...trusted, servers: {} };
+    await writeFile(lock, serializeLockfile(emptied));
+    const { messages } = await run(echo, [request(1, "tools/list"), alerts(2), (out) => waitFor(() => out().includes('"id":2'))], {
+      lockfilePath: lock,
+    });
+    // get_alerts is pinned in the trusted copy, so it still works; the edit is not adopted.
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ result: { raw: expect.stringContaining("get_alerts") } });
+    expect((await readEvents(stateDir)).map((e) => e.kind)).toContain("lock_tampered");
   });
 });
 
@@ -281,5 +432,55 @@ describe("decisions made by latch review while the proxy runs", () => {
     expect(messages.find((m) => m.id === 2)).toMatchObject({ result: { raw: expect.any(String) } });
     expect(messages.find((m) => m.id === 3)).toMatchObject({ result: { raw: expect.any(String) } });
     expect(stderr.join("").match(/kept the previous latch\.lock/g)).toHaveLength(1);
+  });
+});
+
+describe("startProxy, first run of a server linked to be trusted on first use", () => {
+  let linkedLock: string;
+  const poisonedTools = JSON.parse(readFileSync(join(root, "tests/fixtures/poisoned-tools.json"), "utf8")).tools as unknown[];
+
+  beforeEach(async () => {
+    vi.stubEnv("LATCH_REVIEWER", "first-run@example.com");
+    linkedLock = join(stateDir, "latch.lock");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const link = async (args: string[]) => writeLockfile(linkedLock, linkServer(emptyLockfile(), "weather", process.execPath, args, new Date("2026-10-29T09:00:00.000Z")));
+
+  it("pins the tools the server first lists, clears the mark and lets calls through", async () => {
+    await link(echo.args);
+    const { messages } = await run(echo, [request(1, "tools/list"), alerts(2), (out) => waitFor(() => out().includes('"id":2'))], { lockfilePath: linkedLock });
+    expect(messages.find((m) => m.id === 2)).toHaveProperty("result");
+    const lock = await readLockfile(linkedLock);
+    expect(lock.servers.weather!.trustOnFirstUse).toBeUndefined();
+    expect(lock.servers.weather!.tools.map((tool) => [tool.name, tool.approvedBy])).toEqual([
+      ["get_alerts", "first-run@example.com"],
+      ["get_forecast", "first-run@example.com"],
+    ]);
+    expect(await readPending(stateDir)).toEqual([]);
+    expect(stderr.join("")).toContain("weather: first run, so its tools were pinned (trust on first use): get_forecast, get_alerts");
+  });
+
+  it("holds back a tool with a critical finding: queued as tier 3 and blocked, the rest pinned", async () => {
+    const poisoned = { args: ["-e", echoServer(poisonedTools)] };
+    await link(poisoned.args);
+    const forecast = request(2, "tools/call", { name: "get_forecast", arguments: { latitude: 1, longitude: 2 } });
+    const { messages } = await run(poisoned, [request(1, "tools/list"), forecast, (out) => waitFor(() => out().includes('"id":2'))], { lockfilePath: linkedLock });
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { code: -32001, data: { reason: { kind: "hard_block" } } } });
+    expect((await readLockfile(linkedLock)).servers.weather!.tools.map((tool) => tool.name)).toEqual(["read_config"]);
+    expect((await readPending(stateDir)).map((change) => [change.toolName, change.tier])).toContainEqual(["get_forecast", 3]);
+  });
+
+  it("does not trust a mark added to latch.lock outside LatchVerify", async () => {
+    // LatchVerify wrote the server without the mark; a server marks itself afterwards.
+    await writeLockfile(linkedLock, { ...emptyLockfile(), servers: { weather: { transport: "stdio", program: programName(process.execPath), launch: launchHash(process.execPath, echo.args), tools: [] } } });
+    const forged = JSON.parse(await readFile(linkedLock, "utf8"));
+    forged.servers.weather.trustOnFirstUse = true;
+    await writeFile(linkedLock, JSON.stringify(forged, null, 2));
+    const { messages } = await run(echo, [request(1, "tools/list"), alerts(2), (out) => waitFor(() => out().includes('"id":2'))], { lockfilePath: linkedLock });
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { code: -32001 } });
+    expect(JSON.parse(await readFile(linkedLock, "utf8"))).toEqual(forged);
   });
 });

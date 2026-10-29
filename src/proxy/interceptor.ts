@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { isAutoPass } from "../analyze/tiers.js";
-import type { LlmAdvisory, LockFile, McpTool, PendingChange } from "../schema/index.js";
+import type { LlmAdvisory, LockFile, McpTool, PendingChange, Rejection } from "../schema/index.js";
 import { appendEvent, type LatchEvent } from "../store/events.js";
 import { enqueue, updatePending } from "../store/pending.js";
+import { findRejection } from "../store/rejected.js";
 import { analyzeToolList, type DetectedChange, type ListAnalysis } from "./analysis.js";
 import { buildBlockError, shouldBlock, type BlockReason, type BlockVerdict } from "./blocker.js";
 import {
@@ -35,6 +36,8 @@ export interface InterceptorContext {
   lockfile: LockFile;
   /** The pending queue as last read from or written to <stateDir>/pending.json. */
   pending: PendingChange[];
+  /** Definitions reviewers rejected, as last read from <stateDir>/rejected.json. */
+  rejected: Rejection[];
   /** Client request ids awaiting a server response, mapped to their method. */
   inflight: Map<JsonRpcId, string>;
   /** MCP protocol revision negotiated in `initialize`. */
@@ -58,8 +61,15 @@ export interface InterceptorContext {
   advise?: (tool: McpTool, cached: LlmAdvisory | undefined) => Promise<LlmAdvisory>;
   /** Queue a request to the server. It is written after the frame being routed is handled. */
   sendToServer(message: JsonRpcRequest): void;
-  /** Re-read latch.lock and the pending queue if they changed on disk (approvals, rejections). */
+  /** Re-read latch.lock, the pending queue and the rejections if they changed on disk. */
   refresh(): Promise<void>;
+  /**
+   * For a server latch.lock marks trustOnFirstUse: pins `changes`, its first complete tool list
+   * (pinFirstRun), in the trusted latch.lock under the state lock, and returns latch.lock as
+   * written. Undefined when nothing was written: no hook, an untrusted latch.lock, or another
+   * proxy pinned the server first.
+   */
+  pinFirstRun?(changes: PendingChange[]): Promise<LockFile | undefined>;
   /** Write one diagnostic line to stderr. stdout is the protocol. */
   log(message: string): void;
 }
@@ -201,21 +211,52 @@ async function onOwnToolList(ctx: InterceptorContext, response: JsonRpcResponse,
  * (`fromStart` false) nor has a nextCursor. A page of a list is still analyzed and queued, but
  * calls stay unverified until the proxy's own listing has seen every page.
  *
- * Returns "forward": the client still sees the list; enforcement happens at tools/call.
+ * The client still sees every tool: enforcement happens at tools/call, and a tool missing from
+ * the list would leave the model guessing. A tier-3 tool, though, is a hidden instruction or
+ * worse, and the text the model reads is the attack, so it is passed on as withheldTool(): its
+ * name, a notice in place of the description, and an empty input schema. Returns "rewrite" with
+ * that list when a tool was withheld, else "forward".
  */
 export async function onToolsList(ctx: InterceptorContext, response: JsonRpcResponse, fromStart = true): Promise<InterceptDecision> {
   if (response.error !== undefined) return FORWARD;
   await ctx.refresh();
   const now = new Date();
-  const analysis = analyzeToolList(ctx.serverId, response.result, ctx.lockfile, ctx.specVersion, now);
+  let analysis = analyzeToolList(ctx.serverId, response.result, ctx.lockfile, ctx.specVersion, now);
   if (analysis === null) {
     ctx.log(`${ctx.serverId}: tools/list result has no tools array; nothing analyzed`);
     return FORWARD;
   }
   const result = response.result as Record<string, unknown>;
   const complete = fromStart && (typeof result.nextCursor !== "string" || result.nextCursor === "");
+  // First run of a linked server: pin what it serves, then judge the list against those pins, so
+  // only the tools held back (critical findings) are queued and blocked.
+  const server = Object.hasOwn(ctx.lockfile.servers, ctx.serverId) ? ctx.lockfile.servers[ctx.serverId]! : undefined;
+  if (complete && server?.trustOnFirstUse === true && ctx.pinFirstRun !== undefined) {
+    const written = await ctx.pinFirstRun(analysis.changes.map(({ change }) => change));
+    if (written !== undefined) {
+      ctx.lockfile = written;
+      analysis = analyzeToolList(ctx.serverId, response.result, ctx.lockfile, ctx.specVersion, now)!;
+    }
+  }
   await recordAnalysis(ctx, analysis, now, complete);
-  return FORWARD;
+
+  const withheld = new Set(analysis.changes.filter(({ change }) => change.tier === 3).map(({ change }) => change.toolName));
+  if (withheld.size === 0) return FORWARD;
+  ctx.log(`${ctx.serverId}: withheld the description of ${withheld.size} tier-3 tool(s) from the client: ${[...withheld].join(", ")}`);
+  const tools = (result.tools as unknown[]).map((tool) => {
+    const name = isPlainObject(tool) ? tool.name : undefined;
+    return typeof name === "string" && withheld.has(name) ? withheldTool(name) : tool;
+  });
+  return { action: "rewrite", message: { ...response, result: { ...result, tools } } };
+}
+
+/** Description given to the model in place of a tier-3 tool's own. */
+export const WITHHELD_DESCRIPTION =
+  "[LatchVerify] This tool's definition was withheld: it changed in a way that may hide instructions or gain dangerous access, and it is blocked until a person reviews it with `latch review`. Do not call it; tell the user it is blocked pending review.";
+
+/** What the client sees of a tier-3 tool: nothing of its own but its name. */
+export function withheldTool(name: string): McpTool {
+  return { name, description: WITHHELD_DESCRIPTION, inputSchema: { type: "object", properties: {} } };
 }
 
 async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, now: Date, complete: boolean): Promise<void> {
@@ -241,6 +282,12 @@ async function recordAnalysis(ctx: InterceptorContext, analysis: ListAnalysis, n
     );
     ctx.observed.set(toolName, queued ?? change);
     if (queued !== undefined) continue;
+    const rejection = findRejection(ctx.rejected, serverId, toolName, composite);
+    if (rejection !== undefined) {
+      // Not queued again: a reviewer already said no to exactly this definition.
+      ctx.log(`${serverId}/${toolName}: serves the definition rejected in ${rejection.changeId}; its calls stay blocked`);
+      continue;
+    }
 
     ctx.pending = enqueue(ctx.pending, change);
     added.push(detected);
@@ -297,9 +344,10 @@ async function attachAdvisory(ctx: InterceptorContext, change: PendingChange, to
  * Blocked when no tools/list has been analyzed since start or the last list_changed
  * ("unverified": the server may be serving definitions nobody has checked; startProxy holds such
  * calls until a list is analyzed, so this only answers calls whose hold timed out), or when
+ * the definition it serves now was rejected (rejected.json, whatever its tier), or when
  * shouldBlock() objects given the queue and this session's observed changes. The observed
- * changes keep a definition blocked after `latch review` rejects it, and after a failed state
- * write. Every block is logged and recorded as a call_blocked event.
+ * changes keep a definition blocked after a failed state write. Every block is logged and
+ * recorded as a call_blocked event.
  *
  * A call without a string tool name cannot be checked, so it is answered with -32602 instead
  * of forwarded.
@@ -312,9 +360,13 @@ export async function onToolsCall(ctx: InterceptorContext, request: JsonRpcReque
   }
   const toolName = params.name;
   await ctx.refresh();
-  const verdict: BlockVerdict = ctx.verified
-    ? shouldBlock(ctx.serverId, toolName, ctx.lockfile, [...ctx.pending, ...ctx.observed.values()])
-    : { blocked: true, reason: { kind: "unverified" } };
+  const served = ctx.observed.get(toolName);
+  const rejection = served === undefined ? undefined : findRejection(ctx.rejected, ctx.serverId, toolName, served.after.hashes.composite);
+  const verdict: BlockVerdict = !ctx.verified
+    ? { blocked: true, reason: { kind: "unverified" } }
+    : rejection !== undefined
+      ? { blocked: true, reason: { kind: "rejected", changeId: rejection.changeId } }
+      : shouldBlock(ctx.serverId, toolName, ctx.lockfile, [...ctx.pending, ...ctx.observed.values()]);
   if (!verdict.blocked) return FORWARD;
 
   const reason = describeReason(verdict.reason);

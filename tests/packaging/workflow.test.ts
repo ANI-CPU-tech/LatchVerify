@@ -30,13 +30,13 @@ describe("the build-installers workflow", () => {
 
   it("asks version.ts and check-link.ts only for what they support", () => {
     for (const [, format] of workflow.matchAll(/version\.ts (\w+)/g)) expect(["semver", "deb", "arch", "windows"]).toContain(format);
-    for (const [, mode] of workflow.matchAll(/\$check (\w+)/g)) expect(["client", "linked", "unlinked", "probe"]).toContain(mode);
+    for (const [, mode] of workflow.matchAll(/\$check (\w+)/g)) expect(["client", "linked", "pinned", "unlinked", "probe"]).toContain(mode);
   });
 
   it("installs, checks and uninstalls every installer it builds", () => {
     for (const name of ["windows", "linux"]) {
       const text = job(name);
-      for (const mode of ["client", "linked", "probe", "unlinked"]) expect(text, `${name} ${mode}`).toContain(`$check ${mode}`);
+      for (const mode of ["client", "linked", "probe", "pinned", "unlinked"]) expect(text, `${name} ${mode}`).toContain(`$check ${mode}`);
     }
     expect(job("windows")).toContain("unins000.exe");
     expect(job("linux")).toContain("sudo apt-get remove -y latchverify");
@@ -57,6 +57,29 @@ describe("the build-installers workflow", () => {
     expect(release).toContain("packaging/release-notes.ts");
     for (const file of ["*.exe", "*.deb", "*.tar.gz", "*.pkg.tar.zst", "SHA256SUMS"]) expect(release).toContain(`packages/${file}`);
     expect(release).toContain("fail_on_unmatched_files: true");
+  });
+
+  it("signs and uploads latest.json for full releases only, failing without the update key", () => {
+    const release = job("release");
+    expect(release).toContain("LATCH_UPDATE_SIGNING_KEY: ${{ secrets.LATCH_UPDATE_SIGNING_KEY }}");
+    expect(release).toContain("packaging/make-latest-json.ts");
+    expect(release).toMatch(/latest\.json/);
+    expect(release.indexOf("make-latest-json.ts")).toBeGreaterThan(release.indexOf("packaging/release-notes.ts"));
+  });
+
+  it("builds the desktop app into every installer and smoke-tests it", () => {
+    expect(job("windows")).toContain("packaging/build-desktop.ts build/stage win32 x64");
+    expect(job("linux")).toContain("packaging/build-desktop.ts build/stage linux x64");
+    expect(job("windows")).toContain('latchverify-desktop.exe" -ArgumentList "--smoke", "--hidden"');
+    expect(job("linux")).toContain("xvfb-run -a latchverify-desktop --smoke --hidden");
+  });
+
+  it("runs the tests on Windows without hiding failures, and in ci.yml on every push", () => {
+    expect(workflow).not.toContain("continue-on-error");
+    const ci = readFileSync(new URL(".github/workflows/ci.yml", root), "utf8");
+    expect(ci).toMatch(/^on:\n {2}push:\n {2}pull_request:$/m);
+    expect(ci).toContain("os: [ubuntu-24.04, windows-latest]");
+    for (const step of ["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm test"]) expect(ci).toContain(`run: ${step}`);
   });
 
   it("signs the Windows installer only when the certificate secret is set", () => {

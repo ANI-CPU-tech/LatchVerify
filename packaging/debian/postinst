@@ -1,5 +1,6 @@
 #!/bin/sh
-# Link Claude Code for the user who installed the package (see /usr/lib/latchverify/link-user).
+# List the MCP clients of the user who installed the package and how to connect them; connect
+# nothing without their say-so (see /usr/lib/latchverify/link-user).
 # On upgrades too: latch setup is idempotent and picks up servers added since.
 set -e
 case "$1" in

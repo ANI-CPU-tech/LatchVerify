@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { PixelLandscape } from "../art/PixelLandscape";
 import { CheckIcon } from "../components/icons";
-import { PageHeader, Panel, buttonClass } from "../components/ui";
+import type { SettingsPatch } from "@schema/index.js";
+import { PageHeader, Panel, Switch, buttonClass } from "../components/ui";
+import { saveSettings } from "../lib/api";
+import { describeError, useData } from "../lib/data";
+import { href } from "../lib/router";
 import { useTheme } from "../lib/theme";
 import { DEFAULT_SURFACE, SURFACE_STEP, surfaceAlpha } from "../lib/surface";
 import { SYSTEM_THEMES, THEMES, sceneFor, type ThemeId, type ThemePreference } from "../lib/themes";
@@ -121,6 +125,60 @@ function CardOpacity() {
   );
 }
 
+/** The background choices kept in settings.json, saved through the API as soon as they change. */
+function Background() {
+  const { settings, api, reload } = useData();
+  const [saving, setSaving] = useState<keyof SettingsPatch | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const current = settings.status === "ready" ? settings.data : null;
+  const change = async (key: "notifications" | "checkForUpdates" | "launchAtLogin", value: boolean) => {
+    setSaving(key);
+    setError(null);
+    try {
+      await saveSettings({ [key]: value });
+      reload();
+    } catch (failure) {
+      setError(describeError(failure));
+    } finally {
+      setSaving(null);
+    }
+  };
+  const rows: Array<{ key: "notifications" | "checkForUpdates" | "launchAtLogin"; label: string; detail: string }> = [
+    { key: "notifications", label: "Desktop notifications", detail: "When a tool change waits for review, when a call is blocked, and when a new MCP client is found." },
+    { key: "checkForUpdates", label: "Check for updates", detail: "Once a day. Nothing is downloaded or installed without your click." },
+    { key: "launchAtLogin", label: "Start at login", detail: "Keep LatchVerify watching your MCP clients in the background." },
+  ];
+  return (
+    <Panel title="Background">
+      {current === null ? (
+        <p className="text-sm text-muted-foreground">{api === "unreachable" ? "The review API is not running, so these settings cannot be read." : "Loading settings..."}</p>
+      ) : (
+        <ul className="divide-y">
+          {rows.map((row) => (
+            <li key={row.key} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+              <div>
+                <label htmlFor={`setting-${row.key}`} className="text-sm font-medium">
+                  {row.label}
+                </label>
+                <p className="text-xs text-muted-foreground">{row.detail}</p>
+              </div>
+              <Switch id={`setting-${row.key}`} label={row.label} checked={current[row.key]} disabled={saving !== null} onChange={(next) => void change(row.key, next)} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <p className="mt-3 text-xs text-muted-foreground">
+        Which MCP clients are connected is chosen on the <a className="text-primary hover:underline" href={href({ page: "servers" })}>MCP Servers</a> page.
+      </p>
+    </Panel>
+  );
+}
+
 export function Settings() {
   const { preference, setPreference } = useTheme();
   const [notSaved, setNotSaved] = useState(false);
@@ -183,6 +241,7 @@ export function Settings() {
         </fieldset>
       </Panel>
 
+      <Background />
       <CardOpacity />
 
       <Panel title="About this screen">

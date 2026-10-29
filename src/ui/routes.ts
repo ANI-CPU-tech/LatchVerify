@@ -1,10 +1,19 @@
+import { PassThrough } from "node:stream";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { SimulationRequestSchema, type LockFile, type PendingChange } from "../schema/index.js";
+import { runUnlink } from "../commands/setup.js";
+import { SUPPORTED_CLIENTS, type ClientId, type ProxyLaunch } from "../config/clients.js";
+import { syncClients } from "../daemon/sync.js";
+import { addPreset, demoRoot, findPreset, presetStates, removePreset } from "../dev/presets.js";
+import { SettingsPatchSchema, SimulationRequestSchema, type LockFile, type PendingChange } from "../schema/index.js";
+import { readSettings, settingsPath, updateSettings } from "../store/settings.js";
+import { clientsReport } from "./clients.js";
 import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
+import { addRejection, readRejected, writeRejected } from "../store/rejected.js";
+import { VERSION } from "../version.js";
 import { lockfileGitStatus } from "./git.js";
 import { SimulationInputError, simulateRugPull } from "./simulation.js";
 
@@ -16,7 +25,16 @@ export interface RouteDeps {
   reviewer: string;
   /** Clock for approval and event timestamps. Defaults to the system clock. */
   now?: () => Date;
+  /** Development mode (LATCH_DEV): also serve POST /api/simulate. Off by default. */
+  dev?: boolean;
+  /** settings.json (GET/PUT /api/settings, client answers). Defaults to the one beside the per-user lockfile. */
+  settingsPath?: string;
+  /** How entries linked by POST /api/clients/:id/connect start latch. Defaults to INSTALL_LAUNCH. */
+  launch?: ProxyLaunch;
 }
+
+/** Largest PUT /api/settings body. */
+export const MAX_SETTINGS_BYTES = 16 * 1024;
 
 /** Largest POST /api/simulate body: two tool lists, far more than any real server serves. */
 export const MAX_SIMULATION_BYTES = 1024 * 1024;
@@ -84,6 +102,8 @@ export function createRoutes(deps: RouteDeps): Hono {
   const reviewer = deps.reviewer.trim();
   if (reviewer.length === 0) throw new TypeError("createRoutes: reviewer must not be empty; approvals record who made them");
   const now = deps.now ?? (() => new Date());
+  const dev = deps.dev ?? false;
+  const settingsFile = deps.settingsPath ?? settingsPath();
   const app = new Hono();
 
   // Request guard, ahead of every route:
@@ -149,18 +169,21 @@ export function createRoutes(deps: RouteDeps): Hono {
     return c.json(findRecord(done.approved!, change.serverId, change.toolName));
   });
 
-  // Reject: drop the change from the queue and log it. latch.lock is untouched, so the tool stays
-  // blocked until a definition is approved. Returns 204.
+  // Reject: record the definition in rejected.json, drop the change from the queue and log it.
+  // latch.lock is untouched, and the proxies keep blocking calls to the tool for as long as the
+  // server serves this definition, across restarts. Returns 204.
   app.post("/api/pending/:id/reject", async (c) => {
+    const at = now();
     const done: { change?: PendingChange } = {};
-    await updatePending(deps.stateDir, (queue) => {
+    await updatePending(deps.stateDir, async (queue) => {
       done.change = pendingById(queue, c.req.param("id"));
+      await writeRejected(deps.stateDir, addRejection(await readRejected(deps.stateDir), done.change, at));
       return dequeue(queue, done.change.id);
     });
     const change = done.change!;
     await logEvent(deps.stateDir, {
       kind: "rejected",
-      at: now().toISOString(),
+      at: at.toISOString(),
       serverId: change.serverId,
       toolName: change.toolName,
       changeId: change.id,
@@ -168,37 +191,143 @@ export function createRoutes(deps: RouteDeps): Hono {
     return c.body(null, 204);
   });
 
+  // What is serving: the LatchVerify version, and whether development mode is on (the UI shows
+  // the Simulation page only then). Returns { version, dev }.
+  app.get("/api/info", (c) => c.json({ version: VERSION, dev }));
+
   // The newest events, oldest first. ?limit= defaults to DEFAULT_EVENT_LIMIT. Returns LatchEvent[].
   app.get("/api/events", async (c) => c.json(await readEvents(deps.stateDir, eventLimit(c.req.query("limit")))));
 
   // The approved state in latch.lock. Returns LockFile.
   app.get("/api/lockfile", async (c) => c.json(await readLockfile(deps.lockfilePath)));
 
-  // Whether latch.lock is committed: tracked, modified, last commit. Read-only. Returns LockfileGitStatus.
-  app.get("/api/lockfile/git", async (c) => c.json(await lockfileGitStatus(deps.lockfilePath)));
+  // The MCP clients on this machine, per client: answer, files, and each server's program, link
+  // and pin state. Never arguments or env. Returns ClientsReport.
+  app.get("/api/clients", async (c) => c.json(await clientsReport(await readLockfile(deps.lockfilePath), await readSettings(settingsFile))));
 
-  // Rehearse a rug pull in memory with the proxy's own pipeline (src/ui/simulation.ts). Reads and
-  // writes nothing, but is a POST, so it passes the same write guard. Returns SimulationResult.
-  app.post(
-    "/api/simulate",
-    bodyLimit({ maxSize: MAX_SIMULATION_BYTES, onError: (c) => c.json({ error: `the simulation body is over ${MAX_SIMULATION_BYTES} bytes` }, 413) }),
+  /** The client id in the path, or a 404. */
+  const clientParam = (id: string): ClientId => {
+    if (!(SUPPORTED_CLIENTS as readonly string[]).includes(id)) throw new ApiError(404, `no MCP client "${id}"`);
+    return id as ClientId;
+  };
+
+  // Connect: the user's yes. Recorded in settings.json, then the client is linked now (syncClients:
+  // its servers start behind latch proxy and are pinned on their first run). Returns ClientsReport.
+  app.post("/api/clients/:id/connect", async (c) => {
+    const client = clientParam(c.req.param("id"));
+    const settings = await updateSettings(settingsFile, { clients: { [client]: true } });
+    const result = await syncClients({ lockfilePath: deps.lockfilePath, stateDir: deps.stateDir, settings, ...(deps.launch === undefined ? {} : { launch: deps.launch }) });
+    for (const failure of result.failed) console.error(`[latch ui] connect ${client}: ${failure.serverId}: ${failure.reason}`);
+    return c.json(await clientsReport(await readLockfile(deps.lockfilePath), settings));
+  });
+
+  // Disconnect: the user's no. Every entry of the client gets its original command back and the
+  // answer is recorded (runUnlink). latch.lock is kept. Returns ClientsReport.
+  app.post("/api/clients/:id/disconnect", async (c) => {
+    const client = clientParam(c.req.param("id"));
+    const output = new PassThrough();
+    let text = "";
+    output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+    const code = await runUnlink({ client, dryRun: false, output, settingsPath: settingsFile });
+    if (code !== 0) throw new ApiError(409, text.replace(/\x1b\[[0-9;]*m/g, "").trim() || `could not disconnect ${client}`);
+    return c.json(await clientsReport(await readLockfile(deps.lockfilePath), await readSettings(settingsFile)));
+  });
+
+  // The user's settings (settings.json). Returns Settings.
+  app.get("/api/settings", async (c) => c.json(await readSettings(settingsFile)));
+
+  // Change settings: any subset of the fields, clients merged per client. Returns Settings.
+  app.put(
+    "/api/settings",
+    bodyLimit({ maxSize: MAX_SETTINGS_BYTES, onError: (c) => c.json({ error: `the settings body is over ${MAX_SETTINGS_BYTES} bytes` }, 413) }),
     async (c) => {
       let body: unknown;
       try {
         body = await c.req.json();
       } catch {
-        throw new ApiError(400, "the simulation body must be JSON");
+        throw new ApiError(400, "the settings body must be JSON");
       }
-      const request = SimulationRequestSchema.safeParse(body);
-      if (!request.success) throw new ApiError(400, `invalid simulation: ${request.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ")}`);
-      try {
-        return c.json(simulateRugPull(request.data, now()));
-      } catch (error) {
-        if (error instanceof SimulationInputError) throw new ApiError(400, error.message);
-        throw error;
-      }
+      const patch = SettingsPatchSchema.safeParse(body);
+      if (!patch.success) throw new ApiError(400, `invalid settings: ${patch.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ")}`);
+      return c.json(await updateSettings(settingsFile, patch.data));
     },
   );
+
+  // Whether latch.lock is committed: tracked, modified, last commit. Read-only. Returns LockfileGitStatus.
+  app.get("/api/lockfile/git", async (c) => c.json(await lockfileGitStatus(deps.lockfilePath)));
+
+  // Development mode only: the demo presets of the Dev Tools page (src/dev/presets.ts). In real use
+  // these routes do not exist and answer 404.
+  if (dev) {
+    const presetParam = (id: string) => {
+      const preset = findPreset(id);
+      if (preset === undefined) throw new ApiError(404, `no demo preset "${id}"`);
+      return preset;
+    };
+    /** The client named in a JSON body ({ client }); optional when `required` is false. */
+    const clientBody = async (c: { req: { json(): Promise<unknown> } }, required: boolean): Promise<ClientId | undefined> => {
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        body = {};
+      }
+      const client = typeof body === "object" && body !== null ? (body as { client?: unknown }).client : undefined;
+      if (client === undefined && !required) return undefined;
+      if (typeof client !== "string" || !(SUPPORTED_CLIENTS as readonly string[]).includes(client)) throw new ApiError(400, `client must be one of ${SUPPORTED_CLIENTS.join(", ")}`);
+      return client as ClientId;
+    };
+
+    // The presets, whether this checkout can run them, and where each is installed.
+    app.get("/api/dev/presets", async (c) => c.json({ available: demoRoot() !== undefined, presets: await presetStates(deps.lockfilePath) }));
+
+    // Add a preset to { client } with `latch add`. Returns { output } on success, 409 with it otherwise.
+    app.post("/api/dev/presets/:id/add", async (c) => {
+      const preset = presetParam(c.req.param("id"));
+      const client = (await clientBody(c, true))!;
+      if (demoRoot() === undefined) throw new ApiError(409, "the demo servers are not here: this is not a source checkout with demo/ and tsx");
+      const output = new PassThrough();
+      let text = "";
+      output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+      const code = await addPreset(preset, client, { lockfilePath: deps.lockfilePath, stateDir: deps.stateDir }, output);
+      const plain = text.replace(/\x1b\[[0-9;]*m/g, "").trim();
+      if (code !== 0) throw new ApiError(409, plain);
+      return c.json({ output: plain });
+    });
+
+    // Remove a preset from { client }, or from every client when none is named. Returns what was removed.
+    app.post("/api/dev/presets/:id/remove", async (c) => {
+      const preset = presetParam(c.req.param("id"));
+      const client = await clientBody(c, false);
+      return c.json(await removePreset(preset, client, { lockfilePath: deps.lockfilePath, stateDir: deps.stateDir }));
+    });
+  }
+
+  // Rehearse a rug pull in memory with the proxy's own pipeline (src/ui/simulation.ts). Reads and
+  // writes nothing, but is a POST, so it passes the same write guard. Returns SimulationResult.
+  // Development mode only: in real use the route does not exist and answers 404.
+  if (dev) {
+    app.post(
+      "/api/simulate",
+      bodyLimit({ maxSize: MAX_SIMULATION_BYTES, onError: (c) => c.json({ error: `the simulation body is over ${MAX_SIMULATION_BYTES} bytes` }, 413) }),
+      async (c) => {
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          throw new ApiError(400, "the simulation body must be JSON");
+        }
+        const request = SimulationRequestSchema.safeParse(body);
+        if (!request.success) throw new ApiError(400, `invalid simulation: ${request.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ")}`);
+        try {
+          return c.json(simulateRugPull(request.data, now()));
+        } catch (error) {
+          if (error instanceof SimulationInputError) throw new ApiError(400, error.message);
+          throw error;
+        }
+      },
+    );
+  }
 
   app.notFound((c) => c.json({ error: `no route for ${c.req.method} ${c.req.path}` }, 404));
 

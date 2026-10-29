@@ -1,5 +1,8 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -9,6 +12,7 @@ import {
   parseLine,
   readFrames,
   serialize,
+  serverEnvironment,
   spawnUpstream,
   writeLine,
   type Frame,
@@ -310,6 +314,56 @@ describe("readFrames", () => {
     expect(frames.map((f) => f.raw)).toEqual(['{"jsonrpc":"2.0","method":"a"}', '{"jsonrpc":"2.0","method":"b"}']);
   });
 
+  it("stops at a line longer than maxLineBytes, delivering the lines of earlier chunks", async () => {
+    const input = new PassThrough();
+    const raws: string[] = [];
+    let overflows = 0;
+    readFrames(input, (frame) => raws.push(frame.raw), { maxLineBytes: 8, onOverflow: () => overflows++ });
+    input.write("12345678\n");
+    await tick();
+    input.write("abc");
+    input.write("defgh");
+    input.write("ijk\nlater\n");
+    await tick();
+    expect(raws).toEqual(["12345678"]);
+    expect(overflows).toBe(1);
+  });
+
+  it("catches an oversized line that starts and ends inside one chunk", async () => {
+    const input = new PassThrough();
+    const raws: string[] = [];
+    let overflows = 0;
+    readFrames(input, (frame) => raws.push(frame.raw), { maxLineBytes: 4, onOverflow: () => overflows++ });
+    input.write("ok\nfar too long\nok\n");
+    await tick();
+    expect(raws).toEqual([]);
+    expect(overflows).toBe(1);
+  });
+
+  it("counts a long line across chunks in bytes, and resets at each terminator", async () => {
+    const input = new PassThrough();
+    const raws: string[] = [];
+    let overflows = 0;
+    readFrames(input, (frame) => raws.push(frame.raw), { maxLineBytes: 6, onOverflow: () => overflows++ });
+    input.write("abc");
+    input.write("def\r\n");
+    input.write("\u00e9\u00e9\u00e9\n");
+    await tick();
+    expect(raws).toEqual(["abcdef", "\u00e9\u00e9\u00e9"]);
+    expect(overflows).toBe(0);
+    input.write("\u00e9\u00e9\u00e9\u00e9");
+    await tick();
+    expect(overflows).toBe(1);
+  });
+
+  it("destroys the input on overflow by default", async () => {
+    const input = new PassThrough();
+    readFrames(input, () => {}, { maxLineBytes: 4 });
+    input.write("toolong");
+    await tick();
+    expect(input.destroyed).toBe(true);
+  });
+
   it("stops delivering frames once closed, even lines already buffered", async () => {
     const input = new PassThrough();
     const raws: string[] = [];
@@ -369,6 +423,18 @@ async function runNode(script: string, args: string[] = [], env?: NodeJS.Process
   return { child, raws, code };
 }
 
+describe("serverEnvironment", () => {
+  it("merges env over the base and drops LATCH_* variables in any case", () => {
+    const base = { PATH: "/bin", LATCH_LLM_API_KEY: "k", Latch_State_Dir: "/s", HOME: "/h" };
+    expect(serverEnvironment(base, { API_TOKEN: "t", LATCH_LOCKFILE_PATH: "/l", HOME: undefined })).toEqual({ PATH: "/bin", API_TOKEN: "t" });
+    expect(base).toHaveProperty("LATCH_LLM_API_KEY", "k");
+  });
+
+  it("copies the base when no env is given", () => {
+    expect(serverEnvironment({ PATH: "/bin" })).toEqual({ PATH: "/bin" });
+  });
+});
+
 describe("spawnUpstream", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -409,20 +475,50 @@ describe("spawnUpstream", () => {
   });
 
   it("inherits our environment when env is omitted", async () => {
-    vi.stubEnv("LATCH_TEST_INHERITED", "yes");
-    const { raws } = await runNode("console.log(process.env.LATCH_TEST_INHERITED)");
+    vi.stubEnv("MCP_TEST_INHERITED", "yes");
+    const { raws } = await runNode("console.log(process.env.MCP_TEST_INHERITED)");
     expect(raws).toEqual(["yes"]);
   });
 
   it("merges env over our environment, and undefined removes a variable", async () => {
-    vi.stubEnv("LATCH_TEST_INHERITED", "yes");
-    vi.stubEnv("LATCH_TEST_REMOVED", "yes");
+    vi.stubEnv("MCP_TEST_INHERITED", "yes");
+    vi.stubEnv("MCP_TEST_REMOVED", "yes");
     const { raws } = await runNode(
-      "const e = process.env; console.log(JSON.stringify([e.LATCH_TEST_INHERITED, e.LATCH_TEST_ADDED, e.LATCH_TEST_REMOVED ?? null]))",
+      "const e = process.env; console.log(JSON.stringify([e.MCP_TEST_INHERITED, e.MCP_TEST_ADDED, e.MCP_TEST_REMOVED ?? null]))",
       [],
-      { LATCH_TEST_ADDED: "1", LATCH_TEST_REMOVED: undefined },
+      { MCP_TEST_ADDED: "1", MCP_TEST_REMOVED: undefined },
     );
     expect(JSON.parse(raws[0]!)).toEqual(["yes", "1", null]);
+  });
+
+  it("keeps LatchVerify's own LATCH_* variables from the server, inherited or given", async () => {
+    vi.stubEnv("LATCH_LLM_API_KEY", "secret-key");
+    vi.stubEnv("LATCH_LOCKFILE_PATH", "/home/user/latch.lock");
+    vi.stubEnv("MCP_TEST_INHERITED", "yes");
+    const { raws } = await runNode(
+      "console.log(JSON.stringify(Object.keys(process.env).filter((k) => /^latch_|^MCP_TEST_/i.test(k)).sort()))",
+      [],
+      { LATCH_STATE_DIR: "/home/user/.latch", latch_lower: "x", MCP_TEST_ADDED: "1" },
+    );
+    expect(JSON.parse(raws[0]!)).toEqual(["MCP_TEST_ADDED", "MCP_TEST_INHERITED"]);
+  });
+
+  // Node refuses to start .cmd and .bat files without a shell (CVE-2024-27980), and npx, pnpm and
+  // most installed MCP servers are .cmd shims on Windows.
+  it.runIf(process.platform === "win32")("starts a .cmd shim found on PATH by its bare name", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "latch-cmd-"));
+    try {
+      await writeFile(join(dir, "latch-shim-test.cmd"), `@"${process.execPath}" -e "console.log(JSON.stringify(process.argv.slice(1)))" %*\r\n`);
+      vi.stubEnv("PATH", `${dir};${process.env.PATH ?? ""}`);
+      const child = spawnUpstream("latch-shim-test", ["hello world", "x"]);
+      const raws: string[] = [];
+      readFrames(child.stdout, (frame) => raws.push(frame.raw));
+      const [code] = (await once(child, "close")) as [number | null];
+      expect(code).toBe(0);
+      expect(JSON.parse(raws[0]!)).toEqual(["hello world", "x"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("reports a missing command as an error event instead of throwing", async () => {

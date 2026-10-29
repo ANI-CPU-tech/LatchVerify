@@ -1,10 +1,10 @@
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { AppShell, NAV } from "./components/AppShell";
 import { PageTransition } from "./components/PageTransition";
-import { EmptyState, Panel, buttonClass } from "./components/ui";
-import { DataProvider } from "./lib/data";
+import { EmptyState, LoadingState, Panel, buttonClass } from "./components/ui";
+import { DataProvider, useData } from "./lib/data";
 import { href, type Route } from "./lib/router";
-import { useRoute } from "./lib/useRoute";
+import { navigate, useRoute } from "./lib/useRoute";
 import { ThemeProvider } from "./lib/theme";
 import { Audit } from "./pages/Audit";
 import { GitCi } from "./pages/GitCi";
@@ -12,8 +12,44 @@ import { Overview } from "./pages/Overview";
 import { Review } from "./pages/Review";
 import { Servers } from "./pages/Servers";
 import { Settings } from "./pages/Settings";
-import { Simulation } from "./pages/Simulation";
 import { Tools } from "./pages/Tools";
+
+/**
+ * Demo material, development mode only. Loaded on first visit, so its code (and the test fixtures
+ * it rehearses with) is a separate chunk that a real install never downloads.
+ */
+const Simulation = lazy(() => import("./pages/Simulation").then((module) => ({ default: module.Simulation })));
+
+function NotFound({ path }: { path: string }) {
+  return (
+    <Panel>
+      <EmptyState title="Page not found">
+        <p>
+          Nothing lives at <code className="font-mono">{path}</code>.
+        </p>
+        <a href={href({ page: "overview" })} className={`${buttonClass("secondary", "sm")} mt-3`}>
+          Go to Overview
+        </a>
+      </EmptyState>
+    </Panel>
+  );
+}
+
+const DevTools = lazy(() => import("./pages/DevTools").then((module) => ({ default: module.DevTools })));
+
+/**
+ * A development-mode page (Simulation, Dev Tools) when the API says development mode is on. In
+ * normal mode it leaves no trace: a link to it goes to Overview, replacing the history entry.
+ */
+function DevOnly({ loading, children }: { loading: string; children: ReactNode }) {
+  const { info, dev } = useData();
+  const hidden = info.status !== "loading" && !dev;
+  useEffect(() => {
+    if (hidden) navigate({ page: "overview" }, { replace: true });
+  }, [hidden]);
+  if (!dev) return info.status === "loading" ? <LoadingState label="Loading..." /> : null;
+  return <Suspense fallback={<LoadingState label={loading} />}>{children}</Suspense>;
+}
 
 function Page({ route }: { route: Route }) {
   switch (route.page) {
@@ -30,41 +66,48 @@ function Page({ route }: { route: Route }) {
     case "ci":
       return <GitCi />;
     case "simulation":
-      return <Simulation />;
+      return (
+        <DevOnly loading="Loading the simulation...">
+          <Simulation />
+        </DevOnly>
+      );
+    case "devtools":
+      return (
+        <DevOnly loading="Loading the dev tools...">
+          <DevTools />
+        </DevOnly>
+      );
     case "settings":
       return <Settings />;
     case "not-found":
-      return (
-        <Panel>
-          <EmptyState title="Page not found">
-            <p>
-              Nothing lives at <code className="font-mono">{route.path}</code>.
-            </p>
-            <a href={href({ page: "overview" })} className={`${buttonClass("secondary", "sm")} mt-3`}>
-              Go to Overview
-            </a>
-          </EmptyState>
-        </Panel>
-      );
+      return <NotFound path={route.path} />;
   }
 }
 
-export function App() {
+/** The page for the current route, titled after its nav entry; a hidden dev-only page is "Not found". */
+function Routed() {
   const route = useRoute();
-  const label = NAV.find((item) => item.page === route.page)?.label ?? "Not found";
+  const { dev } = useData();
+  const label = NAV.find((item) => item.page === route.page && (dev || !item.devOnly))?.label ?? "Not found";
 
   useEffect(() => {
     document.title = `${label} · LatchVerify`;
   }, [label]);
 
   return (
+    <AppShell current={route.page}>
+      <PageTransition pageKey={route.page}>
+        <Page route={route} />
+      </PageTransition>
+    </AppShell>
+  );
+}
+
+export function App() {
+  return (
     <ThemeProvider>
       <DataProvider>
-        <AppShell current={route.page}>
-          <PageTransition pageKey={route.page}>
-            <Page route={route} />
-          </PageTransition>
-        </AppShell>
+        <Routed />
       </DataProvider>
     </ThemeProvider>
   );

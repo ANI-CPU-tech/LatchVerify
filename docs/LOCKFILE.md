@@ -16,8 +16,9 @@ Schema: `src/schema/lockfile.ts` and `src/schema/tool.ts`. Full example:
   "servers": {
     "weather": {                           // serverId: the key used in `latch proxy --server`
       "transport": "stdio",                // "stdio" | "http"
-      "command": "npx",                    // how the real server is launched
-      "args": ["tsx", "demo/weather-server.ts"],
+      "program": "npx",                    // the program it runs, for people; never a path or an argument
+      "launch": "<sha256 hex>",            // hash of the launch line [command, ...args]; the line itself is never stored
+      // "trustOnFirstUse": true,          // linked, not run yet: the proxy pins its tools on the first run
       "tools": [
         {
           "name": "get_forecast",
@@ -126,6 +127,20 @@ latch verify --json     # machine-readable report
 runs the full pipeline, and compares the result with the pinned records. It writes
 nothing.
 
+`latch.lock` goes to git, and a server's arguments can hold a key (`--token ...`), so it keeps
+only a hash of each launch line. `verify` takes the launch lines from MCP config files instead,
+and uses a launch only when its server id and hash match `latch.lock`:
+
+```sh
+latch verify --config .mcp.json   # the project's committed MCP servers; repeatable
+latch verify                      # ./.mcp.json if it exists, then this machine's client configs
+```
+
+Servers are started with the job's own environment only, never env values from a config, so
+CI passes secrets the usual way. A server with no matching launch is reported as an error (exit
+3) that says what to pass. The `--json` report names each server's `program`, never its
+arguments; its `version` is 2.
+
 | Exit code | Meaning |
 |---|---|
 | `0` | Every live tool matches its pin, or differs only at tier 0/1 |
@@ -147,8 +162,9 @@ when no proxy is running.
 ## Which `latch.lock` a command uses
 
 1. `--lockfile <path>`, then `LATCH_LOCKFILE_PATH`. Entries wrapped by `latch init`,
-   `latch add` and `latch setup` set `LATCH_LOCKFILE_PATH`, so the proxy always opens the
-   file it was linked to, wherever the client starts it.
+   `latch add` and `latch setup` pass `--lockfile` (and `--state-dir`) in their arguments,
+   never in their env, so the proxy always opens the file it was linked to, wherever the
+   client starts it.
 2. `./latch.lock`, the project's committed file.
 3. Only for `latch review` and `latch verify`, when there is no `./latch.lock`: the
    **per-user lockfile**, if it exists. `latch setup` and the installers create it at
@@ -156,7 +172,7 @@ when no proxy is running.
    (Linux, or `$XDG_CONFIG_HOME/latchverify/`) or
    `~/Library/Application Support/LatchVerify/latch.lock` (macOS).
 
-`latch setup` itself skips step 2: without a flag or `LATCH_LOCKFILE_PATH`, it always links
+`latch setup` and `latch watch` skip step 2: without a flag or `LATCH_LOCKFILE_PATH`, they always link
 to the per-user lockfile, so running it inside a project does not touch that project's file.
 
 The state directory (`.latch/`) defaults to the lockfile's own directory, so a per-user
@@ -171,7 +187,14 @@ Teams that want reviewed approvals keep a committed `latch.lock` in the project 
 
 | Path | Contents |
 |---|---|
-| `.latch/pending.json` | Review queue (`PendingChange[]`) with before/after records and findings |
-| `.latch/events.jsonl` | Append-only log of every proxy and CLI decision |
+| `.latch/pending.json` | Review queue (`PendingChange[]`) with before/after records, findings and the served description |
+| `.latch/rejected.json` | Definitions a reviewer rejected (server, tool, composite hash); calls to them stay blocked |
+| `.latch/events.jsonl` | Append-only log of every proxy and CLI decision; at 5 MB it moves to `events.1.jsonl` and a new one starts |
+| `.latch/watch.pid` | The running `latch watch`, so a second one refuses to start |
+| `settings.json` (beside the per-user lockfile) | Which clients the user connected (true) or declined (false), and the notification, update and login switches |
 
-Both are listed in `.gitignore`. `latch.lock` is deliberately **not** listed.
+Lockfiles written before `program` and `launch` existed kept each server's `command` and
+`args`. They are still read: the launch line is hashed and dropped, and the next write leaves it
+out of the file.
+
+`.latch/` is listed in `.gitignore`. `latch.lock` is deliberately **not** listed.

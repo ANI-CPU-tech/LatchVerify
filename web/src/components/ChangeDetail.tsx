@@ -52,6 +52,16 @@ function SegmentChanges({ change }: { change: ReviewItem["change"] }) {
   );
 }
 
+/** The description the server serves now, as plain text: what the model would have read. */
+function ServedDescription({ text }: { text: string }) {
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs font-medium text-muted-foreground">Description the server now serves</h3>
+      <p className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">{text}</p>
+    </div>
+  );
+}
+
 /** What the reviewer can do with a change. Absent when the screen shows sample data. */
 export interface ChangeActions {
   onApprove: (id: string) => Promise<void>;
@@ -127,7 +137,14 @@ export function ChangeDetail({ item, actions }: { item: ReviewItem; actions?: Ch
           {
             id: "definition",
             label: "What changed",
-            content: item.descriptionDiff ? <TextDiff parts={item.descriptionDiff} /> : <SegmentChanges change={change} />,
+            content: item.descriptionDiff ? (
+              <TextDiff parts={item.descriptionDiff} />
+            ) : (
+              <div className="space-y-3">
+                <SegmentChanges change={change} />
+                {item.descriptionAfter !== null && <ServedDescription text={item.descriptionAfter} />}
+              </div>
+            ),
           },
           {
             id: "json",

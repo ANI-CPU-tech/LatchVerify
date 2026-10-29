@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -10,6 +9,7 @@ import type { LockFile, PendingChange } from "../schema/index.js";
 import { appendEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
+import { addRejection, readRejected, writeRejected } from "../store/rejected.js";
 import { defaultReviewer, startUiServer } from "../ui/server.js";
 import { plural, printable } from "./text.js";
 
@@ -32,10 +32,12 @@ export interface ReviewOptions {
   output?: Writable;
   /** Who approvals are recorded as. Defaults to defaultReviewer(): LATCH_REVIEWER, git user.email, OS user. */
   reviewer?: string;
+  /** --ui: development mode (LATCH_DEV), which serves the Simulation page's API. */
+  dev?: boolean;
   /** --ui: the built review UI to serve. Defaults to dist/web of this latchverify install. */
   staticDir?: string;
-  /** --ui: opens the review UI's URL. Defaults to the platform's browser opener. */
-  openBrowser?: (url: string) => void;
+  /** --ui: called with the review UI's URL once it is served (tests use it). No browser is opened. */
+  onReady?: (url: string) => void;
   /** --ui: resolves when the server should stop. Defaults to the first SIGINT or SIGTERM. */
   until?: Promise<void>;
 }
@@ -51,8 +53,9 @@ const BUILT_UI_DIRS = [new URL("../web/", import.meta.url), new URL("../../dist/
  * - Approve: applyApproval, write latch.lock, then drop the change from the queue and log it.
  *   latch.lock goes first, as in the review API: a crash in between leaves the change queued
  *   and approving again is idempotent. A tier-3 approval needs a second confirmation.
- * - Reject: drop the change from the queue and log it. latch.lock is untouched, so the tool
- *   stays blocked until a definition is approved.
+ * - Reject: record the definition in rejected.json, drop the change from the queue and log it.
+ *   latch.lock is untouched, and the proxy blocks calls to the tool, across restarts, for as long
+ *   as the server serves that definition.
  * - Skip leaves it queued; Quit (or Ctrl+C) stops, keeping every decision made so far.
  *
  * Each decision re-reads latch.lock and the queue first, because a running proxy or the review
@@ -87,7 +90,7 @@ export async function runReview(options: ReviewOptions): Promise<number> {
     say(pc.bold(`latch review: ${plural(queue.length, "pending change")}, highest tier first`));
     for (const change of queue) say(), say(renderChange(change, lock));
     say();
-    say(`decide in a terminal with \`latch review\`, or in the browser with \`latch review --ui\``);
+    say(`decide in a terminal with \`latch review\`, or in the LatchVerify app`);
     return 0;
   }
 
@@ -106,7 +109,7 @@ export async function runReview(options: ReviewOptions): Promise<number> {
       message: `Decide on ${printable(`${change.serverId}/${change.toolName}`)}`,
       options: [
         { value: "approve", label: "Approve", hint: "pin this definition in latch.lock" },
-        { value: "reject", label: "Reject", hint: "drop it from the queue; the tool stays blocked" },
+        { value: "reject", label: "Reject", hint: "the tool stays blocked while the server serves this definition" },
         { value: "skip", label: "Skip", hint: "decide later" },
         { value: "quit", label: "Quit" },
       ],
@@ -159,7 +162,7 @@ export async function runReview(options: ReviewOptions): Promise<number> {
   return tally.failed > 0 ? 1 : 0;
 }
 
-/** `latch review --ui`: serve the review API and built UI until stopped, opening the browser on it. */
+/** `latch review --ui`: serve the review API and built UI until stopped; LatchVerify opens nothing itself. */
 async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: string, say: (line?: string) => void): Promise<number> {
   if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65_535) {
     throw new Error(`latch review: --port must be a whole number from 0 to 65535, got ${String(options.port)}`);
@@ -176,7 +179,7 @@ async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: s
 
   const reviewer = (options.reviewer ?? defaultReviewer()).trim();
   if (reviewer === "") throw new Error("latch review: no reviewer name; set LATCH_REVIEWER or git config user.email");
-  const start = (port: number) => startUiServer({ port, lockfilePath, stateDir, reviewer, staticDir });
+  const start = (port: number) => startUiServer({ port, lockfilePath, stateDir, reviewer, staticDir, dev: options.dev });
   const inUse = (error: unknown) => (error as NodeJS.ErrnoException).code === "EADDRINUSE";
   let handle;
   try {
@@ -194,7 +197,8 @@ async function serveUi(options: ReviewOptions, lockfilePath: string, stateDir: s
     say(pc.yellow(`port ${options.port} is in use (often an earlier \`latch review --ui\` that is still running); using a free port instead`));
   }
   say(`review UI on ${handle.url} (approvals are recorded as ${printable(reviewer)}); press Ctrl+C to stop`);
-  (options.openBrowser ?? ((url: string) => openInBrowser(url, say)))(handle.url);
+  say(`open ${handle.url} in the LatchVerify app or a browser; LatchVerify opens nothing itself`);
+  options.onReady?.(handle.url);
 
   try {
     await (options.until ?? untilSignal());
@@ -216,15 +220,6 @@ function untilSignal(): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });
-}
-
-/** Opens `url` with the platform's opener, saying where to go if that fails. */
-function openInBrowser(url: string, say: (line?: string) => void): void {
-  const [command, args] =
-    process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
-  const child = spawn(command, args, { stdio: "ignore", detached: true, windowsHide: true });
-  child.on("error", () => say(`could not open a browser; open ${url} yourself`));
-  child.unref();
 }
 
 /** Approve change `id` as it is in the queue now; "gone" when it is no longer there. */
@@ -251,16 +246,23 @@ async function approve(lockfilePath: string, stateDir: string, id: string, revie
   return "done";
 }
 
-/** Reject change `id`; "gone" when it is no longer in the queue. */
+/**
+ * Reject change `id`: record its definition in rejected.json, so calls stay blocked after the
+ * proxy restarts, then drop it from the queue. "gone" when it is no longer in the queue.
+ */
 async function reject(stateDir: string, id: string): Promise<"done" | "gone"> {
+  const now = new Date();
   const found: { change?: PendingChange } = {};
-  await updatePending(stateDir, (queue) => {
+  await updatePending(stateDir, async (queue) => {
     found.change = queue.find((entry) => entry.id === id);
-    return found.change === undefined ? queue : dequeue(queue, id);
+    if (found.change === undefined) return queue;
+    // The rejection first: a crash in between leaves the change queued, and rejecting it again is idempotent.
+    await writeRejected(stateDir, addRejection(await readRejected(stateDir), found.change, now));
+    return dequeue(queue, id);
   });
   const { change } = found;
   if (change === undefined) return "gone";
-  await logEvent(stateDir, { kind: "rejected", at: new Date().toISOString(), serverId: change.serverId, toolName: change.toolName, changeId: id });
+  await logEvent(stateDir, { kind: "rejected", at: now.toISOString(), serverId: change.serverId, toolName: change.toolName, changeId: id });
   return "done";
 }
 
@@ -275,9 +277,12 @@ async function logEvent(stateDir: string, event: Parameters<typeof appendEvent>[
 
 const TIER_LABEL = ["auto-passed", "auto-passed", "blocked for review", "hard block"] as const;
 
+/** Characters of the served description shown on a card; the review UI shows all of it. */
+const MAX_CARD_DESCRIPTION = 600;
+
 /**
  * One change as a card: tier and what the proxy does about it, the tool, what changed in its
- * definition, the capability delta and every finding. Strings from the server go through
+ * definition, the description it now serves, the capability delta and every finding. Strings from the server go through
  * printable(), so they cannot carry terminal escapes.
  */
 export function renderChange(change: PendingChange, lock: LockFile): string {
@@ -287,6 +292,11 @@ export function renderChange(change: PendingChange, lock: LockFile): string {
     `  detected  ${change.detectedAt}`,
     `  changed   ${describeDefinitionChange(change)}`,
   ];
+  if (change.description !== undefined) {
+    const shown = [...change.description];
+    const text = shown.length > MAX_CARD_DESCRIPTION ? `${shown.slice(0, MAX_CARD_DESCRIPTION).join("")}…` : change.description;
+    lines.push(`  serves    ${pc.dim('"')}${printable(text)}${pc.dim('"')}`);
+  }
   if (findRecord(lock, change.serverId, change.toolName)?.hashes.composite === change.after.hashes.composite) {
     lines.push(pc.dim("  note      latch.lock already pins this definition; approving only clears it from the queue"));
   }

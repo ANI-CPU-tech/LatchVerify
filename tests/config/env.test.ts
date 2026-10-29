@@ -14,6 +14,7 @@ const defaults = {
   lockfilePath: resolve("latch.lock"),
   stateDir: resolve(".latch"),
   logLevel: "info",
+  dev: false,
 };
 
 /** The error loadEnv throws for `env`. */
@@ -44,6 +45,7 @@ describe("loadEnv", () => {
         LATCH_LOCKFILE_PATH: "./latch.lock",
         LATCH_STATE_DIR: "./.latch",
         LATCH_LOG_LEVEL: "info",
+        LATCH_DEV: "",
       }),
     ).toEqual(defaults);
     expect(loadEnv({ LATCH_LLM_API_KEY: "   ", LATCH_UI_PORT: " ", LATCH_LOG_LEVEL: "" })).toEqual(defaults);
@@ -60,6 +62,7 @@ describe("loadEnv", () => {
         LATCH_LOCKFILE_PATH: "/srv/repo/latch.lock",
         LATCH_STATE_DIR: "state",
         LATCH_LOG_LEVEL: "Debug",
+        LATCH_DEV: " 1 ",
       }),
     ).toEqual({
       llmApiKey: "sk-ant-test",
@@ -70,6 +73,7 @@ describe("loadEnv", () => {
       lockfilePath: resolve("/srv/repo/latch.lock"),
       stateDir: resolve("state"),
       logLevel: "debug",
+      dev: true,
     });
   });
 
@@ -86,6 +90,11 @@ describe("loadEnv", () => {
     for (const value of ["false", "0", "no", "off", "False"]) {
       expect(loadEnv({ LATCH_LLM_ENABLED: value }).llmEnabled, value).toBe(false);
     }
+  });
+
+  it("accepts every boolean spelling for LATCH_DEV", () => {
+    for (const value of ["true", "1", "yes", "on", "Yes"]) expect(loadEnv({ LATCH_DEV: value }).dev, value).toBe(true);
+    for (const value of ["false", "0", "no", "off", "OFF"]) expect(loadEnv({ LATCH_DEV: value }).dev, value).toBe(false);
   });
 
   it("accepts every log level, in any case", () => {
@@ -116,6 +125,7 @@ describe("loadEnv", () => {
 
   it("rejects an unrecognized boolean", () => {
     expect(failure({ LATCH_LLM_ENABLED: "maybe" })).toContain('LATCH_LLM_ENABLED must be true or false, got "maybe"');
+    expect(failure({ LATCH_DEV: "dev" })).toContain('LATCH_DEV must be true or false, got "dev"');
   });
 
   it("refuses the LLM pass without an API key", () => {
@@ -197,6 +207,21 @@ describe("loadDotEnv", () => {
       loadDotEnv(path);
       expect(loadEnv()).toMatchObject({ uiPort: 9001, logLevel: "error" });
       expect(() => loadDotEnv(join(dir, "missing.env"))).not.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads only LATCH_* variables, leaving a project's other secrets out of process.env", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "latch-env-"));
+    try {
+      const path = join(dir, ".env");
+      await writeFile(path, "OPENAI_API_KEY=sk-project\nLATCH_REVIEWER=alice\n");
+      vi.stubEnv("OPENAI_API_KEY", undefined);
+      vi.stubEnv("LATCH_REVIEWER", undefined);
+      loadDotEnv(path);
+      expect(process.env.OPENAI_API_KEY).toBeUndefined();
+      expect(process.env.LATCH_REVIEWER).toBe("alice");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

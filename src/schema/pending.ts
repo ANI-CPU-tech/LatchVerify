@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { FindingSchema } from "./capability.js";
-import { ToolRecordSchema } from "./tool.js";
+import { Sha256HexSchema, ToolRecordSchema } from "./tool.js";
 
 /**
  * Change tiers.
@@ -20,6 +20,9 @@ export const CapabilityDeltaSchema = z.object({
 });
 export type CapabilityDelta = z.infer<typeof CapabilityDeltaSchema>;
 
+/** Longest served description kept on a pending change, in UTF-16 code units. */
+export const MAX_SERVED_DESCRIPTION = 16_384;
+
 /** A detected tool change awaiting (or exempt from) human review. Lives in .latch/, not git. */
 export const PendingChangeSchema = z.object({
   id: z.string().min(1),
@@ -32,5 +35,27 @@ export const PendingChangeSchema = z.object({
   after: ToolRecordSchema,
   capabilityDelta: CapabilityDeltaSchema,
   findings: z.array(FindingSchema),
+  /**
+   * The description the server served with `after`, so a reviewer reads what the model would
+   * have read (latch.lock keeps only hashes). Cut to MAX_SERVED_DESCRIPTION characters. Absent
+   * when the tool had no description or could not be analyzed, and in queues written before it
+   * was recorded.
+   */
+  description: z.string().max(MAX_SERVED_DESCRIPTION + 100).optional(),
 });
 export type PendingChange = z.infer<typeof PendingChangeSchema>;
+
+/**
+ * A definition a reviewer rejected: the served tool whose composite hash it was. Kept in
+ * .latch/rejected.json so the rejection outlives the proxy session, and a call to the tool stays
+ * blocked for as long as the server serves exactly that definition.
+ */
+export const RejectionSchema = z.object({
+  serverId: z.string().min(1),
+  toolName: z.string().min(1),
+  composite: Sha256HexSchema,
+  tier: TierSchema,
+  changeId: z.string().min(1),
+  rejectedAt: z.iso.datetime(),
+});
+export type Rejection = z.infer<typeof RejectionSchema>;

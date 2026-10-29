@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LlmError } from "../../src/analyze/llm.js";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
-import { MAX_OWN_PAGES, routeFrame, type InterceptorContext } from "../../src/proxy/interceptor.js";
+import { MAX_OWN_PAGES, WITHHELD_DESCRIPTION, routeFrame, type InterceptorContext } from "../../src/proxy/interceptor.js";
 import { parseLine, type Direction, type JsonRpcRequest } from "../../src/proxy/transport.js";
 import { LockFileSchema, type LockFile, type McpTool } from "../../src/schema/index.js";
 import { readEvents } from "../../src/store/events.js";
 import { applyApproval } from "../../src/store/lockfile.js";
 import { readPending } from "../../src/store/pending.js";
+import { addRejection } from "../../src/store/rejected.js";
 
 const exampleLock = (): LockFile =>
   LockFileSchema.parse(JSON.parse(readFileSync(new URL("../../latch.lock.example", import.meta.url), "utf8")));
@@ -38,6 +39,7 @@ async function setup(overrides: Partial<InterceptorContext> = {}) {
     serverId: "weather",
     lockfile: exampleLock(),
     pending: [],
+    rejected: [],
     inflight: new Map(),
     specVersion: null,
     stateDir,
@@ -134,7 +136,7 @@ describe("onToolsList", () => {
 
   it("queues the rug pull, persists it and logs each change", async () => {
     const { listTools, ctx, kinds, logs, stateDir } = await setup({ specVersion: "2025-06-18" });
-    expect(await listTools(poisoned)).toEqual(FORWARD);
+    expect(await listTools(poisoned)).toMatchObject({ action: "rewrite" });
     expect(ctx.pending.map((c) => [c.toolName, c.tier])).toEqual([
       ["get_forecast", 3],
       ["read_config", 2],
@@ -150,6 +152,29 @@ describe("onToolsList", () => {
     );
     expect(logs[0]).toMatch(/^weather\/get_forecast: tier 3 change hard-blocked: Critical pattern finding/);
     expect(logs[1]).toMatch(/^weather\/read_config: tier 2 change blocked for review: Gained filesystem\.read/);
+  });
+
+  it("passes tier-3 tools on with only their name, and every other tool untouched", async () => {
+    const { listTools, logs } = await setup();
+    const decision = await listTools(poisoned);
+    const tools = (decision as { message: { result: { tools: McpTool[] } } }).message.result.tools;
+    expect(tools.map((t) => t.name)).toEqual(poisoned.map((t) => t.name));
+    for (const [i, tool] of tools.entries()) {
+      if (["get_forecast", "run_diagnostics", "sync_alerts"].includes(tool.name)) {
+        expect(tool).toEqual({ name: tool.name, description: WITHHELD_DESCRIPTION, inputSchema: { type: "object", properties: {} } });
+      } else {
+        expect(tool).toEqual(poisoned[i]);
+      }
+    }
+    expect(decision).toMatchObject({ message: { jsonrpc: "2.0", id: 2 } });
+    expect(logs).toContain("weather: withheld the description of 3 tier-3 tool(s) from the client: get_forecast, run_diagnostics, sync_alerts");
+  });
+
+  it("forwards a list without tier-3 changes unchanged", async () => {
+    const { listTools } = await setup();
+    expect(await listTools([...benign, { name: "ping", description: "Check the server is up.", inputSchema: { type: "object" } }])).toEqual(
+      FORWARD,
+    );
   });
 
   it("does not churn change ids when the same list arrives again", async () => {
@@ -252,7 +277,7 @@ describe("onToolsList", () => {
     dirs.push(blocker);
     await writeFile(blocker, "");
     const { listTools, ctx, logs } = await setup({ stateDir: blocker });
-    expect(await listTools(poisoned)).toEqual(FORWARD);
+    expect(await listTools(poisoned)).toMatchObject({ action: "rewrite" });
     expect(ctx.pending).toHaveLength(4);
     expect(logs.some((line) => line.startsWith("could not write the pending queue:"))).toBe(true);
     expect(logs.some((line) => line.startsWith("could not write the event log:"))).toBe(true);
@@ -302,9 +327,14 @@ describe("onToolsList", () => {
     expect(ctx.pending).toEqual([]);
     expect(ctx.observed.size).toBe(0);
     expect(ctx.verified).toBe(true);
-    expect(logs).toEqual(["stranger: not in latch.lock, so its tools are blocked as unpinned; run `latch init` to pin them"]);
+    expect(logs).toEqual([
+      "stranger: not in latch.lock, so its tools are blocked as unpinned; run `latch init` to pin them",
+      expect.stringMatching(/^stranger: withheld the description of \d+ tier-3 tool\(s\) from the client: /),
+    ]);
     await expect(readFile(join(stateDir, "pending.json"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(await fromClient(call(5, "get_forecast"))).toMatchObject({ message: { error: { data: { reason: { kind: "unpinned" } } } } });
+    expect(await fromClient(call(5, "get_forecast"))).toMatchObject({
+      message: { error: { message: expect.stringContaining("run `latch init`"), data: { reason: { kind: "server_unpinned" } } } },
+    });
     expect(await kinds()).toEqual(["tools_listed", "call_blocked"]);
   });
 
@@ -336,6 +366,41 @@ const blocked = (id: number | string, message: string, reason: unknown) => ({
 });
 
 describe("onToolsCall", () => {
+  it("keeps a rejected definition blocked after a restart, without queueing it again, whatever its tier", async () => {
+    const reworded = [{ ...benign[0]!, description: "Fetch the forecast for a location." }, benign[1]!];
+    const [tier0] = analyzeToolList("weather", { tools: reworded }, exampleLock(), null, new Date())!.changes;
+    const [, readConfig] = analyzeToolList("weather", { tools: poisoned }, exampleLock(), null, new Date())!.changes;
+    expect([tier0!.change.tier, readConfig!.change.tier]).toEqual([0, 2]);
+    const rejected = addRejection(addRejection([], tier0!.change, new Date()), readConfig!.change, new Date());
+
+    const { ctx, listTools, fromClient, logs, kinds } = await setup({ rejected });
+    await listTools(reworded);
+    expect(ctx.pending).toEqual([]);
+    expect(logs).toContain(`weather/get_forecast: serves the definition rejected in ${tier0!.change.id}; its calls stay blocked`);
+    expect(await fromClient(call(5, "get_forecast"))).toEqual(
+      blocked(
+        5,
+        'LatchVerify blocked "get_forecast": a reviewer rejected the definition this server now serves; it stays blocked until the server changes it',
+        { kind: "rejected", changeId: tier0!.change.id },
+      ),
+    );
+    expect(await fromClient(call(6, "get_alerts"))).toEqual(FORWARD);
+
+    await listTools(poisoned, 3);
+    expect(ctx.pending.map((c) => c.toolName)).toEqual(["get_forecast", "run_diagnostics", "sync_alerts"]);
+    expect(await fromClient(call(7, "read_config"))).toMatchObject({ message: { error: { data: { reason: { kind: "rejected" } } } } });
+    expect((await kinds()).filter((k) => k === "call_blocked")).toHaveLength(2);
+  });
+
+  it("lets a rejected tool through again once the server serves its approved definition", async () => {
+    const reworded = [{ ...benign[0]!, description: "Fetch the forecast for a location." }, benign[1]!];
+    const [tier0] = analyzeToolList("weather", { tools: reworded }, exampleLock(), null, new Date())!.changes;
+    const { listTools, fromClient } = await setup({ rejected: addRejection([], tier0!.change, new Date()) });
+    await listTools(reworded);
+    await listTools(benign, 3);
+    expect(await fromClient(call(5, "get_forecast"))).toEqual(FORWARD);
+  });
+
   it("blocks every call until a tool list has been verified", async () => {
     const { fromClient, kinds, logs } = await setup();
     expect(await fromClient(call(5, "get_forecast"))).toEqual(

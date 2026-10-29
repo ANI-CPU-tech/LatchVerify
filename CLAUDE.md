@@ -18,8 +18,12 @@ a regression test first.
   `tests/schema.test.ts`, `web/src/lib/mock.ts` and `latch.lock.example` depend
   on its shape.
 - `latch.lock.example` holds real hashes and capabilities; tests check both.
-- The review UI reads the hono API and falls back to `web/src/lib/mock.ts` when the
-  API is unreachable.
+- The review UI reads the hono API. Under the Vite dev server only, it falls back to
+  `web/src/lib/mock.ts` when the API is unreachable.
+- **Demo material is development-only.** `demo/`, `tests/fixtures`, `lib/mock.ts` and the
+  Simulation page stay in the repo for testing but never reach an installed build:
+  `LATCH_DEV=1` (`LatchEnv.dev`) gates `POST /api/simulate` and the Simulation page, and
+  `tests/packaging/no-demo.test.ts` builds the bundle and checks it.
 
 ## Stack (fixed, do not substitute)
 
@@ -32,18 +36,32 @@ a regression test first.
 | UI server | `hono` + `@hono/node-server` |
 | Frontend | Vite + React 18 + Tailwind 3, shadcn/ui conventions (hand-written, no shadcn CLI) |
 | Diff | `diff` (jsdiff) |
+| Spawning servers | `cross-spawn` (Windows `.cmd` shims such as `npx` need cmd.exe and its escaping) |
+| Client configs | `jsonc-parser` (read and edit JSONC configs without losing comments; `src/config/jsonc.ts`) |
 | Tests | `vitest` |
 | Package manager | `pnpm` (single package, no workspaces; `pnpm-workspace.yaml` only holds pnpm 11 settings) |
+| Desktop app | Electron (exact version in devDependencies), built by `@electron/packager` |
+| Updates | ed25519 via `node:crypto`; no updater dependency |
 | Optional LLM pass | any OpenAI-compatible chat-completions API via `fetch` (Groq, OpenRouter); no SDK |
 
 ## Hard rules
 
 - **No MCP SDK.** The proxy parses raw line-delimited JSON-RPC with `readline` and
-  spawns the server with `child_process.spawn`. A transparent proxy must forward
+  spawns the server with `cross-spawn` (plain `child_process.spawn` on POSIX). A transparent proxy must forward
   fields it does not model, and SDKs normalize them away. Forward untouched frames
   byte-for-byte (`Frame.raw`), and re-serialize only messages the proxy rewrites.
 - **stdout is the protocol.** In proxy mode nothing but JSON-RPC may go to stdout.
   Logs go to stderr and `.latch/events.jsonl`.
+- **No `LATCH_*` variable reaches a guarded server** (`serverEnvironment` in
+  `proxy/transport.ts`). Never pass LatchVerify's paths or keys to a server another way.
+- **Read configs, never touch keys.** Env values of client configs are dropped right after
+  parsing (`stdioServers` keeps command, args and env variable names); edits write `command` and
+  `args` only (plus deleting the two old `LATCH_*` variables by name). `latch.lock` keeps a
+  launch hash and a program name, never arguments; messages, logs, the API and the dashboard
+  show the program name only. Never start a server with a client's env (pinning happens on the
+  first run, in the proxy). Never copy a config. `tests/canary.test.ts` enforces this.
+- **Consent per client.** Nothing links a client the user has not connected
+  (`settings.json` `clients[id] === true`); a client never asked about is only reported.
 - **Blocks are JSON-RPC errors.** A blocked `tools/call` gets an error response
   (code `-32001`) whose message the model can read and relay ("blocked pending
   review — run `latch review`"). Never drop or hang the request.
@@ -73,15 +91,52 @@ that blocks on every reword gets disabled by its users.
   interception points, `blocker.ts` verdict and error).
 - Analysis pipeline: `src/analyze/` (hash, capabilities, unicode, patterns,
   differ, tiers, llm).
-- State: `src/store/` (`lockfile.ts` for `latch.lock`; `pending.ts` and
-  `events.ts` for `.latch/`). Atomic writes end with `replace.ts` `replaceFile`, which retries
-  the rename on Windows while another process holds the target.
+- State: `src/store/` (`lockfile.ts` for `latch.lock`; `pending.ts`, `rejected.ts` and
+  `events.ts` for `.latch/`). Atomic writes go through `replace.ts` (`writeFileAtomic`, ending
+  with `replaceFile`, which retries the rename on Windows while another process holds the
+  target). `lock.ts` `withFileLock` is the cross-process lock (owner token, heartbeat).
+- Tamper detection: `src/store/integrity.ts` `LockIntegrity`. `writeLockfile` records every
+  lockfile it writes (HMAC under a per-user key in `integrityDir()`); the proxy refuses a
+  `latch.lock` the record does not vouch for. `latch lock status|accept|restore`
+  (`commands/lock.ts`) handles edits made outside LatchVerify. Tests point
+  `LATCH_INTEGRITY_DIR` at a temp dir (`tests/setup.ts`).
+- Logging: `src/log.ts` `createLogger`, leveled by `LATCH_LOG_LEVEL`, stderr only.
 - CLI: `src/cli.ts` wires `src/commands/*`. `latch setup` (`commands/setup.ts`) is
-  `latch init` for one client with no questions, plus `--remove` to unwrap; installers run it.
+  `latch init` for one client (or `--all`) with no questions, plus `--remove` to unwrap; installers
+  run `setup --all` and `setup --remove --all`.
+- Client configs: `src/config/clients.ts`. `clientLocations(client)` lists each client's files with
+  the key path to its server map, each with the doc or source it was checked against (add a client
+  only after checking its docs, with a fixture in `tests/fixtures/clients/<client>/<file>`; a test
+  fails without one). `detectClients()` returns `{ configs, problems }`: a config that exists but
+  cannot be used is a problem, reported and never rewritten. Claude Code's per-project servers in
+  `~/.claude.json` are extra configs with a `scope`; project `.mcp.json` files are never written
+  (shared through git). `writeClientConfig` edits `command` and `args` in place with `setJsonc`;
+  it makes no copy. `findOldBackups` lists `.bak` copies earlier versions left, for the user to
+  delete. Ids and names: `config/client-ids.ts`, `config/client-names.ts` (light, for startup).
+- Linking: `linkServer` records a server with `program`, `launch` (`launchHash`) and
+  `trustOnFirstUse`; the proxy's `pinFirstRun` pins its first complete tool list (trusted
+  `latch.lock` only). `mergeServers` + `withStateLock` keep concurrent pins and approvals.
+- Background: `src/daemon/` (`sync.ts` syncClients, `watch.ts` startWatcher behind `latch watch`,
+  `notify.ts` desktop notifications via notify-send or a PowerShell toast). Settings:
+  `src/store/settings.ts` (`settings.json` beside the per-user lockfile).
+- Desktop app: `src/desktop/` (`main.ts` Electron main process: window, tray, login start; `shell.ts`
+  pure helpers; `preload.cts`; `updates.ts` the update dialogs). `pnpm desktop` runs it from a
+  checkout; `--smoke` starts the services, prints and quits. It opens no browser, and nothing else does.
+  The app records its pid in `app.pid` beside the per-user lockfile; `launch.ts` (no Electron import)
+  lets `latch proxy` start an installed app hidden when that pid is not alive, with `appEnvironment`
+  (session variables only, never the server's env).
+- Updates: `src/update/` (`manifest.ts` schema and signed message, `index.ts` check, download,
+  install per kind, `key.ts` the public key). The private key is the release workflow's
+  `LATCH_UPDATE_SIGNING_KEY` secret, never in the repo. `latch update` (`commands/update.ts`).
+- Dev: `src/dev/presets.ts` (demo presets; `demo/` referenced by path, never imported), the Dev
+  Tools page and `pnpm demo:add`.
+- Memory: commands load on demand (`cli.ts`); `tests/startup.test.ts` pins the startup import
+  graph. Wrapped entries start node with `PROXY_NODE_FLAGS` (`--max-semi-space-size=1`).
 - Per-user lockfile: `src/config/paths.ts` `userLockfilePath()` (`%APPDATA%\LatchVerify`,
   `~/.config/latchverify`, `~/Library/Application Support/LatchVerify`). `statePaths` falls
   back to it only when no flag or env names a lockfile and `./latch.lock` is absent.
-- Installers: `packaging/` (see `packaging/README.md`) and
+- Installers: `packaging/` (see `packaging/README.md`; `build-desktop.ts` builds the app into each
+  package, `make-latest-json.ts` signs the update manifest) and
   `.github/workflows/build-installers.yml`, which builds and smoke-tests each installer on Windows
   and Linux and publishes on `v*` tags. Every package bundles Node.js 22, so wrapped entries
   point at the install directory by absolute path. `tests/packaging/` checks the scripts and the
@@ -93,10 +148,12 @@ that blocks on every reword gets disabled by its users.
 
 ## Review UI
 
-**API** (`src/ui/routes.ts`): `GET /api/pending`, `GET /api/pending/:id`,
+**API** (`src/ui/routes.ts`): `GET /api/info` (`{ version, dev }`), `GET /api/clients`
+(per client: answer, files, each server's program, link and pin state; never args or env),
+`POST /api/clients/:id/connect|disconnect`, `GET|PUT /api/settings`, `GET /api/pending`, `GET /api/pending/:id`,
 `POST /api/pending/:id/approve|reject`, `GET /api/events?limit=`, `GET /api/lockfile`,
 `GET /api/lockfile/git` (read-only `git status`/`git log` of `latch.lock`, in
-`src/ui/git.ts`), `POST /api/simulate` (a rug pull rehearsed in memory by
+`src/ui/git.ts`), `/api/dev/presets` (development mode only), `POST /api/simulate` (development mode only, otherwise 404: a rug pull rehearsed in memory by
 `src/ui/simulation.ts` with the proxy's own analyzeToolList, applyApproval, shouldBlock and
 buildBlockError; it reads and writes no file, body capped at 1 MiB). It answers only on
 loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a loopback
@@ -120,9 +177,9 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
   the change it lands on; `navigate(route, { replace: true })` keeps that out of the Back history.
 - Dropdowns use `components/Select.tsx` (themed, WAI-ARIA select-only combobox; key logic in
   `lib/listbox.ts`), never a native `<select>`, whose popup the OS paints in its own colors.
-- `lib/data.tsx` loads the queue, lockfile, events and git status once and shares them
+- `lib/data.tsx` loads the queue, lockfile, events, git status, clients and settings once and shares them
   with every page. It polls every 3 s while the API is connected. Refresh, or a decision,
-  reloads all four.
+  reloads them all.
 - `lib/api.ts` validates every response with the shared zod schemas
   (`src/schema/event.ts` holds the event log schema for this reason).
 - `lib/format.ts` holds the pure view logic (plain-language explanations, server
@@ -151,8 +208,10 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
 **Security boundaries.** The UI displays tiers and decisions; the proxy and the API
 decide. There are no client-side security checks, no invented data, and nothing is
 sent off the machine (no remote fonts or scripts). Sample data (`lib/mock.ts`) appears
-only on the Review Queue, only when the API is unreachable, labeled, with actions
-disabled. No page shows live connection state, because nothing reports it: Servers
+only under the Vite dev server (`import.meta.env.MODE === "development"`, never `DEV`, which
+follows NODE_ENV), only on the Review Queue, only when the API is unreachable, labeled, with
+actions disabled. The Simulation nav entry is `devOnly` and the page is a `React.lazy` chunk,
+shown only when `GET /api/info` says `dev: true`. No page shows live connection state, because nothing reports it: Servers
 shows the last `tools_listed` event instead.
 
 **Themes.** Every color is a CSS variable in `web/src/index.css`, one block per
@@ -212,7 +271,7 @@ next to the name, with a foreground glow so its dark outline reads on dark theme
    `proxy/index.ts`. Integration-test with `demo/evil-server.ts`.
 6. `store/pending.ts`, `store/events.ts`.
 7. Commands: `verify` (the CI contract), then `inspect`, `init`, `review`, `add` (one
-   server; shares `pinServer` and `proxiedEntry` with `init`).
+   server; shares `proxiedEntry` with `init`).
 8. `ui/` routes and wiring `web/` to `lib/api.ts`.
 9. `analyze/llm.ts` last. It is optional and off by default.
 
@@ -235,6 +294,10 @@ There is no browser test runner. To check the UI visually, serve the built bundl
 
 - CI results are not stored, so the Git & CI page documents `latch verify` rather than
   showing CI runs, and no page shows live proxy connections.
+- `.github/workflows/ci.yml` runs typecheck and tests on Ubuntu and Windows; Windows has not yet had
+  a green run.
+- The portable Linux archive has no setuid `chrome-sandbox`, so the app needs unprivileged user
+  namespaces there (the deb and the Arch package ship a setuid helper).
 - On Windows, MCP clients that spawn `latch` without a shell may not resolve `latch.cmd`.
   Entries written by `init`, `add` and `setup` avoid this by starting node by absolute path.
 - The Windows installer and its smoke test run only in CI (no Inno Setup or PowerShell here).
