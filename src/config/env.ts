@@ -17,6 +17,8 @@ export interface LatchEnv {
   lockfilePath: string;
   stateDir: string;
   logLevel: LogLevel;
+  /** Development mode: the review API serves the Simulation rehearsal. Off in real use. */
+  dev: boolean;
 }
 
 const TRUE_WORDS = new Set(["true", "1", "yes", "on"]);
@@ -35,6 +37,7 @@ const FALSE_WORDS = new Set(["false", "0", "no", "off"]);
  * | LATCH_LOCKFILE_PATH   | ./latch.lock   | a path, resolved against the cwd           |
  * | LATCH_STATE_DIR       | <lockfile dir>/.latch | a path, resolved against the cwd    |
  * | LATCH_LOG_LEVEL       | info           | debug, info, warn, error (any case)        |
+ * | LATCH_DEV             | false          | true/false, 1/0, yes/no, on/off (any case) |
  *
  * LATCH_REVIEWER (who approvals are recorded as) is read by defaultReviewer() in ui/server.ts.
  *
@@ -54,13 +57,17 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): LatchEnv {
 
   const llmApiKey = read("LATCH_LLM_API_KEY");
 
-  let llmEnabled = false;
-  const llm = read("LATCH_LLM_ENABLED");
-  if (llm !== undefined) {
-    const word = llm.toLowerCase();
-    if (TRUE_WORDS.has(word)) llmEnabled = true;
-    else if (!FALSE_WORDS.has(word)) problems.push(`LATCH_LLM_ENABLED must be true or false, got ${JSON.stringify(llm)}`);
-  }
+  /** A boolean variable: false when unset, a problem when it is not a recognized word. */
+  const readFlag = (name: string): boolean => {
+    const value = read(name);
+    if (value === undefined) return false;
+    const word = value.toLowerCase();
+    if (TRUE_WORDS.has(word)) return true;
+    if (!FALSE_WORDS.has(word)) problems.push(`${name} must be true or false, got ${JSON.stringify(value)}`);
+    return false;
+  };
+
+  const llmEnabled = readFlag("LATCH_LLM_ENABLED");
   if (llmEnabled && llmApiKey === undefined) {
     problems.push("LATCH_LLM_ENABLED is true but LATCH_LLM_API_KEY is not set");
   }
@@ -81,6 +88,8 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): LatchEnv {
     else problems.push(`LATCH_LOG_LEVEL must be one of ${LOG_LEVELS.join(", ")}, got ${JSON.stringify(level)}`);
   }
 
+  const dev = readFlag("LATCH_DEV");
+
   if (problems.length > 0) {
     throw new Error(`Invalid LatchVerify environment:\n${problems.map((problem) => `  - ${problem}`).join("\n")}`);
   }
@@ -92,6 +101,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): LatchEnv {
     uiPort,
     ...statePaths({}, env),
     logLevel,
+    dev,
   };
 }
 
