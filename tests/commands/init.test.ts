@@ -471,13 +471,27 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
 
   it("does not wrap an entry that already runs <node> <path>/cli.js proxy a second time", async () => {
     // Regression: weather, wrapped by hand this way, came out wrapped twice.
-    const byHand = { ...wrapWithProxy("weather", weatherEntry, { command: "/usr/bin/node", args: ["/opt/latch/dist/cli.js"] }) };
+    const otherInstall = join(home, "opt", "latch", "dist", "cli.js");
+    await mkdir(dirname(otherInstall), { recursive: true });
+    await writeFile(otherInstall, "");
+    const byHand = { ...wrapWithProxy("weather", weatherEntry, { command: process.execPath, args: [otherInstall] }) };
     const config = await writeConfig("cursor", { mcpServers: { weather: byHand } });
     expect((await init()).code).toBe(0);
     expect(Object.keys((await lockOnDisk()).servers)).toEqual(["weather"]);
     const entry = JSON.parse(await readFile(config, "utf8")).mcpServers.weather as ClientServerEntry;
-    // Its own launch is kept; only the lockfile and state directory are added.
+    // Its own launch (another install that exists) is kept; only the lockfile and state directory are added.
     expect(entry).toEqual({ ...byHand, env: { LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: join(home, "repo", ".latch") } });
+  });
+
+  it("moves an entry of this install to the current launch, and repairs one whose install is gone", async () => {
+    const env = { LATCH_LOCKFILE_PATH: lockfilePath, LATCH_STATE_DIR: join(home, "repo", ".latch") };
+    const flagless = { ...wrapWithProxy("weather", weatherEntry, { command: INSTALL_LAUNCH.command, args: [INSTALL_LAUNCH.args.at(-1)!] }), env };
+    const gone = { ...wrapWithProxy("forecast", weatherEntry, { command: "/opt/removed/node", args: ["/opt/removed/cli.js"] }), env };
+    const config = await writeConfig("cursor", { mcpServers: { weather: flagless, forecast: gone } });
+    expect((await init()).code).toBe(0);
+    const servers = JSON.parse(await readFile(config, "utf8")).mcpServers as Record<string, ClientServerEntry>;
+    expect(servers.weather).toEqual({ ...wrapWithProxy("weather", weatherEntry, INSTALL_LAUNCH), env });
+    expect(servers.forecast).toEqual({ ...wrapWithProxy("forecast", weatherEntry, INSTALL_LAUNCH), env });
   });
 });
 

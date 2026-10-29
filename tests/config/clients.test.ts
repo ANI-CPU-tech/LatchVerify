@@ -8,6 +8,8 @@ import {
   MAX_BACKUPS,
   PROXY_COMMAND,
   PROXY_NODE_FLAGS,
+  proxyLaunchOf,
+  replacesLaunch,
   SUPPORTED_CLIENTS,
   clientConfigPath,
   clientLocations,
@@ -242,6 +244,30 @@ describe("wrapWithProxy", () => {
     expect(() => wrapWithProxy("--evil", orig)).toThrow(/must be non-empty and not start with "-"/);
     expect(() => wrapWithProxy("s", { command: "" })).toThrow("has no command");
     expect(() => wrapWithProxy("s", { url: "https://x" } as unknown as ClientServerEntry)).toThrow("has no command");
+  });
+});
+
+describe("proxyLaunchOf and replacesLaunch", () => {
+  const launch = { command: "/usr/bin/node", args: ["--max-semi-space-size=1", "/opt/latch/dist/cli.js"] };
+  const exists = (path: string) => path.startsWith("/usr/") || path.startsWith("/opt/latch/");
+
+  it("reads the launch before proxy, for every wrapped form", () => {
+    expect(proxyLaunchOf(wrapWithProxy("w", { command: "x" }, launch))).toEqual(launch);
+    expect(proxyLaunchOf(wrapWithProxy("w", { command: "x" }))).toEqual({ command: "latch", args: [] });
+    expect(proxyLaunchOf({ command: "x", args: ["proxy"] })).toBeUndefined();
+  });
+
+  it("replaces this install's launch when only the flags differ, never when it is already current", () => {
+    expect(replacesLaunch({ command: "/usr/bin/node", args: ["/opt/latch/dist/cli.js"] }, launch, exists)).toBe(true);
+    expect(replacesLaunch(launch, launch, exists)).toBe(false);
+  });
+
+  it("replaces a launch whose node or cli.js is gone, and keeps one that still works", () => {
+    expect(replacesLaunch({ command: "/gone/node", args: ["/opt/latch/dist/cli.js"] }, launch, exists)).toBe(true);
+    expect(replacesLaunch({ command: "/usr/bin/node", args: ["/gone/cli.js"] }, launch, exists)).toBe(true);
+    expect(replacesLaunch({ command: "/usr/bin/node", args: ["/opt/latch/other/cli.js"] }, launch, exists)).toBe(false);
+    // latch on PATH cannot be checked, so it is the user's choice.
+    expect(replacesLaunch({ command: "latch", args: [] }, launch, exists)).toBe(false);
   });
 });
 

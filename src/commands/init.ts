@@ -9,6 +9,8 @@ import {
   SUPPORTED_CLIENTS,
   clientConfigPath,
   detectClients,
+  proxyLaunchOf,
+  replacesLaunch,
   unwrapProxy,
   wrapWithProxy,
   writeClientConfig,
@@ -390,8 +392,12 @@ export function proxiedEntry(
  * Per client config, the entries to write: each ready server it configures, as proxiedEntry.
  * Entries already in that state are left out, and configs with nothing left are dropped, which
  * makes a second init a no-op.
+ *
+ * An entry that already runs latch keeps its own launch unless replacesLaunch says it must give
+ * way to `launch`: then it is rewritten from its original command, so an entry of this install
+ * gains the current node flags and one of a moved or removed install starts again.
  */
-function planRewrites(
+export function planRewrites(
   configs: readonly ClientConfig[],
   ready: readonly InitServer[],
   lockfilePath: string,
@@ -404,7 +410,11 @@ function planRewrites(
       // Per file, not per client: a client can keep servers in more than one file.
       if (!Object.hasOwn(config.servers, server.serverId)) continue;
       const current = config.servers[server.serverId]!;
-      const target = proxiedEntry(server.serverId, current, lockfilePath, stateDir, launch);
+      const own = proxyLaunchOf(current);
+      const target =
+        own !== undefined && replacesLaunch(own, launch)
+          ? proxiedEntry(server.serverId, unwrapProxy(current), lockfilePath, stateDir, launch)
+          : proxiedEntry(server.serverId, current, lockfilePath, stateDir, launch);
       if (!isDeepStrictEqual(target, current)) entries.push([server.serverId, target]);
     }
     return entries.length > 0 ? [{ config, servers: Object.fromEntries(entries) }] : [];

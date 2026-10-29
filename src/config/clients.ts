@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { replaceFile } from "../store/replace.js";
@@ -293,6 +294,30 @@ export function unwrapProxy(entry: ClientServerEntry): ClientServerEntry {
   const separator = args.indexOf("--");
   if (separator === -1 || separator + 1 >= args.length) return entry;
   return withCommand(entry, args[separator + 1]!, args.slice(separator + 2));
+}
+
+/**
+ * How a wrapped entry starts latch: its command and the arguments before "proxy". Undefined for
+ * an entry that does not run `latch proxy`.
+ */
+export function proxyLaunchOf(entry: ClientServerEntry): ProxyLaunch | undefined {
+  if (!isProxyInvocation(entry)) return undefined;
+  const args = entry.args!;
+  return { command: entry.command, args: args.slice(0, args.indexOf("proxy")) };
+}
+
+/**
+ * Whether a wrapped entry's `own` launch should give way to `launch`, this install's: when it is
+ * this install already (only the node flags differ, as in entries written before
+ * PROXY_NODE_FLAGS), or when its node or cli.js no longer exists (a moved or removed install,
+ * whose servers would not start at all). Any other launch, such as an entry wrapped by hand or by
+ * another working install, is the user's and is kept.
+ */
+export function replacesLaunch(own: ProxyLaunch, launch: ProxyLaunch, exists: (path: string) => boolean = existsSync): boolean {
+  const script = (candidate: ProxyLaunch) => candidate.args.find((arg) => !arg.startsWith("-"));
+  if (own.command === launch.command && script(own) === script(launch)) return !isDeepStrictEqual(own, launch);
+  const paths = [own.command, ...(script(own) === undefined ? [] : [script(own)!])].filter((path) => isAbsolute(path));
+  return paths.some((path) => !exists(path));
 }
 
 /**
