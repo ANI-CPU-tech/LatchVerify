@@ -26,6 +26,9 @@ import {
 // os.homedir() follows HOME only on POSIX hosts.
 const onWindows = process.platform === "win32";
 
+/** A server entry as it is on disk: command and args, plus whatever else the client keeps (env, type, cwd...). */
+type DiskEntry = { command: string; args?: string[] } & Record<string, unknown>;
+
 /** The key of a client's main server map ("mcpServers", "servers" or "context_servers"). */
 const mapKey = (client: ClientId): string => clientLocations(client)[0]!.serversPath[0]!;
 
@@ -120,7 +123,7 @@ describe("clientConfigPath", () => {
 });
 
 describe("wrapWithProxy", () => {
-  const orig: ClientServerEntry = { command: "node", args: ["w.js"], env: { A: "1" }, extra: true };
+  const orig: DiskEntry = { command: "node", args: ["w.js"], env: { A: "1" }, extra: true };
 
   it("launches latch proxy with the real command after --", () => {
     expect(wrapWithProxy("weather", orig)).toEqual({
@@ -280,7 +283,7 @@ describe("unwrapProxy", () => {
   });
 
   it("round-trips entries of every shape", () => {
-    const entries: ClientServerEntry[] = [
+    const entries: DiskEntry[] = [
       { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] },
       { type: "stdio", command: "uvx", args: ["mcp-server-git", "--", "x"], env: { N: "1" }, cwd: "/srv" },
       { command: "server" },
@@ -385,7 +388,7 @@ describe.skipIf(onWindows)("detectClients", () => {
     await writeConfig("vscode", { mcpServers: { a: { command: "a" } }, servers: { b: { type: "stdio", command: "b" } } });
     await writeConfig("cursor", { servers: { a: { command: "a" } }, mcpServers: { b: { command: "b" } } });
     const { configs: found } = await detectClients();
-    expect(found.find((c) => c.client === "vscode")?.servers).toEqual({ b: { type: "stdio", command: "b" } });
+    expect(found.find((c) => c.client === "vscode")?.servers).toEqual({ b: { command: "b" } });
     expect(found.find((c) => c.client === "cursor")?.servers).toEqual({ b: { command: "b" } });
   });
 
@@ -406,8 +409,17 @@ describe.skipIf(onWindows)("detectClients", () => {
     };
     await writeConfig("claude-desktop", { mcpServers });
     const [config] = (await detectClients()).configs;
-    expect(config!.servers).toEqual({ ok: mcpServers.ok, typed: mcpServers.typed });
+    // Reduced to command, args and env variable names: no value, no other key.
+    expect(config!.servers).toEqual({ ok: { command: "node", args: ["x.js"], envNames: ["A"] }, typed: { command: "uvx" } });
     expect(config!.serverIds).toEqual(Object.keys(mcpServers));
+  });
+
+  it("keeps no env value: only the names of the variables", async () => {
+    home = await fakeHome();
+    await writeConfig("cursor", { mcpServers: { s: { command: "node", env: { API_KEY: "sk-secret", OTHER: "x" } } } });
+    const detection = await detectClients();
+    expect(detection.configs[0]!.servers.s).toEqual({ command: "node", envNames: ["API_KEY", "OTHER"] });
+    expect(JSON.stringify(detection)).not.toContain("sk-secret");
   });
 
   it("detects a config without servers, with an empty server map", async () => {
@@ -419,7 +431,7 @@ describe.skipIf(onWindows)("detectClients", () => {
   it("reads JSONC: comments and trailing commas", async () => {
     home = await fakeHome();
     await writeConfig("vscode", '{\n  // mine\n  "servers": {\n    "a": { "type": "stdio", "command": "a", }, /* b */\n  },\n}\n');
-    expect((await detectClients()).configs.map((c) => [c.client, c.servers])).toEqual([["vscode", { a: { type: "stdio", command: "a" } }]]);
+    expect((await detectClients()).configs.map((c) => [c.client, c.servers])).toEqual([["vscode", { a: { command: "a" } }]]);
   });
 
   it("reports files it cannot use instead of skipping them silently", async () => {

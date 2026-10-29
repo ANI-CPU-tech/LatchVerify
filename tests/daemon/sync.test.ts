@@ -118,7 +118,7 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
     expect(result.problems.map((problem) => problem.client)).toEqual(["vscode"]);
     expect(result.failed).toEqual([]);
     expect(result.wrapped).toEqual([{ client: "cursor", path, serverIds: ["absent", "weather"] }]);
-    expect((await servers(path)).absent!.env).toEqual({ KEY: "sk-secret" });
+    expect(JSON.parse(await readFile(path, "utf8")).mcpServers.absent.env).toEqual({ KEY: "sk-secret" });
     expect(await readFile(options.lockfilePath, "utf8")).not.toContain("sk-secret");
   });
 });

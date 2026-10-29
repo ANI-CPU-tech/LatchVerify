@@ -9,7 +9,7 @@ import {
   writeClientConfig,
   type ClientConfig,
   type ClientId,
-  type ClientServerEntry,
+  type NewServerEntry,
   type ProxyLaunch,
 } from "../config/clients.js";
 import { linkServer, mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
@@ -90,11 +90,12 @@ export async function runAdd(options: AddOptions): Promise<number> {
   if (command === undefined || command === "") return fail("no server command given; put it after --");
 
   let env: Record<string, string>;
-  let entry: ClientServerEntry;
+  let entry: NewServerEntry;
   try {
     env = parseEnv(options.env, options.sourceEnv ?? process.env);
     // Built before the server starts, so an id the proxy cannot take fails without spawning anything.
-    entry = proxiedEntry(name, { command, args, ...(Object.keys(env).length > 0 ? { env } : {}) }, lockfilePath, stateDir, launch);
+    // The env goes into the new entry as the user gave it; latch itself never uses it.
+    entry = { ...proxiedEntry(name, { command, args }, lockfilePath, stateDir, launch), ...(Object.keys(env).length > 0 ? { env } : {}) };
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
   }

@@ -16,8 +16,27 @@ export { SUPPORTED_CLIENTS, type ClientId };
 export interface ClientServerEntry {
   command: string;
   args?: string[];
+  /**
+   * The names of the entry's env variables, never their values: those are the server's API keys,
+   * dropped as soon as the file is parsed (stdioServers), so no key enters LatchVerify's data.
+   */
+  envNames?: string[];
+}
+
+/** Anything started by a command and arguments: a detected entry, a new one, or an entry as it is on disk. */
+export interface Launchable {
+  command: string;
+  args?: string[];
+}
+
+/**
+ * A server entry `latch add` creates. The one place LatchVerify writes env values: the ones the
+ * user passed to it with --env. An entry that already exists never has its env written.
+ */
+export interface NewServerEntry {
+  command: string;
+  args?: string[];
   env?: Record<string, string>;
-  [extra: string]: unknown;
 }
 
 /** A file a client keeps MCP servers in, and the keys from its root to the server map. */
@@ -31,7 +50,7 @@ export interface ClientConfig extends ClientLocation {
   client: ClientId;
   /** Which part of the file, for people, when it is not the whole client: "project /home/me/app". */
   scope?: string;
-  /** The stdio entries latch can wrap. They hold the servers' env; never log, store or send them anywhere. */
+  /** The stdio entries latch can wrap: launch and env variable names, no env values. Args may still hold a key: never print or store them. */
   servers: Record<string, ClientServerEntry>;
   /** Every server id in the map, stdio or not, so a new name never replaces an HTTP server. */
   serverIds: string[];
@@ -209,13 +228,25 @@ async function readClientConfig(client: ClientId, { path, serversPath }: ClientL
   return client === "claude-code" ? [config, ...claudeCodeProjects(config, parsed.value)] : [config];
 }
 
+/**
+ * The stdio entries of a server map, each reduced to its command, args and env variable names.
+ * Env values and every other key are left behind here, right after parsing.
+ */
 function stdioServers(value: unknown): Record<string, ClientServerEntry> {
   if (!isPlainObject(value)) return {};
   // fromEntries: a server named "__proto__" stays a plain key.
-  return Object.fromEntries(Object.entries(value).filter((pair): pair is [string, ClientServerEntry] => isStdioEntry(pair[1])));
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([id, raw]): Array<[string, ClientServerEntry]> => {
+      if (!isStdioEntry(raw)) return [];
+      const entry: ClientServerEntry = { command: raw.command as string };
+      if (raw.args !== undefined) entry.args = [...(raw.args as string[])];
+      if (raw.env !== undefined) entry.envNames = Object.keys(raw.env as object);
+      return [[id, entry]];
+    }),
+  );
 }
 
-function isStdioEntry(value: unknown): value is ClientServerEntry {
+function isStdioEntry(value: unknown): value is Record<string, unknown> {
   if (!isPlainObject(value)) return false;
   const { command, type, args, env } = value;
   return (
@@ -282,7 +313,7 @@ const PATH_OPTIONS: ReadonlySet<string> = new Set(["--lockfile", "--state-dir"])
  * @throws TypeError when serverId is empty or starts with "-" (the proxy's option parser would
  * misread it), or the entry has no command to wrap.
  */
-export function wrapWithProxy(serverId: string, original: ClientServerEntry, launch: ProxyLaunch = PATH_LAUNCH, paths?: ProxyPaths): ClientServerEntry {
+export function wrapWithProxy<T extends Launchable>(serverId: string, original: T, launch: ProxyLaunch = PATH_LAUNCH, paths?: ProxyPaths): T {
   if (isProxyInvocation(original)) return original;
   if (serverId === "" || serverId.startsWith("-")) {
     throw new TypeError(`cannot wrap server ${JSON.stringify(serverId)}: the id must be non-empty and not start with "-"`);
@@ -302,7 +333,7 @@ export function wrapWithProxy(serverId: string, original: ClientServerEntry, lau
  * An empty argument list is restored as no `args` key, so `{ command, args: [] }` comes back as
  * `{ command }`; clients treat the two the same.
  */
-export function unwrapProxy(entry: ClientServerEntry): ClientServerEntry {
+export function unwrapProxy<T extends Launchable>(entry: T): T {
   if (!isProxyInvocation(entry)) return entry;
   const args = entry.args!;
   const separator = args.indexOf("--");
@@ -315,7 +346,7 @@ export function unwrapProxy(entry: ClientServerEntry): ClientServerEntry {
  * "proxy" (node flags and cli.js, or nothing for `latch` itself). Undefined for an entry that does
  * not run `latch proxy`.
  */
-export function proxyLaunchOf(entry: ClientServerEntry): ProxyLaunch | undefined {
+export function proxyLaunchOf(entry: Launchable): ProxyLaunch | undefined {
   const at = latchArgsStart(entry);
   return at === undefined ? undefined : { command: entry.command, args: entry.args!.slice(0, at) };
 }
@@ -339,7 +370,7 @@ export function replacesLaunch(own: ProxyLaunch, launch: ProxyLaunch, exists: (p
  * INSTALL_LAUNCH's form, `<node> [node flags] <path>/cli.js proxy --server ...`, with or without
  * the flags (entries written before PROXY_NODE_FLAGS existed have none).
  */
-function isProxyInvocation(entry: ClientServerEntry): boolean {
+function isProxyInvocation(entry: Launchable): boolean {
   return latchArgsStart(entry) !== undefined;
 }
 
@@ -348,7 +379,7 @@ function isProxyInvocation(entry: ClientServerEntry): boolean {
  * (any --lockfile/--state-dir options, then "proxy --server"): 0 for `latch ...`, just after
  * cli.js for `<node> [node flags] <path>/cli.js ...`. Undefined for any other entry.
  */
-function latchArgsStart(entry: ClientServerEntry): number | undefined {
+function latchArgsStart(entry: Launchable): number | undefined {
   if (typeof entry.command !== "string" || !Array.isArray(entry.args)) return undefined;
   const args = entry.args;
   const proxyAt = (start: number): boolean => {
@@ -367,13 +398,17 @@ function latchArgsStart(entry: ClientServerEntry): number | undefined {
 /** Variables older versions of latch init put in a wrapped entry's env; relinking and unlinking remove exactly these. */
 export const LATCH_ENTRY_ENV = ["LATCH_LOCKFILE_PATH", "LATCH_STATE_DIR"] as const;
 
-/** `entry` without the variables of LATCH_ENTRY_ENV; an env left empty by that is dropped. Other variables are kept. */
+const isLatchEnv = (name: string) => (LATCH_ENTRY_ENV as readonly string[]).includes(name);
+
+/**
+ * `entry` without the names of LATCH_ENTRY_ENV: what it is once writeClientConfig has deleted
+ * those variables. Other names are kept; an empty list is dropped.
+ */
 export function withoutLatchEnv(entry: ClientServerEntry): ClientServerEntry {
-  if (typeof entry.env !== "object" || entry.env === null) return entry;
-  if (!LATCH_ENTRY_ENV.some((key) => Object.hasOwn(entry.env!, key))) return entry;
-  const env = Object.fromEntries(Object.entries(entry.env).filter(([key]) => !(LATCH_ENTRY_ENV as readonly string[]).includes(key)));
-  const { env: _dropped, ...rest } = entry;
-  return Object.keys(env).length > 0 ? { ...rest, env } : (rest as ClientServerEntry);
+  if (entry.envNames === undefined || !entry.envNames.some(isLatchEnv)) return entry;
+  const envNames = entry.envNames.filter((name) => !isLatchEnv(name));
+  const { envNames: _dropped, ...rest } = entry;
+  return envNames.length > 0 ? { ...rest, envNames } : rest;
 }
 
 function baseName(path: string): string {
@@ -385,7 +420,7 @@ function baseName(path: string): string {
  * appended when the entry had none, and dropped when empty. Object.fromEntries keeps a parsed
  * "__proto__" key as plain data instead of setting the prototype.
  */
-function withCommand(entry: ClientServerEntry, command: string, args: string[]): ClientServerEntry {
+function withCommand<T extends Launchable>(entry: T, command: string, args: string[]): T {
   const entries: Array<[string, unknown]> = [];
   for (const [key, value] of Object.entries(entry)) {
     if (key === "command") entries.push([key, command]);
@@ -394,17 +429,19 @@ function withCommand(entry: ClientServerEntry, command: string, args: string[]):
     } else entries.push([key, value]);
   }
   if (!Object.hasOwn(entry, "args") && args.length > 0) entries.push(["args", args]);
-  return Object.fromEntries(entries) as ClientServerEntry;
+  return Object.fromEntries(entries) as unknown as T;
 }
 
 /**
  * Write `config.servers` into the client's config file. Resolves once the new file is flushed to
  * disk.
  *
- * - Only the values that differ are edited, field by field and in place (setJsonc): for a
- *   wrapped server that is its `command` and `args`, and the LATCH_* variables older versions put
- *   in its env. The rest of the entry, its other env variables (the server's API keys) included,
- *   and every other byte of the file stay as they are: other servers, unrelated keys, comments,
+ * - Of an entry that exists, only `command` and `args` are written, plus the deletion of the
+ *   LATCH_* variables older versions put in its env (LATCH_ENTRY_ENV), by name. Nothing else in
+ *   it is read into LatchVerify's data or written: env values (the server's API keys) and every
+ *   other key stay byte for byte as they are. A whole entry is written only for a server the map
+ *   does not have yet: a NewServerEntry from `latch add`, with the env the user gave it.
+ * - Every other byte of the file stays as it is: other servers, unrelated keys, comments,
  *   trailing commas, indentation, line endings and the final newline (or its absence).
  * - No copy of the file is made: it holds the user's keys, and the original command of a wrapped
  *   entry stays in its own args after "--", which is all unlinking needs.
@@ -420,24 +457,47 @@ function withCommand(entry: ClientServerEntry, command: string, args: string[]):
  * @throws Error naming the file when it exists but is no longer a JSON object, or its server
  * map is no longer an object; it is left as is.
  */
-export async function writeClientConfig(config: ClientConfig): Promise<void> {
+export async function writeClientConfig(config: {
+  path: string;
+  serversPath: string[];
+  servers: Record<string, ClientServerEntry | NewServerEntry>;
+}): Promise<void> {
   const target = await resolveSymlinks(config.path);
   const current = await readIfExists(target);
   const before = current?.text ?? "{}\n";
-  const parsed = parseJsonc(before);
-  if (!parsed.ok || !isPlainObject(parsed.value)) {
-    throw new Error(`${config.path} is no longer a JSON object; not rewriting it`);
+  // The edits are planned inside this block; the parsed file (keys included) is not kept.
+  const planned: Array<[string[], unknown]> = [];
+  {
+    const parsed = parseJsonc(before);
+    if (!parsed.ok || !isPlainObject(parsed.value)) {
+      throw new Error(`${config.path} is no longer a JSON object; not rewriting it`);
+    }
+    const map = valueAt(parsed.value, config.serversPath);
+    if (map !== undefined && !isPlainObject(map)) {
+      throw new Error(`${config.path} no longer keeps "${config.serversPath.join(".")}" as an object; not rewriting it`);
+    }
+    for (const [serverId, entry] of Object.entries(config.servers)) {
+      const path = [...config.serversPath, serverId];
+      const now = map !== undefined && Object.hasOwn(map, serverId) ? map[serverId] : undefined;
+      if (!isPlainObject(now)) {
+        const created: Record<string, unknown> = { command: entry.command };
+        if (entry.args !== undefined && entry.args.length > 0) created.args = entry.args;
+        if ("env" in entry && entry.env !== undefined && Object.keys(entry.env).length > 0) created.env = entry.env;
+        planned.push([path, created]);
+        continue;
+      }
+      if (now.command !== entry.command) planned.push([[...path, "command"], entry.command]);
+      const args = entry.args !== undefined && entry.args.length > 0 ? entry.args : undefined;
+      const nowArgs = Array.isArray(now.args) && now.args.length > 0 ? now.args : undefined;
+      if (!isDeepStrictEqual(nowArgs, args)) planned.push([[...path, "args"], args]);
+      const envNames = isPlainObject(now.env) ? Object.keys(now.env) : [];
+      const ours = envNames.filter(isLatchEnv);
+      if (ours.length > 0 && ours.length === envNames.length) planned.push([[...path, "env"], undefined]);
+      else for (const name of ours) planned.push([[...path, "env", name], undefined]);
+    }
   }
-  const map = valueAt(parsed.value, config.serversPath);
-  if (map !== undefined && !isPlainObject(map)) {
-    throw new Error(`${config.path} no longer keeps "${config.serversPath.join(".")}" as an object; not rewriting it`);
-  }
-
   let text = before;
-  for (const [serverId, entry] of Object.entries(config.servers)) {
-    const now = map !== undefined && Object.hasOwn(map, serverId) ? map[serverId] : undefined;
-    for (const [path, value] of edits(now, entry, [...config.serversPath, serverId])) text = setJsonc(text, path, value);
-  }
+  for (const [path, value] of planned) text = setJsonc(text, path, value);
   if (current !== undefined && text === current.text) return;
 
   const mode = current === undefined ? 0o600 : current.mode;
@@ -462,23 +522,6 @@ async function readIfExists(path: string): Promise<{ text: string; mode: number 
     if (isErrno(error, "ENOENT")) return undefined;
     throw error;
   }
-}
-
-/**
- * The edits that turn `current` into `target`, as key paths under `path` and the values to put
- * there (undefined removes the key). Plain objects are compared key by key, so a value that did
- * not change, an env variable for instance, is never rewritten. Values compare by content: a
- * hand-formatted entry is not reformatted when nothing changed.
- */
-function edits(current: unknown, target: unknown, path: string[]): Array<[string[], unknown]> {
-  if (isDeepStrictEqual(current, target)) return [];
-  if (isPlainObject(current) && isPlainObject(target)) {
-    const keys = new Set([...Object.keys(current), ...Object.keys(target)]);
-    return [...keys].flatMap((key) =>
-      edits(Object.hasOwn(current, key) ? current[key] : undefined, Object.hasOwn(target, key) ? target[key] : undefined, [...path, key]),
-    );
-  }
-  return [[path, target]];
 }
 
 /** Temp file, fsync, rename: the target holds either the old or the new content, never a mix. */

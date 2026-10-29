@@ -29,8 +29,8 @@ const weather: ClientServerEntry = { command: "npx", args: ["tsx", "demo/weather
 describe("collectServers", () => {
   it("returns every stdio server, sorted by id, with its clients", () => {
     const { servers, skipped } = collectServers([
-      config("claude-desktop", { weather, git: { command: "uvx", args: ["mcp-server-git"], env: { A: "1" } } }),
-      config("cursor", { weather: { ...weather, extra: true } }),
+      config("claude-desktop", { weather, git: { command: "uvx", args: ["mcp-server-git"], envNames: ["A"] } }),
+      config("cursor", { weather: { ...weather } }),
     ]);
     expect(skipped).toEqual([]);
     expect(servers).toEqual([
@@ -173,7 +173,7 @@ describe.skipIf(process.platform === "win32")("runInit", { timeout: 30_000 }, ()
     const config = await writeConfig("claude-desktop", { mcpServers: { weather: { ...weatherEntry, env: { KEY: "secret" } } } });
     const stateDir = join(home, "state");
     expect((await init({ client: "claude-desktop", stateDir })).code).toBe(0);
-    const entry = JSON.parse(await readFile(config, "utf8")).mcpServers.weather as ClientServerEntry;
+    const entry = JSON.parse(await readFile(config, "utf8")).mcpServers.weather as { args: string[]; env: unknown };
     expect(entry.args).toEqual(expect.arrayContaining(["--lockfile", lockfilePath, "--state-dir", stateDir]));
     expect(entry.env).toEqual({ KEY: "secret" });
   });

@@ -87,7 +87,7 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
   const exists = async (path: string) => (await readdir(dirname(path)).catch((): string[] => [])).includes(path.split("/").pop()!);
 
   it("links one server and adds it wrapped by absolute path, leaving the rest of the config alone", async () => {
-    const other: ClientServerEntry = { command: "node", args: ["other.js"], env: { KEY: "keep" } };
+    const other = { command: "node", args: ["other.js"], env: { KEY: "keep" } };
     await writeConfig({ mcpServers: { other }, preferences: { x: 1 } });
     const { code, text } = await add();
     expect(code).toBe(0);
