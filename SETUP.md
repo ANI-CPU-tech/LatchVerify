@@ -15,9 +15,11 @@ Commands are written for bash or zsh; fish equivalents are noted where they diff
 | Installers (Windows, deb, Arch, tar.gz) | Build installers workflow, see `INSTALL.md` | built and smoke-tested in CI |
 | Add one server and pin its tools | `latch add <name> -- <command>` (`--dry-run`) | works |
 | Approve or reject queued changes | `latch review` (terminal) | works |
-| Browser review screen | `latch review --ui`, or `pnpm ui` for development | works |
+| LatchVerify app (tray, window, notifications, login start) | `latchverify-desktop`, or `pnpm desktop` from a checkout | works on Linux; Windows built in CI only |
+| Signed updates | the app, or `latch update` (`--check`) | built; no release published yet |
+| Review UI on a local port | `latch review --ui`, or `pnpm ui` for development | works |
 | Demo servers (benign and rug pull), development only | `pnpm demo:benign`, `pnpm demo:evil` | works |
-| Simulation and Dev Tools pages, development only | `LATCH_DEV=1` with `pnpm ui` or `latch review --ui` | works |
+| Simulation and Dev Tools pages, development only | `--dev` or `LATCH_DEV=1` for the app, `LATCH_DEV=1` with `pnpm ui` or `latch review --ui` | works |
 | Add a demo server to a client | `pnpm demo:add <preset> --client <id>` | works |
 | Background sync and desktop notifications | `latch watch` (`--once`, `--no-notify`) | works |
 | LLM advisory pass | — | built in `src/analyze/llm.ts`, **not wired in yet** |
@@ -145,6 +147,27 @@ Log, Git & CI, and Settings. With `LATCH_DEV=1` set for the API (in `.env`, or b
 `pnpm ui` or `latch review --ui`), two more appear: Simulation rehearses the demo rug pull in
 memory, and Dev Tools adds the demo servers to an MCP client in one click. Settings has six themes plus "Follow system"; the
 choice is kept in the browser's local storage.
+
+### The LatchVerify app: normal and development mode
+
+The app runs one copy at a time. Starting it again only shows the window of the copy already
+running, in whatever mode that copy is in, so quit it first (tray icon, **Quit**, or
+`pkill -f latchverify-desktop`).
+
+```sh
+# Installed app
+~/.local/bin/latchverify-desktop --dev   # development mode (LATCH_DEV=1 does the same)
+~/.local/bin/latchverify-desktop         # normal mode, as the app menu and login start it
+
+# From this checkout (builds first)
+LATCH_DEV=1 pnpm desktop                 # development mode
+pnpm desktop                             # normal mode
+```
+
+Development mode lasts for that run only: nothing is saved, and the login start always uses
+normal mode. In an installed app the Dev Tools page says the demo servers are not there, since
+packages ship neither `demo/` nor `tsx`; run the app from the checkout to add them.
+`Failed to load module "appmenu-gtk-module"` on start is a harmless GTK message.
 
 ## 5. Use it with a real MCP client (optional)
 
