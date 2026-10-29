@@ -5,7 +5,7 @@ import { useTheme } from "../lib/theme";
 import { sceneFor } from "../lib/themes";
 import { NAV_OPEN_DELAY_MS, navKeyTarget } from "../lib/nav";
 import { href, type Page } from "../lib/router";
-import { FlaskIcon, GitIcon, HomeIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
+import { FlaskIcon, GitIcon, TerminalIcon, HomeIcon, LogIcon, QueueIcon, RefreshIcon, ServerIcon, SettingsIcon, ToolCheckIcon } from "./icons";
 import { StatusDot, buttonClass } from "./ui";
 
 /** The sections. `devOnly` ones show only in development mode (GET /api/info). */
@@ -17,6 +17,7 @@ export const NAV: Array<{ page: Exclude<Page, "not-found">; label: string; icon:
   { page: "audit", label: "Audit Log", icon: <LogIcon />, href: href({ page: "audit" }) },
   { page: "ci", label: "Git & CI", icon: <GitIcon />, href: href({ page: "ci" }) },
   { page: "simulation", label: "Simulation", icon: <FlaskIcon />, href: href({ page: "simulation" }), devOnly: true },
+  { page: "devtools", label: "Dev Tools", icon: <TerminalIcon />, href: href({ page: "devtools" }), devOnly: true },
   { page: "settings", label: "Settings", icon: <SettingsIcon />, href: href({ page: "settings" }) },
 ];
 

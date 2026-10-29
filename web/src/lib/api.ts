@@ -189,6 +189,31 @@ export async function saveSettings(patch: SettingsPatch): Promise<Settings> {
   });
 }
 
+const PresetsSchema = z.object({
+  available: z.boolean(),
+  presets: z.array(
+    z.object({ id: z.string(), name: z.string(), description: z.string(), clients: z.array(z.string()), inLockfile: z.boolean() }),
+  ),
+});
+/** The demo presets of the Dev Tools page (development mode only; src/dev/presets.ts). */
+export type Presets = z.infer<typeof PresetsSchema>;
+
+/** The demo presets and where each is installed (GET /api/dev/presets). */
+export async function fetchPresets(signal?: AbortSignal): Promise<Presets> {
+  return getJson("/api/dev/presets", PresetsSchema, "preset list", signal);
+}
+
+/** Adds a demo preset to `client` (latch add), or removes it from that client. Resolves the API's message. */
+export async function changePreset(id: string, client: string, action: "add" | "remove"): Promise<string> {
+  const response = await call(`/api/dev/presets/${encodeURIComponent(id)}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", [CLIENT_HEADER]: CLIENT_NAME },
+    body: JSON.stringify({ client }),
+  });
+  const body = (await response.json()) as { output?: unknown; clients?: unknown };
+  return typeof body.output === "string" ? body.output : `removed from ${Array.isArray(body.clients) && body.clients.length > 0 ? body.clients.join(", ") : "no client"}`;
+}
+
 /** The approved state in latch.lock. */
 export async function fetchLockfile(signal?: AbortSignal): Promise<LockFile> {
   return getJson("/api/lockfile", LockFileSchema, "lockfile", signal);

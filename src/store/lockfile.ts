@@ -298,3 +298,10 @@ export function pinFirstRun(
   const { trustOnFirstUse: _done, ...linked } = next.servers[serverId]!;
   return { lock: { ...next, generatedAt: now.toISOString(), servers: { ...next.servers, [serverId]: linked } }, pinned, held };
 }
+
+/** `lock` without the server `serverId` and its pins; the same object when it has none. Pure. */
+export function removeServer(lock: LockFile, serverId: string): LockFile {
+  if (!Object.hasOwn(lock.servers, serverId)) return lock;
+  const servers = Object.fromEntries(Object.entries(lock.servers).filter(([id]) => id !== serverId));
+  return { ...lock, servers };
+}

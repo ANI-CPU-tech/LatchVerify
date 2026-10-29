@@ -31,7 +31,8 @@
     "ui": "concurrently -n api,web -c blue,magenta \"tsx watch src/ui/server.ts\" \"vite --config web/vite.config.ts\"",
     "demo:benign": "tsx demo/weather-server.ts",
     "demo:evil": "tsx demo/evil-server.ts",
-    "demo:devtools": "tsx demo/devtools-server.ts"
+    "demo:devtools": "tsx demo/devtools-server.ts",
+    "demo:add": "tsx demo/add.ts"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",

@@ -97,3 +97,43 @@ describe.skipIf(process.platform === "win32")("the clients and settings API", ()
     expect((await put(JSON.stringify({ lastUpdateCheck: "x".repeat(20_000) }))).status).toBe(413);
   });
 });
+
+describe.skipIf(process.platform === "win32")("the dev preset API", () => {
+  let home: string;
+  let deps: RouteDeps;
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), "latch-dev-api-"));
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("XDG_CONFIG_HOME", undefined);
+    const lockfilePath = join(home, ".config", "latchverify", "latch.lock");
+    await mkdir(dirname(lockfilePath), { recursive: true });
+    await writeLockfile(lockfilePath, emptyLockfile());
+    deps = { lockfilePath, stateDir: join(dirname(lockfilePath), ".latch"), reviewer: "api@example.com", settingsPath: join(dirname(lockfilePath), "settings.json") };
+  });
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await rm(home, { recursive: true, force: true });
+  });
+
+  const request = (dev: boolean, path: string, body?: unknown) =>
+    createRoutes({ ...deps, dev }).request(`http://127.0.0.1${path}`, body === undefined ? {} : { method: "POST", headers: { [CLIENT_HEADER]: "test", "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  it("does not exist outside development mode", async () => {
+    expect((await request(false, "/api/dev/presets")).status).toBe(404);
+    expect((await request(false, "/api/dev/presets/demo-weather/add", { client: "cursor" })).status).toBe(404);
+  });
+
+  it("lists, adds and removes presets in development mode", async () => {
+    const list = await (await request(true, "/api/dev/presets")).json();
+    expect(list).toMatchObject({ available: true, presets: expect.arrayContaining([expect.objectContaining({ id: "demo-weather", clients: [], inLockfile: false })]) });
+    const added = await request(true, "/api/dev/presets/demo-weather/add", { client: "cursor" });
+    expect(added.status).toBe(200);
+    expect(((await added.json()) as { output: string }).output).toContain("✔ demo-weather: linked");
+    expect(JSON.parse(await readFile(clientConfigPath("cursor"), "utf8")).mcpServers["demo-weather"].args).toContain("proxy");
+    expect((await request(true, "/api/dev/presets/demo-weather/add", { client: "cursor" })).status).toBe(409);
+    expect(await (await request(true, "/api/dev/presets/demo-weather/remove", { client: "cursor" })).json()).toEqual({ clients: ["cursor"], lockfile: true });
+    expect((await request(true, "/api/dev/presets/nope/add", { client: "cursor" })).status).toBe(404);
+    expect((await request(true, "/api/dev/presets/demo-weather/add", { client: "notepad" })).status).toBe(400);
+  });
+});

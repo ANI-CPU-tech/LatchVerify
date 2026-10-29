@@ -203,6 +203,7 @@ describe("router", () => {
     ["#/git-ci", { page: "ci" }],
     ["#/simulation", { page: "simulation" }],
     ["#/simulation/x", { page: "not-found", path: "/simulation/x" }],
+    ["#/dev-tools", { page: "devtools" }],
     ["#/settings", { page: "settings" }],
     ["#/nope", { page: "not-found", path: "/nope" }],
     ["#/settings/extra", { page: "not-found", path: "/settings/extra" }],
@@ -222,6 +223,7 @@ describe("router", () => {
       { page: "audit" },
       { page: "ci" },
       { page: "simulation" },
+      { page: "devtools" },
       { page: "settings" },
     ] as const) {
       expect(parseRoute(href(route))).toEqual(route);

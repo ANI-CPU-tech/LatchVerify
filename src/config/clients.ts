@@ -549,6 +549,22 @@ export async function writeClientConfig(config: {
   await writeFileAtomic(target, text, mode);
 }
 
+/**
+ * Deletes the server `serverId` from a client config file: the whole entry, comments elsewhere
+ * kept. For entries LatchVerify itself added (the dev demo presets); it never deletes a server the
+ * user configured. Resolves false when the file or the entry does not exist.
+ */
+export async function removeClientServer(location: ClientLocation, serverId: string): Promise<boolean> {
+  const target = await resolveSymlinks(location.path);
+  const current = await readIfExists(target);
+  if (current === undefined) return false;
+  const parsed = parseJsonc(current.text);
+  const map = parsed.ok ? valueAt(parsed.value, location.serversPath) : undefined;
+  if (!isPlainObject(map) || !Object.hasOwn(map, serverId)) return false;
+  await writeFileAtomic(target, setJsonc(current.text, [...location.serversPath, serverId], undefined), current.mode);
+  return true;
+}
+
 async function resolveSymlinks(path: string): Promise<string> {
   try {
     return await realpath(path);

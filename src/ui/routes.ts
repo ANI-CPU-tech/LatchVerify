@@ -5,6 +5,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { runUnlink } from "../commands/setup.js";
 import { SUPPORTED_CLIENTS, type ClientId, type ProxyLaunch } from "../config/clients.js";
 import { syncClients } from "../daemon/sync.js";
+import { addPreset, demoRoot, findPreset, presetStates, removePreset } from "../dev/presets.js";
 import { SettingsPatchSchema, SimulationRequestSchema, type LockFile, type PendingChange } from "../schema/index.js";
 import { readSettings, settingsPath, updateSettings } from "../store/settings.js";
 import { clientsReport } from "./clients.js";
@@ -254,6 +255,53 @@ export function createRoutes(deps: RouteDeps): Hono {
 
   // Whether latch.lock is committed: tracked, modified, last commit. Read-only. Returns LockfileGitStatus.
   app.get("/api/lockfile/git", async (c) => c.json(await lockfileGitStatus(deps.lockfilePath)));
+
+  // Development mode only: the demo presets of the Dev Tools page (src/dev/presets.ts). In real use
+  // these routes do not exist and answer 404.
+  if (dev) {
+    const presetParam = (id: string) => {
+      const preset = findPreset(id);
+      if (preset === undefined) throw new ApiError(404, `no demo preset "${id}"`);
+      return preset;
+    };
+    /** The client named in a JSON body ({ client }); optional when `required` is false. */
+    const clientBody = async (c: { req: { json(): Promise<unknown> } }, required: boolean): Promise<ClientId | undefined> => {
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        body = {};
+      }
+      const client = typeof body === "object" && body !== null ? (body as { client?: unknown }).client : undefined;
+      if (client === undefined && !required) return undefined;
+      if (typeof client !== "string" || !(SUPPORTED_CLIENTS as readonly string[]).includes(client)) throw new ApiError(400, `client must be one of ${SUPPORTED_CLIENTS.join(", ")}`);
+      return client as ClientId;
+    };
+
+    // The presets, whether this checkout can run them, and where each is installed.
+    app.get("/api/dev/presets", async (c) => c.json({ available: demoRoot() !== undefined, presets: await presetStates(deps.lockfilePath) }));
+
+    // Add a preset to { client } with `latch add`. Returns { output } on success, 409 with it otherwise.
+    app.post("/api/dev/presets/:id/add", async (c) => {
+      const preset = presetParam(c.req.param("id"));
+      const client = (await clientBody(c, true))!;
+      if (demoRoot() === undefined) throw new ApiError(409, "the demo servers are not here: this is not a source checkout with demo/ and tsx");
+      const output = new PassThrough();
+      let text = "";
+      output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+      const code = await addPreset(preset, client, { lockfilePath: deps.lockfilePath, stateDir: deps.stateDir }, output);
+      const plain = text.replace(/\x1b\[[0-9;]*m/g, "").trim();
+      if (code !== 0) throw new ApiError(409, plain);
+      return c.json({ output: plain });
+    });
+
+    // Remove a preset from { client }, or from every client when none is named. Returns what was removed.
+    app.post("/api/dev/presets/:id/remove", async (c) => {
+      const preset = presetParam(c.req.param("id"));
+      const client = await clientBody(c, false);
+      return c.json(await removePreset(preset, client, { lockfilePath: deps.lockfilePath, stateDir: deps.stateDir }));
+    });
+  }
 
   // Rehearse a rug pull in memory with the proxy's own pipeline (src/ui/simulation.ts). Reads and
   // writes nothing, but is a POST, so it passes the same write guard. Returns SimulationResult.

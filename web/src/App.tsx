@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { AppShell, NAV } from "./components/AppShell";
 import { PageTransition } from "./components/PageTransition";
 import { EmptyState, LoadingState, Panel, buttonClass } from "./components/ui";
@@ -35,22 +35,20 @@ function NotFound({ path }: { path: string }) {
   );
 }
 
+const DevTools = lazy(() => import("./pages/DevTools").then((module) => ({ default: module.DevTools })));
+
 /**
- * The Simulation page when the API says development mode is on. In normal mode it leaves no
- * trace: a #/simulation link goes to Overview, replacing the history entry.
+ * A development-mode page (Simulation, Dev Tools) when the API says development mode is on. In
+ * normal mode it leaves no trace: a link to it goes to Overview, replacing the history entry.
  */
-function DevSimulation() {
+function DevOnly({ loading, children }: { loading: string; children: ReactNode }) {
   const { info, dev } = useData();
   const hidden = info.status !== "loading" && !dev;
   useEffect(() => {
     if (hidden) navigate({ page: "overview" }, { replace: true });
   }, [hidden]);
   if (!dev) return info.status === "loading" ? <LoadingState label="Loading..." /> : null;
-  return (
-    <Suspense fallback={<LoadingState label="Loading the simulation..." />}>
-      <Simulation />
-    </Suspense>
-  );
+  return <Suspense fallback={<LoadingState label={loading} />}>{children}</Suspense>;
 }
 
 function Page({ route }: { route: Route }) {
@@ -68,7 +66,17 @@ function Page({ route }: { route: Route }) {
     case "ci":
       return <GitCi />;
     case "simulation":
-      return <DevSimulation />;
+      return (
+        <DevOnly loading="Loading the simulation...">
+          <Simulation />
+        </DevOnly>
+      );
+    case "devtools":
+      return (
+        <DevOnly loading="Loading the dev tools...">
+          <DevTools />
+        </DevOnly>
+      );
     case "settings":
       return <Settings />;
     case "not-found":
