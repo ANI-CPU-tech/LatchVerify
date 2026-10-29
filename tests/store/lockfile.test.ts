@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import {
   applyApproval,
   emptyLockfile,
   findRecord,
+  mergeServers,
   readLockfile,
   serializeLockfile,
   writeLockfile,
@@ -339,5 +341,36 @@ describe("applyApproval", () => {
     expect(() => applyApproval(lock, changeFor(after), "alice", NOW)).toThrow(/server "mail" is not in the lockfile/);
     const proto = { ...(await changedForecast()), serverId: "constructor" };
     expect(() => applyApproval(lock, changeFor(proto), "alice", NOW)).toThrow(/is not in the lockfile/);
+  });
+});
+
+describe("mergeServers", () => {
+  const example = (): LockFile => LockFileSchema.parse(JSON.parse(readFileSync(fileURLToPath(new URL("../../latch.lock.example", import.meta.url)), "utf8")));
+  const pinned = (): LockFile => {
+    const lock = example();
+    return { ...lock, generatedAt: "2026-10-29T12:00:00.000Z", servers: { ...lock.servers, git: { transport: "stdio", command: "uvx", args: ["mcp-server-git"], tools: [] } } };
+  };
+
+  it("adds the new servers to the lockfile as it is now", () => {
+    const current = { ...emptyLockfile(), servers: { other: structuredClone(example().servers.weather!) } };
+    const { lock, added, taken } = mergeServers(current, pinned(), ["git", "weather"]);
+    expect(added).toEqual(["git", "weather"]);
+    expect(taken).toEqual([]);
+    expect(Object.keys(lock.servers).sort()).toEqual(["git", "other", "weather"]);
+    expect(lock.generatedAt).toBe("2026-10-29T12:00:00.000Z");
+    expect(current.servers).not.toHaveProperty("git");
+  });
+
+  it("keeps a server someone else pinned meanwhile, and reports it", () => {
+    const current = example();
+    current.servers.weather!.tools[0]!.approvedBy = "approved-meanwhile@example.com";
+    const { lock, added, taken } = mergeServers(current, pinned(), ["weather"]);
+    expect(added).toEqual([]);
+    expect(taken).toEqual(["weather"]);
+    expect(lock).toBe(current);
+  });
+
+  it("refuses an id the pinned lockfile does not have", () => {
+    expect(() => mergeServers(emptyLockfile(), pinned(), ["nope"])).toThrow('mergeServers: server "nope" is not in the pinned lockfile');
   });
 });

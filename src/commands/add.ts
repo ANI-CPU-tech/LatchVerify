@@ -13,7 +13,8 @@ import {
   type ClientServerEntry,
   type ProxyLaunch,
 } from "../config/clients.js";
-import { readLockfile, writeLockfile } from "../store/lockfile.js";
+import { mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
+import { withStateLock } from "../store/pending.js";
 import { defaultReviewer } from "../ui/server.js";
 import { commandLine, pinServer, proxiedEntry } from "./init.js";
 import { plural, printable } from "./text.js";
@@ -148,7 +149,13 @@ export async function runAdd(options: AddOptions): Promise<number> {
 
   // The lockfile goes first: a config is only ever wrapped around pins that exist.
   await mkdir(dirname(lockfilePath), { recursive: true });
-  await writeLockfile(lockfilePath, outcome.lock);
+  // Merged into latch.lock as it is now: an approval made while the server was queried is kept.
+  const taken = await withStateLock(stateDir, async () => {
+    const merged = mergeServers(await readLockfile(lockfilePath), outcome.lock, [name]);
+    if (merged.added.length > 0) await writeLockfile(lockfilePath, merged.lock);
+    return merged.taken.length > 0;
+  });
+  if (taken) return fail(`${name} was added to latch.lock by someone else meanwhile; nothing else written`);
   say(`${pc.green("✔")} wrote ${printable(lockfilePath)}`);
   try {
     await writeClientConfig({ ...config, servers: { [name]: entry } });

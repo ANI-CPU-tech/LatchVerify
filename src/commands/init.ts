@@ -20,7 +20,8 @@ import {
 import { analyzeToolList } from "../proxy/analysis.js";
 import { captureTools } from "../proxy/capture.js";
 import type { LockFile } from "../schema/index.js";
-import { applyApproval, readLockfile, serializeLockfile, writeLockfile } from "../store/lockfile.js";
+import { applyApproval, mergeServers, readLockfile, serializeLockfile, writeLockfile } from "../store/lockfile.js";
+import { withStateLock } from "../store/pending.js";
 import { defaultReviewer } from "../ui/server.js";
 import { configPlace, plural, printable, problemWarning } from "./text.js";
 
@@ -339,9 +340,17 @@ export async function runInit(options: InitOptions): Promise<number> {
   }
 
   if (lockChanged) {
+    // Pinning took a while without the lock: merge into latch.lock as it is now, so an approval
+    // or another pin made meanwhile is kept.
+    const newIds = Object.keys(next.servers).filter((id) => !Object.hasOwn(lock.servers, id));
     await mkdir(dirname(lockfilePath), { recursive: true });
-    await writeLockfile(lockfilePath, next);
+    const taken = await withStateLock(stateDir, async () => {
+      const merged = mergeServers(await readLockfile(lockfilePath), next, newIds);
+      if (merged.added.length > 0) await writeLockfile(lockfilePath, merged.lock);
+      return merged.taken;
+    });
     say(`${pc.green("✔")} wrote ${printable(lockfilePath)}`);
+    for (const id of taken) say(pc.yellow(`! ${printable(id)} was added to latch.lock by someone else meanwhile; that pin is kept`));
   }
   for (const { config, servers: entries } of rewrites) {
     try {

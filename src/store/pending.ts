@@ -64,6 +64,16 @@ export async function writePending(stateDir: string, changes: readonly PendingCh
 }
 
 /**
+ * Run `task` holding the state lock (<stateDir>/pending.json.lock, see withFileLock): the one lock
+ * every writer of the review queue and of latch.lock takes, so an approval, a rejection, a proxy
+ * queueing a change and a command pinning servers never overwrite each other's changes.
+ */
+export async function withStateLock<T>(stateDir: string, task: () => Promise<T>): Promise<T> {
+  await mkdir(stateDir, { recursive: true });
+  return withFileLock(join(stateDir, `${PENDING_FILE}.lock`), task);
+}
+
+/**
  * Read-modify-write the queue under an exclusive lock (<stateDir>/pending.json.lock, see
  * withFileLock), so the proxies of several servers, `latch review` and the review UI never
  * overwrite each other's changes. `update` gets the queue as it is on disk and returns the new
@@ -77,8 +87,7 @@ export async function updatePending(
   stateDir: string,
   update: (queue: PendingChange[]) => PendingChange[] | Promise<PendingChange[]>,
 ): Promise<PendingChange[]> {
-  await mkdir(stateDir, { recursive: true });
-  return withFileLock(join(stateDir, `${PENDING_FILE}.lock`), async () => {
+  return withStateLock(stateDir, async () => {
     const queue = await readPending(stateDir);
     const next = await update(queue);
     if (next !== queue) await writePending(stateDir, next);

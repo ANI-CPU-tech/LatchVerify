@@ -422,6 +422,36 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
     expect(conflict.text).toContain("! skipping weather (cursor, vscode): cursor and vscode launch it with different commands");
   });
 
+  it("keeps a server another writer added to latch.lock while init was pinning", async () => {
+    // Regression: init wrote back the lockfile it read before querying the servers, so a pin or
+    // approval made meanwhile was lost. This server adds "other" to latch.lock as it starts.
+    const other = { transport: "stdio", command: "uvx", args: ["mcp-server-other"], tools: [] };
+    const racing = {
+      command: process.execPath,
+      args: [
+        "-e",
+        `const fs = require("fs");
+const lock = JSON.parse(fs.readFileSync(process.env.LOCK, "utf8"));
+lock.servers.other = JSON.parse(process.env.OTHER);
+fs.writeFileSync(process.env.LOCK, JSON.stringify(lock, null, 2) + "\\n");
+const tools = JSON.parse(process.env.TOOLS);
+require("readline").createInterface({ input: process.stdin }).on("line", (line) => {
+  const m = JSON.parse(line);
+  if (m.id === undefined) return;
+  const result = m.method === "initialize" ? { protocolVersion: "2025-06-18" } : { tools };
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result }) + "\\n");
+});`,
+      ],
+      env: { LOCK: lockfilePath, OTHER: JSON.stringify(other), TOOLS: JSON.stringify(fixture("benign-tools.json")) },
+    };
+    await mkdir(dirname(lockfilePath), { recursive: true });
+    await writeFile(lockfilePath, `${JSON.stringify(emptyLockfile(), null, 2)}\n`);
+    await writeConfig("cursor", { mcpServers: { racing } });
+    const { code } = await init();
+    expect(code).toBe(0);
+    expect(Object.keys((await lockOnDisk()).servers).sort()).toEqual(["other", "racing"]);
+  });
+
   it("launches the proxy by absolute path, so a client without latch on its PATH can start it", async () => {
     // Regression: init wrote command "latch", which Claude Desktop could not spawn.
     const config = await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });

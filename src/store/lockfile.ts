@@ -196,3 +196,26 @@ export function applyApproval(lock: LockFile, change: PendingChange, approvedBy:
   if (!result.success) throw new Error(`applyApproval: the approved lockfile would be invalid\n${z.prettifyError(result.error)}`);
   return result.data;
 }
+
+/**
+ * Adds the servers `serverIds` of `pinned` to `current`, the lockfile as it is on disk now, for
+ * commands that pin servers outside the state lock and write under it (init, add, the background
+ * sync). A server `current` already has was pinned or approved by someone else meanwhile: it is
+ * kept as it is and reported in `taken`, never overwritten. Pure.
+ */
+export function mergeServers(current: LockFile, pinned: LockFile, serverIds: readonly string[]): { lock: LockFile; added: string[]; taken: string[] } {
+  const added: string[] = [];
+  const taken: string[] = [];
+  const servers = { ...current.servers };
+  for (const id of serverIds) {
+    if (!Object.hasOwn(pinned.servers, id)) throw new Error(`mergeServers: server "${id}" is not in the pinned lockfile`);
+    if (Object.hasOwn(servers, id)) {
+      taken.push(id);
+      continue;
+    }
+    servers[id] = structuredClone(pinned.servers[id]!);
+    added.push(id);
+  }
+  if (added.length === 0) return { lock: current, added, taken };
+  return { lock: { ...current, generatedAt: pinned.generatedAt, servers }, added, taken };
+}
