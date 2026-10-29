@@ -5,7 +5,10 @@ import type { Readable, Writable } from "node:stream";
 import { runAdvisory, type LlmOptions } from "../analyze/llm.js";
 import type { LogLevel } from "../config/env.js";
 import { createLogger } from "../log.js";
-import { readLockfile } from "../store/lockfile.js";
+import type { LockFile } from "../schema/index.js";
+import { appendEvent } from "../store/events.js";
+import { LockIntegrity } from "../store/integrity.js";
+import { emptyLockfile, parseLockfile, readLockfileText } from "../store/lockfile.js";
 import { PENDING_FILE, readPending } from "../store/pending.js";
 import { REJECTED_FILE, readRejected } from "../store/rejected.js";
 import { buildBlockError } from "./blocker.js";
@@ -79,7 +82,9 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
  *
  * latch.lock, the queue and the rejections are re-read whenever they change on disk, so an
  * approval or rejection made with `latch review` applies to the next tools/call without
- * restarting the proxy.
+ * restarting the proxy. A latch.lock whose content LatchVerify did not write (LockIntegrity) is
+ * not adopted: the proxy keeps the version it already trusts (at start, the copy LatchVerify last
+ * wrote, or an empty lockfile, which blocks every call), and logs a lock_tampered event.
  *
  * When the client closes its input, the server's stdin is closed once everything queued for
  * it is written; when the client stops reading, or either side sends a line longer than
@@ -98,9 +103,45 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
   const log = logger.info;
 
   const pendingPath = join(options.stateDir, PENDING_FILE);
+  const integrity = new LockIntegrity(options.lockfilePath);
+  // Once a record has vouched for latch.lock, a missing record later means it was removed.
+  let recorded = false;
+  /**
+   * latch.lock as it is on disk, if LatchVerify wrote it (or a person accepted it); `fallback`
+   * when the content is one the integrity record does not vouch for. Logged and recorded once
+   * per change on disk.
+   */
+  const loadLockfile = async (fallback: () => Promise<LockFile>): Promise<LockFile> => {
+    const text = await readLockfileText(options.lockfilePath);
+    if (text === undefined) return emptyLockfile();
+    const status = await integrity.check(text);
+    if (status === "trusted" || (status === "unrecorded" && !recorded)) {
+      const lock = parseLockfile(options.lockfilePath, text);
+      if (status === "trusted") recorded = true;
+      else logger.debug(`${options.lockfilePath} has no integrity record yet; LatchVerify records one on its next write`);
+      return lock;
+    }
+    logger.warn(
+      `${options.lockfilePath} was changed outside LatchVerify; keeping the last version it trusted. Run \`latch lock accept\` if the edit was yours, or \`latch lock restore\``,
+    );
+    await appendEvent(options.stateDir, {
+      kind: "lock_tampered",
+      at: new Date().toISOString(),
+      serverId: options.serverId,
+      path: options.lockfilePath,
+    }).catch((error: unknown) => logger.error(`could not write the event log: ${error instanceof Error ? error.message : String(error)}`));
+    return fallback();
+  };
+
   // Stamp before reading: a change that lands in between is picked up by the next refresh.
-  let lockStamp = await fileStamp(options.lockfilePath);
-  const lockfile = await readLockfile(options.lockfilePath);
+  // The integrity record is part of the stamp: `latch lock accept` changes trust, not the file.
+  const lockStampNow = async () => `${await fileStamp(options.lockfilePath)}|${await fileStamp(integrity.recordPath)}`;
+  let lockStamp = await lockStampNow();
+  const lockfile = await loadLockfile(async () => {
+    // Nothing trusted in memory yet: the copy LatchVerify last wrote, or nothing pinned at all.
+    const good = await integrity.lastGood();
+    return good === undefined ? emptyLockfile() : parseLockfile(options.lockfilePath, good);
+  });
   let pendingStamp = await fileStamp(pendingPath);
   const pending = await readPending(options.stateDir);
   const rejectedPath = join(options.stateDir, REJECTED_FILE);
@@ -165,12 +206,13 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     advise: options.llm === undefined ? undefined : (tool, cached) => runAdvisory(tool, options.llm!, cached),
     sendToServer: (message) => void outbox.push(message),
     refresh: async () => {
-      const nextLock = await fileStamp(options.lockfilePath).catch(() => lockStamp);
+      const nextLock = await lockStampNow().catch(() => lockStamp);
       if (nextLock !== lockStamp) {
         // Advance the stamp even on failure: a bad file is reported once, not on every call.
         lockStamp = nextLock;
         try {
-          ctx.lockfile = await readLockfile(options.lockfilePath);
+          const current = ctx.lockfile;
+          ctx.lockfile = await loadLockfile(async () => current);
           logger.debug(`reloaded ${options.lockfilePath}`);
         } catch (error) {
           logger.warn(`kept the previous latch.lock: ${error instanceof Error ? error.message : String(error)}`);

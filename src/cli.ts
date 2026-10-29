@@ -7,6 +7,7 @@ import { userLockfilePath } from "./config/paths.js";
 import { runAdd } from "./commands/add.js";
 import { runInit } from "./commands/init.js";
 import { runInspect } from "./commands/inspect.js";
+import { runLockAccept, runLockRestore, runLockStatus } from "./commands/lock.js";
 import { runProxy } from "./commands/proxy.js";
 import { runReview } from "./commands/review.js";
 import { runSetup, runUnlink } from "./commands/setup.js";
@@ -109,6 +110,22 @@ program
   .option("--json", "machine-readable output", false)
   // An unexpected failure is an error (3), never drift (1): CI must tell the two apart.
   .action((opts: { json: boolean }) => run(() => runVerify({ ...opts, lockfilePath: readingGlobals().lockfilePath }), VERIFY_EXIT.error));
+
+const lock = program
+  .command("lock")
+  .description("check latch.lock for edits made outside LatchVerify, and accept or undo them");
+lock
+  .command("status")
+  .description("say whether latch.lock is what LatchVerify last wrote (exit 1 when it was changed outside it)")
+  .action(() => run(() => runLockStatus(readingGlobals())));
+lock
+  .command("accept")
+  .description("trust latch.lock as it is now, after a git pull, merge or hand edit")
+  .action(() => run(() => runLockAccept(readingGlobals())));
+lock
+  .command("restore")
+  .description("put back the last version of latch.lock that LatchVerify wrote")
+  .action(() => run(() => runLockRestore(readingGlobals())));
 
 program
   .command("inspect")

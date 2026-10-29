@@ -165,6 +165,7 @@ const EVENT_TITLES: Record<LatchEvent["kind"], string> = {
   call_blocked: "Call blocked",
   approved: "Change approved",
   rejected: "Change rejected",
+  lock_tampered: "latch.lock changed outside LatchVerify",
 };
 
 export const EVENT_KINDS = Object.keys(EVENT_TITLES) as Array<LatchEvent["kind"]>;
@@ -194,6 +195,13 @@ export function describeEvent(event: LatchEvent): { title: string; subject: stri
       return { title, subject: `${event.serverId} / ${event.toolName}`, detail: `Approved by ${event.approvedBy}`, tone: "success" };
     case "rejected":
       return { title, subject: `${event.serverId} / ${event.toolName}`, detail: "Rejected; the tool stays blocked", tone: "neutral" };
+    case "lock_tampered":
+      return {
+        title,
+        subject: event.serverId,
+        detail: `${event.path}: the proxy kept the last version LatchVerify wrote. Run \`latch lock accept\` if the edit was yours, or \`latch lock restore\`.`,
+        tone: "destructive",
+      };
   }
 }
 

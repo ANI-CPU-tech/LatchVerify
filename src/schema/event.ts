@@ -12,7 +12,9 @@ export type LatchEvent =
   | { kind: "auto_passed"; at: string; serverId: string; toolName: string; tier: Tier }
   | { kind: "call_blocked"; at: string; serverId: string; toolName: string; reason: string }
   | { kind: "approved"; at: string; serverId: string; toolName: string; changeId: string; approvedBy: string }
-  | { kind: "rejected"; at: string; serverId: string; toolName: string; changeId: string };
+  | { kind: "rejected"; at: string; serverId: string; toolName: string; changeId: string }
+  /** The proxy of `serverId` found `path` changed outside LatchVerify and kept the last version it trusted. */
+  | { kind: "lock_tampered"; at: string; serverId: string; path: string };
 
 // Runtime mirror of LatchEvent. Names stay unconstrained strings: a blocked call logs whatever
 // tool name the client sent, and logging must not reject what actually happened.
@@ -39,6 +41,7 @@ export const LatchEventSchema = z.discriminatedUnion("kind", [
     approvedBy: z.string(),
   }),
   z.object({ kind: z.literal("rejected"), at, serverId: z.string(), toolName: z.string(), changeId: z.string() }),
+  z.object({ kind: z.literal("lock_tampered"), at, serverId: z.string(), path: z.string() }),
 ]);
 
 // Compile-time guard: the schema and the LatchEvent type must describe the same events.

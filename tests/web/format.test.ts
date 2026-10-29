@@ -107,6 +107,7 @@ describe("describeEvent", () => {
     { kind: "call_blocked", at, serverId: "weather", toolName: "get_forecast", reason: "hard-blocked pending review" },
     { kind: "approved", at, serverId: "weather", toolName: "x", changeId: "c", approvedBy: "alice@example.com" },
     { kind: "rejected", at, serverId: "weather", toolName: "x", changeId: "c" },
+    { kind: "lock_tampered", at, serverId: "weather", path: "/home/u/.config/latchverify/latch.lock" },
   ];
 
   it("covers every event kind", () => {
@@ -118,6 +119,12 @@ describe("describeEvent", () => {
     expect(describeEvent(events[2]!)).toMatchObject({ subject: "weather / get_forecast", detail: "Tier 3: hard-blocked", tone: "destructive" });
     expect(describeEvent(events[4]!)).toMatchObject({ detail: "hard-blocked pending review", tone: "destructive" });
     expect(describeEvent(events[5]!)).toMatchObject({ detail: "Approved by alice@example.com", tone: "success" });
+    expect(describeEvent(events[7]!)).toMatchObject({
+      title: "latch.lock changed outside LatchVerify",
+      subject: "weather",
+      detail: expect.stringContaining("latch lock accept"),
+      tone: "destructive",
+    });
   });
 });
 

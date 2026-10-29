@@ -9,7 +9,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startProxy, type ProxyOptions } from "../../src/proxy/index.js";
 import { readEvents } from "../../src/store/events.js";
-import { applyApproval, readLockfile, writeLockfile } from "../../src/store/lockfile.js";
+import { applyApproval, readLockfile, serializeLockfile, writeLockfile } from "../../src/store/lockfile.js";
+import { runLockAccept } from "../../src/commands/lock.js";
 import { dequeue, readPending, writePending } from "../../src/store/pending.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -304,6 +305,58 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     const bad = join(stateDir, "latch.lock");
     await writeFile(bad, "{ nope");
     await expect(run(echo, [], { lockfilePath: bad })).rejects.toThrow();
+  });
+});
+
+describe("tamper detection", () => {
+  it("keeps blocking when latch.lock is edited behind LatchVerify's back, until the edit is accepted", async () => {
+    const lock = join(stateDir, "latch.lock");
+    await writeLockfile(lock, await readLockfile(lockfilePath));
+    const readConfig = (JSON.parse(readFileSync(join(root, "tests/fixtures/poisoned-tools.json"), "utf8")).tools as Array<{ name: string }>).find(
+      (t) => t.name === "read_config",
+    )!;
+    const callReadConfig = (id: number) => request(id, "tools/call", { name: "read_config", arguments: {} });
+    const { messages } = await run(
+      { args: ["-e", echoServer([...benignTools, readConfig])] },
+      [
+        request(1, "tools/list"),
+        (out) => waitFor(() => out().includes('"id":1')),
+        // A server running as the same user approves its own change by editing latch.lock.
+        async () => {
+          const [change] = await readPending(stateDir);
+          const approved = applyApproval(await readLockfile(lock), change!, "attacker", new Date());
+          await writeFile(lock, serializeLockfile(approved));
+        },
+        callReadConfig(2),
+        (out) => waitFor(() => out().includes('"id":2')),
+        async () => {
+          expect(await runLockAccept({ lockfilePath: lock, output: new PassThrough() })).toBe(0);
+        },
+        callReadConfig(3),
+        (out) => waitFor(() => out().includes('"id":3')),
+      ],
+      { lockfilePath: lock },
+    );
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { code: -32001, data: { reason: { kind: "pending_review" } } } });
+    expect(messages.find((m) => m.id === 3)).toMatchObject({ result: { raw: expect.stringContaining("read_config") } });
+    expect(stderr.join("")).toContain(`[latch] warning: ${lock} was changed outside LatchVerify`);
+    expect((await readEvents(stateDir)).filter((e) => e.kind === "lock_tampered")).toEqual([
+      { kind: "lock_tampered", at: expect.any(String), serverId: "weather", path: lock },
+    ]);
+  });
+
+  it("starts from the last trusted copy when latch.lock was edited while no proxy ran", async () => {
+    const lock = join(stateDir, "latch.lock");
+    const trusted = await readLockfile(lockfilePath);
+    await writeLockfile(lock, trusted);
+    const emptied = { ...trusted, servers: {} };
+    await writeFile(lock, serializeLockfile(emptied));
+    const { messages } = await run(echo, [request(1, "tools/list"), alerts(2), (out) => waitFor(() => out().includes('"id":2'))], {
+      lockfilePath: lock,
+    });
+    // get_alerts is pinned in the trusted copy, so it still works; the edit is not adopted.
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ result: { raw: expect.stringContaining("get_alerts") } });
+    expect((await readEvents(stateDir)).map((e) => e.kind)).toContain("lock_tampered");
   });
 });
 
