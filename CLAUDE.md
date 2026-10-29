@@ -18,8 +18,12 @@ a regression test first.
   `tests/schema.test.ts`, `web/src/lib/mock.ts` and `latch.lock.example` depend
   on its shape.
 - `latch.lock.example` holds real hashes and capabilities; tests check both.
-- The review UI reads the hono API and falls back to `web/src/lib/mock.ts` when the
-  API is unreachable.
+- The review UI reads the hono API. Under the Vite dev server only, it falls back to
+  `web/src/lib/mock.ts` when the API is unreachable.
+- **Demo material is development-only.** `demo/`, `tests/fixtures`, `lib/mock.ts` and the
+  Simulation page stay in the repo for testing but never reach an installed build:
+  `LATCH_DEV=1` (`LatchEnv.dev`) gates `POST /api/simulate` and the Simulation page, and
+  `tests/packaging/no-demo.test.ts` builds the bundle and checks it.
 
 ## Stack (fixed, do not substitute)
 
@@ -103,10 +107,10 @@ that blocks on every reword gets disabled by its users.
 
 ## Review UI
 
-**API** (`src/ui/routes.ts`): `GET /api/pending`, `GET /api/pending/:id`,
+**API** (`src/ui/routes.ts`): `GET /api/info` (`{ version, dev }`), `GET /api/pending`, `GET /api/pending/:id`,
 `POST /api/pending/:id/approve|reject`, `GET /api/events?limit=`, `GET /api/lockfile`,
 `GET /api/lockfile/git` (read-only `git status`/`git log` of `latch.lock`, in
-`src/ui/git.ts`), `POST /api/simulate` (a rug pull rehearsed in memory by
+`src/ui/git.ts`), `POST /api/simulate` (development mode only, otherwise 404: a rug pull rehearsed in memory by
 `src/ui/simulation.ts` with the proxy's own analyzeToolList, applyApproval, shouldBlock and
 buildBlockError; it reads and writes no file, body capped at 1 MiB). It answers only on
 loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a loopback
@@ -161,8 +165,10 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
 **Security boundaries.** The UI displays tiers and decisions; the proxy and the API
 decide. There are no client-side security checks, no invented data, and nothing is
 sent off the machine (no remote fonts or scripts). Sample data (`lib/mock.ts`) appears
-only on the Review Queue, only when the API is unreachable, labeled, with actions
-disabled. No page shows live connection state, because nothing reports it: Servers
+only under the Vite dev server (`import.meta.env.MODE === "development"`, never `DEV`, which
+follows NODE_ENV), only on the Review Queue, only when the API is unreachable, labeled, with
+actions disabled. The Simulation nav entry is `devOnly` and the page is a `React.lazy` chunk,
+shown only when `GET /api/info` says `dev: true`. No page shows live connection state, because nothing reports it: Servers
 shows the last `tools_listed` event instead.
 
 **Themes.** Every color is a CSS variable in `web/src/index.css`, one block per

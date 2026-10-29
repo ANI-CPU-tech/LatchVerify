@@ -14,6 +14,10 @@
 - **Reviewers see the description a tool now serves**, in `latch review` and in the review UI, not only that it changed.
 - **`LATCH_LOG_LEVEL` works**: `debug` names every frame the proxy holds, rewrites or answers itself; `warn` keeps stderr quiet. Warnings and errors are tagged.
 
+### Changed
+- **The demo stays out of real installs.** The Simulation page and its API (`POST /api/simulate`) exist only in development mode, `LATCH_DEV=1`. Its code and the demo tool lists load as a separate chunk only then. An installed review UI never shows sample data: when the API is down, it says so.
+- **`GET /api/info`** reports the running version and whether development mode is on.
+
 ### Security
 - **Guarded servers no longer get LatchVerify's own variables.** The LLM API key and the paths of `latch.lock` and the review queue used to reach every wrapped server. No `LATCH_*` variable reaches a server now, and `.env` files only load `LATCH_*` lines.
 - **A server cannot approve its own change by editing `latch.lock`.** Every lockfile LatchVerify writes is recorded in an HMAC-signed integrity record under a per-user key. A proxy refuses a `latch.lock` the record does not vouch for, keeps the version it trusts and logs a `lock_tampered` event. After a `git pull`, run `latch lock accept`. This detects tampering; a program written against LatchVerify, running as the same user, can still defeat it.

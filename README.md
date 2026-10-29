@@ -10,8 +10,7 @@ calls to any tool whose capabilities changed without review.
 npm package: `latchverify` · CLI: `latch`
 
 > **Status: working prototype.** The proxy, the analysis pipeline, `init`, `review`
-> (terminal and web UI), `verify` and `inspect` are implemented and tested. See
-> [docs/DEMO.md](docs/DEMO.md) for the end-to-end rug-pull demo.
+> (terminal and web UI), `verify` and `inspect` are implemented and tested.
 
 ---
 
@@ -112,13 +111,21 @@ pnpm typecheck    # tsc over src/, tests/, demo/ and web/
 pnpm test         # vitest
 pnpm build        # emit dist/ (CLI) and dist/web/ (review UI served by `latch review --ui`)
 pnpm ui           # dev: hono API + Vite review UI with hot reload on http://localhost:5173
-pnpm demo:benign  # benign weather MCP server
-pnpm demo:evil    # rug-pull MCP server
 ```
 
 Copy `.env.example` to `.env` to change ports, paths or the reviewer name, or to
 enable the optional LLM advisory pass (any OpenAI-compatible API, such as Groq or
 OpenRouter). `latch` reads `./.env`; variables already set win.
+
+### Demo material
+
+The repository keeps the demo for development and testing. None of it ships in a package.
+
+- `pnpm demo:benign` and `pnpm demo:evil`: a benign weather MCP server and its rug-pull twin.
+  [docs/DEMO.md](docs/DEMO.md) walks through the rug pull end to end.
+- `LATCH_DEV=1` (in `.env`, or the shell running `pnpm ui` or `latch review --ui`) turns on
+  development mode: the review UI adds the Simulation page, which rehearses the rug pull in memory.
+- Under the Vite dev server only, the Review Queue shows labeled sample data when the API is down.
 
 ## Project layout
 
@@ -129,8 +136,8 @@ src/analyze/   capability extraction, Unicode/pattern detectors, differ, tiers, 
 src/store/     latch.lock, the .latch/ pending queue and event log
 src/commands/  init, setup, add, review, verify, inspect, proxy
 src/ui/        hono review API
-web/           Vite + React review UI (falls back to mock data when the API is down)
-demo/          benign and evil demo servers
+web/           Vite + React review UI
+demo/          benign and evil demo servers (development only)
 docs/          design docs
 packaging/     installers: Windows (Inno Setup), deb, Arch, portable tar.gz
 ```
