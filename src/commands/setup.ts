@@ -25,8 +25,8 @@ export const CLIENT_NAMES: Record<ClientId, string> = {
 };
 
 export interface SetupOptions {
-  /** The client to link. The CLI defaults it to claude-code. */
-  client: ClientId;
+  /** The client to link, or undefined for every client found (`--all`). The CLI defaults it to claude-code. */
+  client: ClientId | undefined;
   /** Show what would change without writing. */
   dryRun: boolean;
   /** The lockfile to create and link to. The CLI defaults it to userLockfilePath(). */
@@ -44,12 +44,12 @@ export interface SetupOptions {
 }
 
 /**
- * `latch setup`: link a client (Claude Code by default) to latch with no questions, as installers
- * run it right after installing.
+ * `latch setup`: link a client (Claude Code by default), or with `--all` every client found, to
+ * latch with no questions, as installers run it right after installing.
  *
  * 1. Creates the lockfile (by default the per-user one, see userLockfilePath) if it does not exist,
  *    so latch review and verify find it from any directory without asking.
- * 2. When the client's config exists, runs `latch init` for that client, non-interactively: every
+ * 2. When the client's config exists, runs `latch init` for that client (or all), non-interactively: every
  *    stdio server is pinned (trust on first use; tools with hidden-intent findings are held for
  *    review) and its entry rewritten to start `latch proxy`, with a .bak of the config.
  *
@@ -62,22 +62,25 @@ export interface SetupOptions {
 export async function runSetup(options: SetupOptions): Promise<number> {
   const out = options.output ?? process.stdout;
   const say = (line = "") => void out.write(`${line}\n`);
-  const name = CLIENT_NAMES[options.client];
+  const client = options.client;
+  const name = client === undefined ? "every MCP client found" : CLIENT_NAMES[client];
   const lockfilePath = resolve(options.lockfilePath);
 
   say(pc.bold(`latch setup: linking ${name} to ${printable(lockfilePath)}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
 
   const detection = await detectClients();
-  const installed = detection.configs.some((config) => config.client === options.client);
-  const problem = detection.problems.find((candidate) => candidate.client === options.client);
+  const mine = (config: { client: ClientId }) => client === undefined || config.client === client;
+  const linked = [...new Set(detection.configs.filter(mine).map((config) => config.client))];
+  const problems = detection.problems.filter(mine);
   let code = 0;
-  if (problem !== undefined) {
-    say(pc.yellow(problemWarning(problem)));
+  if (client !== undefined && problems.length > 0) {
+    for (const problem of problems) say(pc.yellow(problemWarning(problem)));
     say(`  Fix the file, or let ${name} rewrite it, then run \`latch setup\` again.`);
     code = 1;
-  } else if (installed) {
+  } else if (linked.length > 0 || problems.length > 0) {
+    // init reports the problems of --all itself, and links every config it can read.
     code = await runInit({
-      client: options.client,
+      ...(client === undefined ? {} : { client }),
       dryRun: options.dryRun,
       lockfilePath,
       ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir }),
@@ -88,8 +91,11 @@ export async function runSetup(options: SetupOptions): Promise<number> {
       interactive: false,
       hints: false,
     });
+  } else if (client === undefined) {
+    say(pc.yellow("! no MCP client is set up on this machine yet."));
+    say("  LatchVerify is installed. After installing an MCP client, run `latch setup --all` again to link it.");
   } else {
-    say(pc.yellow(`! ${name} is not set up on this machine yet (no ${printable(clientConfigPath(options.client))}).`));
+    say(pc.yellow(`! ${name} is not set up on this machine yet (no ${printable(clientConfigPath(client))}).`));
     say(`  LatchVerify is installed. After installing ${name}, run \`latch setup\` again to link it.`);
   }
 
@@ -105,16 +111,24 @@ export async function runSetup(options: SetupOptions): Promise<number> {
   }
 
   say();
-  if (installed && !options.dryRun) say(`next: restart ${name} so its MCP servers start behind latch`);
+  if (linked.length > 0 && !options.dryRun && code === 0) {
+    say(`next: restart ${listOf(linked.map((id) => CLIENT_NAMES[id]))} so ${linked.length === 1 ? "its" : "their"} MCP servers start behind latch`);
+  }
   say(`next: review tool changes with \`latch review --ui\` (it opens ${printable(lockfilePath)} from any directory)`);
   return code;
+}
+
+/** "a", "a and b", "a, b and c". */
+function listOf(items: readonly string[]): string {
+  return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 /** Variables latch init adds to a wrapped entry's env; unlinking removes exactly these. */
 const LATCH_ENTRY_ENV = ["LATCH_LOCKFILE_PATH", "LATCH_STATE_DIR"] as const;
 
 export interface UnlinkOptions {
-  client: ClientId;
+  /** The client to unlink, or undefined for every client (`--remove --all`, as uninstallers run it). */
+  client: ClientId | undefined;
   dryRun: boolean;
   output?: Writable;
 }
@@ -131,21 +145,25 @@ export interface UnlinkOptions {
 export async function runUnlink(options: UnlinkOptions): Promise<number> {
   const out = options.output ?? process.stdout;
   const say = (line = "") => void out.write(`${line}\n`);
-  const name = CLIENT_NAMES[options.client];
+  const client = options.client;
+  const name = client === undefined ? "every MCP client" : CLIENT_NAMES[client];
   say(pc.bold(`latch setup --remove: unlinking ${name}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
 
   const detection = await detectClients();
-  const problems = detection.problems.filter((candidate) => candidate.client === options.client);
+  const mine = (config: { client: ClientId }) => client === undefined || config.client === client;
+  const problems = detection.problems.filter(mine);
   for (const problem of problems) say(pc.red(problemWarning(problem)));
-  const configs = detection.configs.filter((candidate) => candidate.client === options.client);
+  const configs = detection.configs.filter(mine);
   if (configs.length === 0) {
-    if (problems.length === 0) say(`nothing to unlink: ${name} is not set up on this machine (no ${printable(clientConfigPath(options.client))})`);
+    if (problems.length === 0) {
+      say(client === undefined ? "nothing to unlink: no MCP client is set up on this machine" : `nothing to unlink: ${name} is not set up on this machine (no ${printable(clientConfigPath(client))})`);
+    }
     return problems.length > 0 ? 1 : 0;
   }
 
   // A client can keep servers in more than one file (Amazon Q): each is restored on its own.
   let code = problems.length > 0 ? 1 : 0;
-  let restoredAny = false;
+  const restoredClients = new Set<ClientId>();
   for (const config of configs) {
     const restored: Record<string, ClientServerEntry> = {};
     for (const [serverId, entry] of Object.entries(config.servers)) {
@@ -169,10 +187,12 @@ export async function runUnlink(options: UnlinkOptions): Promise<number> {
       code = 1;
       continue;
     }
-    restoredAny = true;
+    restoredClients.add(config.client);
     say(`${pc.green("✔")} restored ${plural(ids.length, "server")} in ${configPlace(config)} (the previous file is kept as a .bak copy): ${printable(ids.join(", "))}`);
   }
-  if (restoredAny) say(`next: restart ${name}. latch.lock is kept, so linking again later keeps your approvals.`);
+  if (restoredClients.size > 0) {
+    say(`next: restart ${listOf([...restoredClients].map((id) => CLIENT_NAMES[id]))}. latch.lock is kept, so linking again later keeps your approvals.`);
+  }
   return code;
 }
 

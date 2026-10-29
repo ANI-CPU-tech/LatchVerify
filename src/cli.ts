@@ -66,13 +66,15 @@ const setupGlobals = () => {
 
 program
   .command("setup")
-  .description("link Claude Code to latch with no questions: wrap its MCP servers and create the per-user latch.lock (installers run this)")
+  .description("link Claude Code (or --all clients) to latch with no questions: wrap their MCP servers and create the per-user latch.lock (installers run this)")
   .addOption(new Option("--client <id>", "client to link").choices(SUPPORTED_CLIENTS).default("claude-code"))
+  .addOption(new Option("--all", "link (or with --remove, unlink) every MCP client found on this machine").conflicts("client"))
   .option("--remove", "unlink instead: give the client's servers their original commands back (latch.lock is kept)", false)
   .option("--dry-run", "show what would change without writing", false)
-  .action((opts: { client: (typeof SUPPORTED_CLIENTS)[number]; remove: boolean; dryRun: boolean }) =>
-    run(() => (opts.remove ? runUnlink(opts) : runSetup({ ...opts, ...setupGlobals() }))),
-  );
+  .action((opts: { client: (typeof SUPPORTED_CLIENTS)[number]; all?: boolean; remove: boolean; dryRun: boolean }) => {
+    const client = opts.all ? undefined : opts.client;
+    return run(() => (opts.remove ? runUnlink({ client, dryRun: opts.dryRun }) : runSetup({ client, dryRun: opts.dryRun, ...setupGlobals() })));
+  });
 
 program
   .command("add")

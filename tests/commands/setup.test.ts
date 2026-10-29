@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runSetup, runUnlink, type SetupOptions } from "../../src/commands/setup.js";
-import { INSTALL_LAUNCH, clientConfigPath, clientLocations, wrapWithProxy } from "../../src/config/clients.js";
+import { INSTALL_LAUNCH, clientConfigPath, clientLocations, wrapWithProxy, type ClientId } from "../../src/config/clients.js";
 import { LockFileSchema } from "../../src/schema/index.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -90,6 +90,65 @@ describe.skipIf(process.platform === "win32")("runSetup", () => {
     await claudeConfig({ mcpServers: {} });
     expect((await setup()).code).toBe(0);
     expect((await lockOnDisk()).servers).toEqual({});
+  });
+
+  describe("--all", () => {
+    /** Writes `contents` as `client`'s main config. */
+    async function clientConfig(client: ClientId, contents: unknown): Promise<string> {
+      const path = clientConfigPath(client);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, typeof contents === "string" ? contents : JSON.stringify(contents, null, 2));
+      return path;
+    }
+
+    it("links every client it finds, then --remove --all unlinks every one", async () => {
+      const claude = await claudeConfig({ mcpServers: { weather } });
+      const zed = await clientConfig("zed", `// my settings\n{\n  "theme": "One Dark",\n  "context_servers": {\n    "forecast": ${JSON.stringify(weather)}\n  }\n}\n`);
+      const zedBefore = await readFile(zed, "utf8");
+
+      const { code, text } = await setup({ client: undefined });
+      expect(code).toBe(0);
+      expect(text).toContain(`latch setup: linking every MCP client found to ${lockfilePath}`);
+      expect(text).toContain("next: restart Claude Code and Zed so their MCP servers start behind latch");
+      expect(JSON.parse(await readFile(claude, "utf8")).mcpServers.weather.args).toContain("proxy");
+      const zedLinked = await readFile(zed, "utf8");
+      expect(zedLinked.startsWith('// my settings\n{\n  "theme": "One Dark",')).toBe(true);
+      expect(zedLinked).toContain('"proxy"');
+
+      const output = new PassThrough();
+      let unlinked = "";
+      output.setEncoding("utf8").on("data", (chunk: string) => (unlinked += chunk));
+      expect(await runUnlink({ client: undefined, dryRun: false, output })).toBe(0);
+      expect(unlinked).toContain("latch setup --remove: unlinking every MCP client");
+      expect(unlinked).toContain("next: restart Claude Code and Zed.");
+      expect(JSON.parse(await readFile(claude, "utf8"))).toEqual({ mcpServers: { weather } });
+      const zedRestored = await readFile(zed, "utf8");
+      expect(zedRestored.startsWith("// my settings\n")).toBe(true);
+      expect(JSON.parse(zedRestored.replace("// my settings\n", ""))).toEqual(JSON.parse(zedBefore.replace("// my settings\n", "")));
+    });
+
+    it("succeeds with a note when no client is set up, and still creates the lockfile", async () => {
+      const { code, text } = await setup({ client: undefined });
+      expect(code).toBe(0);
+      expect(text).toContain("! no MCP client is set up on this machine yet.");
+      expect(text).toContain("run `latch setup --all` again");
+      await lockOnDisk();
+      const output = new PassThrough();
+      let unlinked = "";
+      output.setEncoding("utf8").on("data", (chunk: string) => (unlinked += chunk));
+      expect(await runUnlink({ client: undefined, dryRun: false, output })).toBe(0);
+      expect(unlinked).toContain("nothing to unlink: no MCP client is set up on this machine");
+    });
+
+    it("links the clients it can read and exits 1 over one it cannot", async () => {
+      const claude = await claudeConfig({ mcpServers: { weather } });
+      const broken = await clientConfig("cursor", "{ broken");
+      const { code, text } = await setup({ client: undefined });
+      expect(code).toBe(1);
+      expect(text).toContain(`! cursor: ${broken} is not valid JSON`);
+      expect(JSON.parse(await readFile(claude, "utf8")).mcpServers.weather.args).toContain("proxy");
+      expect(await readFile(broken, "utf8")).toBe("{ broken");
+    });
   });
 
   it("links and unlinks Claude Code's per-project servers too", async () => {
