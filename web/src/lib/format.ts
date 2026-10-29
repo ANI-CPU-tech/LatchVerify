@@ -1,4 +1,4 @@
-import type { CapabilitySet, LatchEvent, LockFile, PendingChange, Tier, Transport } from "@schema/index.js";
+import type { CapabilitySet, ClientReport, ClientServerState, ClientsReport, LatchEvent, LockFile, PendingChange, Tier, Transport } from "@schema/index.js";
 
 /** Semantic color of a badge, dot or row. Maps to theme tokens in components/ui.tsx. */
 export type Tone = "neutral" | "success" | "warning" | "destructive" | "info";
@@ -306,4 +306,39 @@ export function lastApproval(lock: LockFile): { at: string; by: string; tool: st
     }
   }
   return latest;
+}
+
+/** How a client's state reads on the dashboard. */
+export function clientAnswer(answer: ClientReport["answer"]): { label: string; tone: Tone } {
+  switch (answer) {
+    case "connected":
+      return { label: "Connected", tone: "success" };
+    case "declined":
+      return { label: "Not connected", tone: "neutral" };
+    case "unasked":
+      return { label: "Not connected yet", tone: "warning" };
+  }
+}
+
+/**
+ * What one server of a client is, for its row: protected (with what latch.lock and the queue say),
+ * waiting for its first run, or not protected and why. `summary` is the server's serverSummaries
+ * entry, when latch.lock or the logs know it.
+ */
+export function clientServerStatus(server: ClientServerState, answer: ClientReport["answer"], summary: ServerSummary | undefined): { label: string; tone: Tone; detail: string } {
+  if (!server.linked) {
+    return answer === "connected"
+      ? { label: "Not linked", tone: "warning", detail: "LatchVerify links it on its next sync, unless latch.lock pinned it with another launch." }
+      : { label: "Not protected", tone: "neutral", detail: "The client starts it directly. Connect the client to put it behind latch." };
+  }
+  if (server.pin === "absent") return { label: "Not in latch.lock", tone: "warning", detail: "Linked, but latch.lock does not list it: every call is blocked until it is pinned." };
+  if (server.pin === "first_run") return { label: "Pinned on first run", tone: "neutral", detail: "Its tools are pinned the first time the client starts it." };
+  if (summary !== undefined && summary.pending > 0) return { ...summary.status, detail: `${summary.pending} ${summary.pending === 1 ? "change waits" : "changes wait"} for review.` };
+  return { label: "Protected", tone: "success", detail: `${server.tools} ${server.tools === 1 ? "tool" : "tools"} pinned in latch.lock.` };
+}
+
+/** Servers latch.lock (or the logs) know that no client on this machine starts, for their own section. */
+export function unclaimedServers(summaries: readonly ServerSummary[], report: ClientsReport | null): ServerSummary[] {
+  const claimed = new Set(report?.clients.flatMap((client) => client.servers.map((server) => server.id)) ?? []);
+  return summaries.filter((summary) => !claimed.has(summary.id));
 }

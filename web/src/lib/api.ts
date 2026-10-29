@@ -1,5 +1,10 @@
 import { z } from "zod";
 import {
+  ClientsReportSchema,
+  SettingsSchema,
+  type ClientsReport,
+  type Settings,
+  type SettingsPatch,
   LatchEventSchema,
   LockFileSchema,
   PendingChangeSchema,
@@ -152,6 +157,36 @@ export type ApiInfo = z.infer<typeof ApiInfoSchema>;
 /** The serving LatchVerify's version and mode (LATCH_DEV). */
 export async function fetchInfo(signal?: AbortSignal): Promise<ApiInfo> {
   return getJson("/api/info", ApiInfoSchema, "info", signal);
+}
+
+/** The MCP clients on this machine, per client (GET /api/clients). Names and states only. */
+export async function fetchClients(signal?: AbortSignal): Promise<ClientsReport> {
+  return getJson("/api/clients", ClientsReportSchema, "client list", signal);
+}
+
+/**
+ * Connects a client (the user's yes: its servers are linked now and pinned on their first run) or
+ * disconnects it (their original commands come back). Resolves with the new client list.
+ */
+export async function setClientConnected(id: string, connected: boolean): Promise<ClientsReport> {
+  return getJson(`/api/clients/${encodeURIComponent(id)}/${connected ? "connect" : "disconnect"}`, ClientsReportSchema, "client list", undefined, {
+    method: "POST",
+    headers: { [CLIENT_HEADER]: CLIENT_NAME },
+  });
+}
+
+/** The user's settings (GET /api/settings). */
+export async function fetchSettings(signal?: AbortSignal): Promise<Settings> {
+  return getJson("/api/settings", SettingsSchema, "settings", signal);
+}
+
+/** Changes some settings (PUT /api/settings) and resolves with all of them as saved. */
+export async function saveSettings(patch: SettingsPatch): Promise<Settings> {
+  return getJson("/api/settings", SettingsSchema, "settings", undefined, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", [CLIENT_HEADER]: CLIENT_NAME },
+    body: JSON.stringify(patch),
+  });
 }
 
 /** The approved state in latch.lock. */

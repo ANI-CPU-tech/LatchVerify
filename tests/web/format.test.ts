@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { LockFileSchema, type LatchEvent, type PendingChange } from "../../src/schema/index.js";
+import { LockFileSchema, type ClientServerState, type LatchEvent, type PendingChange } from "../../src/schema/index.js";
 import { VERIFY_EXIT } from "../../src/commands/verify.js";
 import { VERIFY_EXIT_CODES } from "../../web/src/lib/ci.js";
 import {
@@ -16,6 +16,9 @@ import {
   relativeTime,
   sentence,
   serverSummaries,
+  clientAnswer,
+  clientServerStatus,
+  unclaimedServers,
 } from "../../web/src/lib/format.js";
 import { mockReviewItems } from "../../web/src/lib/mock.js";
 import { href, parseRoute } from "../../web/src/lib/router.js";
@@ -242,5 +245,33 @@ describe("sentence", () => {
     expect(sentence("The LatchVerify review API is not running (HTTP 502 from the proxy)")).toBe("The LatchVerify review API is not running (HTTP 502 from the proxy).");
     expect(sentence("is the review API running?")).toBe("is the review API running?");
     expect(sentence("Done. ")).toBe("Done.");
+  });
+});
+
+describe("clients on the dashboard", () => {
+  const server = (extra: Partial<ClientServerState> = {}): ClientServerState => ({ id: "weather", program: "npx", linked: true, pin: "pinned", tools: 2, ...extra });
+
+  it("labels each answer", () => {
+    expect(clientAnswer("connected")).toEqual({ label: "Connected", tone: "success" });
+    expect(clientAnswer("declined")).toEqual({ label: "Not connected", tone: "neutral" });
+    expect(clientAnswer("unasked")).toEqual({ label: "Not connected yet", tone: "warning" });
+  });
+
+  it("says what each server is: protected, waiting for its first run, or not protected and why", () => {
+    expect(clientServerStatus(server(), "connected", undefined)).toEqual({ label: "Protected", tone: "success", detail: "2 tools pinned in latch.lock." });
+    expect(clientServerStatus(server({ pin: "first_run", tools: 0 }), "connected", undefined).label).toBe("Pinned on first run");
+    expect(clientServerStatus(server({ pin: "absent" }), "connected", undefined)).toMatchObject({ label: "Not in latch.lock", tone: "warning" });
+    expect(clientServerStatus(server({ linked: false }), "unasked", undefined)).toMatchObject({ label: "Not protected", tone: "neutral" });
+    expect(clientServerStatus(server({ linked: false }), "connected", undefined)).toMatchObject({ label: "Not linked", tone: "warning" });
+    const [weather] = serverSummaries(lock, [alerts], []);
+    expect(clientServerStatus(server(), "connected", weather)).toEqual({ ...weather!.status, detail: "1 change waits for review." });
+  });
+
+  it("finds the servers latch.lock knows that no client here starts", () => {
+    const summaries = serverSummaries(lock, [], []);
+    const report = { clients: [{ id: "cursor" as const, name: "Cursor", answer: "connected" as const, files: [], servers: [server()], problems: [] }] };
+    expect(unclaimedServers(summaries, report)).toEqual([]);
+    expect(unclaimedServers(summaries, { clients: [] }).map((s) => s.id)).toEqual(["weather"]);
+    expect(unclaimedServers(summaries, null).map((s) => s.id)).toEqual(["weather"]);
   });
 });

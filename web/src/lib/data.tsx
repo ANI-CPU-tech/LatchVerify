@@ -1,12 +1,14 @@
-import type { LatchEvent, LockFile } from "@schema/index.js";
+import type { ClientsReport, LatchEvent, LockFile, Settings } from "@schema/index.js";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ApiUnreachableError,
+  fetchClients,
   fetchEvents,
   fetchInfo,
   fetchLockfile,
   fetchLockfileGit,
   fetchPending,
+  fetchSettings,
   type ApiInfo,
   type LockfileGitStatus,
   type ReviewItem,
@@ -55,6 +57,10 @@ export interface AppData {
   lockfile: Resource<LockFile>;
   events: Resource<LatchEvent[]>;
   git: Resource<LockfileGitStatus>;
+  /** The MCP clients on this machine and their servers. */
+  clients: Resource<ClientsReport>;
+  /** The user's settings. */
+  settings: Resource<Settings>;
   /** The API's version and mode. Fetched on load and on reload, not polled: it does not change. */
   info: Resource<ApiInfo>;
   /**
@@ -81,6 +87,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const lockfile = useResource(fetchLockfile, reloadKey, pollKey);
   const events = useResource((signal) => fetchEvents(undefined, signal), reloadKey, pollKey);
   const git = useResource(fetchLockfileGit, reloadKey, pollKey);
+  const clients = useResource(fetchClients, reloadKey, pollKey);
+  const settings = useResource(fetchSettings, reloadKey, pollKey);
   const info = useResource(fetchInfo, reloadKey, 0);
   const reload = useCallback(() => setReloadKey((n) => n + 1), []);
 
@@ -103,10 +111,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     lockfile,
     events,
     git,
+    clients,
+    settings,
     info,
     dev: info.status === "ready" && info.data.dev,
     reload,
-    busy: [pending, lockfile, events, git, info].some(isBusy),
+    busy: [pending, lockfile, events, git, clients, settings, info].some(isBusy),
     api,
   };
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
