@@ -114,6 +114,15 @@ program
   // An unexpected failure is an error (3), never drift (1): CI must tell the two apart.
   .action((opts: { json: boolean }) => run(async () => (await import("./commands/verify.js")).runVerify({ ...opts, lockfilePath: readingGlobals().lockfilePath }), VERIFY_EXIT.error));
 
+program
+  .command("watch")
+  .description("keep every MCP client linked in the background: pin and wrap new servers as they appear, and notify about changes to review and blocked calls")
+  .option("--once", "sync a single time, print what changed and exit", false)
+  .option("--no-notify", "log notifications instead of showing them on the desktop")
+  .action((opts: { once: boolean; notify: boolean }) =>
+    run(async (env) => (await import("./commands/watch.js")).runWatch({ ...opts, ...setupGlobals(), logLevel: env.logLevel })),
+  );
+
 const lock = program
   .command("lock")
   .description("check latch.lock for edits made outside LatchVerify, and accept or undo them");

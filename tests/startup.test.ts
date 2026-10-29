@@ -45,6 +45,11 @@ describe("latch at startup", () => {
     ]);
   });
 
+  it("keeps the review UI's server and the prompts out of the background watcher", () => {
+    const graph = startupGraph("commands/watch.ts");
+    for (const heavy of ["hono", "@hono/node-server", "@clack/prompts", "ui/server.js"]) expect(graph.has(heavy), heavy).toBe(false);
+  });
+
   it("leaves the LLM client out of a proxy that does not use it", () => {
     expect(startupGraph("commands/proxy.ts").has("analyze/llm.js")).toBe(false);
   });
