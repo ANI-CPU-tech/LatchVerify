@@ -77,6 +77,10 @@ describe("the Linux install hooks", () => {
       expect(read(script), script).not.toMatch(/\$(?:repo\/packaging\/linux|src)\/latchverify-review/);
     }
     expect(read("linux/build-deb.sh")).toContain('chmod 4755 "$lib/desktop/chrome-sandbox"');
+    // Installed as root: every user must be able to read the app, whatever modes the build left.
+    expect(read("linux/build-deb.sh")).toContain('chmod -R go+rX,go-w "$root"');
+    expect(read("linux/build-tarball.sh")).toContain('chmod -R go+rX,go-w "$dir"');
+    expect(read("../packaging/build-desktop.ts")).toContain("chmodSync(desktop, 0o755)");
     expect(read("linux/install.sh")).toContain('"$src/install-kind"');
   });
 

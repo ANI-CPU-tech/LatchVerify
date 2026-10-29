@@ -26,7 +26,7 @@ printf 'tarball\n' > "$dir/install-kind"
 install -m 755 "$repo/packaging/linux/latch" "$repo/packaging/linux/install.sh" "$repo/packaging/linux/uninstall.sh" "$dir/"
 install -m 644 "$repo/packaging/linux/io.github.vinayakkam.LatchVerify.desktop" "$repo/LICENSE" "$dir/"
 install -m 644 "$repo/web/public/favicon.svg" "$dir/io.github.vinayakkam.LatchVerify.svg"
-chmod -R go-w "$dir"
+chmod -R go+rX,go-w "$dir"
 
 mkdir -p "$out"
 archive="$(readlink -f "$out")/$name.tar.gz"

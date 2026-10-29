@@ -10,7 +10,7 @@
  *
  * Usage: pnpm -s exec tsx packaging/build-desktop.ts <stage-dir> [linux|win32] [x64|arm64]
  */
-import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultSanitizePackageJson, packager } from "@electron/packager";
@@ -53,6 +53,8 @@ export async function buildDesktop(stageDir: string, platform: "linux" | "win32"
   const desktop = join(stage, "desktop");
   rmSync(desktop, { recursive: true, force: true });
   renameSync(built, desktop);
+  // packager builds in a private temp directory (0700); installed as root, users could not enter it.
+  chmodSync(desktop, 0o755);
   rmSync(out, { recursive: true, force: true });
   return desktop;
 }

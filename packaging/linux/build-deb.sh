@@ -37,9 +37,10 @@ ln -s ../lib/latchverify/desktop/latchverify-desktop "$root/usr/bin/latchverify-
 install -Dm 644 "$repo/packaging/linux/io.github.vinayakkam.LatchVerify.desktop" "$root/usr/share/applications/io.github.vinayakkam.LatchVerify.desktop"
 install -Dm 644 "$repo/web/public/favicon.svg" "$root/usr/share/icons/hicolor/scalable/apps/io.github.vinayakkam.LatchVerify.svg"
 install -Dm 644 "$repo/LICENSE" "$root/usr/share/doc/latchverify/copyright"
-# Files must not be group- or world-writable, whatever the build machine's umask, and the tree's
-# root (mktemp makes it 0700) must not carry odd permissions into the package's "./".
-chmod -R go-w "$root"
+# Files must be readable and not group- or world-writable, whatever the build machine's umask or a
+# tool's private temp directories (0700), and the tree's root (mktemp makes it 0700) must not carry
+# odd permissions into the package's "./".
+chmod -R go+rX,go-w "$root"
 chmod 755 "$root"
 # Chromium's setuid sandbox helper: root-owned (--root-owner-group) and setuid, as Electron needs it.
 chmod 4755 "$lib/desktop/chrome-sandbox"
