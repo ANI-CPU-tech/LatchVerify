@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchHash, programName } from "../../src/analyze/hash.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { INSTALL_LAUNCH, clientConfigPath, unwrapProxy, wrapWithProxy, type ClientId, type ClientServerEntry } from "../../src/config/clients.js";
 import { syncClients, type SyncOptions } from "../../src/daemon/sync.js";
@@ -64,7 +65,7 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
     const entry = (await servers(path)).weather!;
     expect(entry.args!.slice(0, INSTALL_LAUNCH.args.length)).toEqual(INSTALL_LAUNCH.args);
     expect(entry).toEqual(wrapWithProxy("weather", stub("w"), INSTALL_LAUNCH, { lockfilePath: options.lockfilePath, stateDir: options.stateDir }));
-    expect((await lockOnDisk()).servers.weather).toEqual({ transport: "stdio", command: stub("w").command, args: stub("w").args, tools: [], trustOnFirstUse: true });
+    expect((await lockOnDisk()).servers.weather).toEqual({ transport: "stdio", program: programName(stub("w").command), launch: launchHash(stub("w").command, stub("w").args!), tools: [], trustOnFirstUse: true });
 
     const before = await readFile(path, "utf8");
     const second = await syncClients(options);

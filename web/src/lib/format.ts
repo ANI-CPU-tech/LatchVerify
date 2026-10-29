@@ -233,8 +233,8 @@ export interface ServerSummary {
   /** False for a server that appears in the queue or log but not in latch.lock. */
   pinned: boolean;
   transport: Transport | null;
-  /** Command and args (stdio) or URL (http), as recorded in latch.lock. */
-  command: string | null;
+  /** The program the server runs, as latch.lock names it ("npx"); latch.lock never keeps its arguments. */
+  program: string | null;
   approvedTools: number;
   pending: number;
   highestPendingTier: Tier | null;
@@ -245,8 +245,6 @@ export interface ServerSummary {
   blockedCalls: number;
   status: { label: string; tone: Tone };
 }
-
-const quoteArg = (arg: string): string => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : JSON.stringify(arg));
 
 /**
  * Per-server summaries, latch.lock servers first (sorted by id), then servers that only appear
@@ -273,14 +271,16 @@ export function serverSummaries(lock: LockFile | null, pending: PendingChange[],
         ? { label: "High-risk change", tone: "destructive" }
         : highest !== null
           ? { label: "Review needed", tone: "warning" }
-          : entry
-            ? { label: "Matches latch.lock", tone: "success" }
-            : { label: "Not pinned", tone: "neutral" };
+          : entry?.trustOnFirstUse === true
+            ? { label: "Linked, waiting for first run", tone: "neutral" }
+            : entry
+              ? { label: "Matches latch.lock", tone: "success" }
+              : { label: "Not pinned", tone: "neutral" };
     return {
       id,
       pinned: entry !== undefined,
       transport: entry?.transport ?? null,
-      command: entry ? [entry.command, ...entry.args].map(quoteArg).join(" ") : null,
+      program: entry?.program ?? null,
       approvedTools: entry?.tools.length ?? 0,
       pending: queued.length,
       highestPendingTier: highest,

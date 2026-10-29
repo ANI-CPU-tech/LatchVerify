@@ -111,8 +111,19 @@ program
   .command("verify")
   .description("CI check: exit non-zero if any server drifted from latch.lock")
   .option("--json", "machine-readable output", false)
+  .option(
+    "--config <file>",
+    "MCP config with the servers' launch lines (latch.lock keeps only their hash); repeatable. Default: ./.mcp.json, then this machine's client configs",
+    (value: string, previous: string[]) => [...previous, value],
+    [],
+  )
   // An unexpected failure is an error (3), never drift (1): CI must tell the two apart.
-  .action((opts: { json: boolean }) => run(async () => (await import("./commands/verify.js")).runVerify({ ...opts, lockfilePath: readingGlobals().lockfilePath }), VERIFY_EXIT.error));
+  .action((opts: { json: boolean; config: string[] }) =>
+    run(
+      async () => (await import("./commands/verify.js")).runVerify({ json: opts.json, configs: opts.config, lockfilePath: readingGlobals().lockfilePath }),
+      VERIFY_EXIT.error,
+    ),
+  );
 
 program
   .command("watch")

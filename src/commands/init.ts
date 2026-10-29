@@ -20,7 +20,8 @@ import {
   type ProxyLaunch,
 } from "../config/clients.js";
 import type { LockFile } from "../schema/index.js";
-import { linkServer, mergeServers, readLockfile, serializeLockfile, writeLockfile } from "../store/lockfile.js";
+import { programName } from "../analyze/hash.js";
+import { launchesAs, linkServer, mergeServers, readLockfile, serializeLockfile, writeLockfile } from "../store/lockfile.js";
 import { withStateLock } from "../store/pending.js";
 import { configPlace, plural, printable, problemWarning } from "./text.js";
 
@@ -200,7 +201,7 @@ export async function runInit(options: InitOptions): Promise<number> {
       options: servers.map((server) => ({
         value: server.serverId,
         label: printable(server.serverId),
-        hint: `${server.clients.join(", ")}: ${commandLine(server.command, server.args)}${Object.hasOwn(lock.servers, server.serverId) ? " (already pinned)" : ""}`,
+        hint: `${server.clients.join(", ")}: ${programOf(server.command)}${Object.hasOwn(lock.servers, server.serverId) ? " (already pinned)" : ""}`,
       })),
       initialValues: servers.map((server) => server.serverId),
       required: false,
@@ -226,11 +227,11 @@ export async function runInit(options: InitOptions): Promise<number> {
     const id = printable(server.serverId);
     const existing = Object.hasOwn(next.servers, server.serverId) ? next.servers[server.serverId]! : undefined;
     if (existing !== undefined) {
-      if (existing.transport === "stdio" && existing.command === server.command && isDeepStrictEqual(existing.args, server.args)) {
+      if (launchesAs(existing, server.command, server.args)) {
         say(`${pc.green("✔")} ${id}: already in latch.lock (${plural(existing.tools.length, "tool")}); changes go through \`latch review\``);
         ready.push(server);
       } else {
-        say(pc.red(`✖ ${id}: latch.lock launches it as ${commandLine(existing.command, existing.args)}, but the client runs ${commandLine(server.command, server.args)}; left unchanged`));
+        say(pc.red(`✖ ${id}: the client starts it differently than latch.lock pinned it (${printable(existing.program)}, client: ${printable(programName(server.command))}); left unchanged`));
         failed = true;
       }
       continue;
@@ -250,7 +251,7 @@ export async function runInit(options: InitOptions): Promise<number> {
     for (const { config, servers: entries } of rewrites) {
       say(`would rewrite ${configPlace(config)}:`);
       for (const [serverId, entry] of Object.entries(entries)) {
-        say(`  ${printable(serverId)}: ${commandLine(entry.command, entry.args ?? [])}`);
+        say(`  ${printable(serverId)}: ${programOf(unwrapProxy(entry).command)}, started through latch proxy`);
       }
     }
     if (!lockChanged && rewrites.length === 0) say("nothing to change");
@@ -336,6 +337,10 @@ export function planRewrites(
   });
 }
 
-export function commandLine(command: string, args: readonly string[]): string {
-  return printable([command, ...args].join(" "));
+/**
+ * How a server is named in messages: its program only ("npx"), never the rest of its launch line,
+ * whose arguments may hold a key (`--token ...`).
+ */
+export function programOf(command: string): string {
+  return printable(programName(command));
 }

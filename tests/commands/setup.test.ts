@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { launchHash, programName } from "../../src/analyze/hash.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runSetup, runUnlink, type SetupOptions } from "../../src/commands/setup.js";
 import { INSTALL_LAUNCH, clientConfigPath, clientLocations, wrapWithProxy, type ClientId } from "../../src/config/clients.js";
@@ -64,7 +65,7 @@ describe.skipIf(process.platform === "win32")("runSetup", { timeout: 30_000 }, (
       },
       numStartups: 3,
     });
-    expect((await lockOnDisk()).servers.weather).toEqual({ transport: "stdio", command: weather.command, args: weather.args, tools: [], trustOnFirstUse: true });
+    expect((await lockOnDisk()).servers.weather).toEqual({ transport: "stdio", program: programName(weather.command), launch: launchHash(weather.command, weather.args), tools: [], trustOnFirstUse: true });
   });
 
   it("changes nothing when run again", async () => {

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { launchHash, programName } from "../../src/analyze/hash.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseEnv, runAdd, type AddOptions } from "../../src/commands/add.js";
 import { INSTALL_LAUNCH, clientConfigPath, type ClientServerEntry } from "../../src/config/clients.js";
@@ -107,7 +108,7 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     });
     expect(await readdir(dirname(configPath))).toEqual([configPath.split("/").pop()]);
 
-    expect((await lockOnDisk()).servers).toEqual({ weather: { transport: "stdio", command: weather[0], args: weather.slice(1), tools: [], trustOnFirstUse: true } });
+    expect((await lockOnDisk()).servers).toEqual({ weather: { transport: "stdio", program: programName(weather[0]!), launch: launchHash(weather[0]!, weather.slice(1)), tools: [], trustOnFirstUse: true } });
   });
 
   it("creates the client config when there is none", async () => {
@@ -161,7 +162,7 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     await writeConfig({ mcpServers: {} });
     const { code } = await add({ name: "later", command: ["latch-no-such-binary-for-test"] });
     expect(code).toBe(0);
-    expect((await lockOnDisk()).servers.later).toMatchObject({ command: "latch-no-such-binary-for-test", trustOnFirstUse: true });
+    expect((await lockOnDisk()).servers.later).toMatchObject({ program: "latch-no-such-binary-for-test", trustOnFirstUse: true });
   });
 
   it("refuses a bad name or a missing --env variable before starting anything", async () => {
@@ -179,7 +180,9 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     expect(code).toBe(0);
     expect(text).toContain("✔ weather: would link; its tools are pinned the first time claude-desktop starts it");
     expect(text).toContain(`would write ${lockfilePath} and add weather to ${configPath}:`);
-    expect(text).toContain(`${INSTALL_LAUNCH.command} ${INSTALL_LAUNCH.args.join(" ")} --lockfile ${lockfilePath} --state-dir ${stateDir()} proxy --server weather -- `);
+    // The program only: the rest of the launch line may hold a key.
+    expect(text).toContain(`  ${programName(weather[0]!)}, started through latch proxy`);
+    expect(text).not.toContain("weather-server.ts");
     expect(await readFile(configPath, "utf8")).toBe(before);
     expect(await exists(lockfilePath)).toBe(false);
   });

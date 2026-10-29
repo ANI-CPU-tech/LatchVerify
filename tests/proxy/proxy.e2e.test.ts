@@ -1,3 +1,4 @@
+import { launchHash, programName } from "../../src/analyze/hash.js";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
@@ -474,7 +475,7 @@ describe("startProxy, first run of a server linked to be trusted on first use", 
 
   it("does not trust a mark added to latch.lock outside LatchVerify", async () => {
     // LatchVerify wrote the server without the mark; a server marks itself afterwards.
-    await writeLockfile(linkedLock, { ...emptyLockfile(), servers: { weather: { transport: "stdio", command: process.execPath, args: echo.args, tools: [] } } });
+    await writeLockfile(linkedLock, { ...emptyLockfile(), servers: { weather: { transport: "stdio", program: programName(process.execPath), launch: launchHash(process.execPath, echo.args), tools: [] } } });
     const forged = JSON.parse(await readFile(linkedLock, "utf8"));
     forged.servers.weather.trustOnFirstUse = true;
     await writeFile(linkedLock, JSON.stringify(forged, null, 2));

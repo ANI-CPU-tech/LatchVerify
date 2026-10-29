@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { collectServers, planRewrites, type InitServer, type SkippedServer } from "../commands/init.js";
 import { INSTALL_LAUNCH, detectClients, writeClientConfig, type ClientId, type ConfigProblem, type ProxyLaunch } from "../config/clients.js";
 import type { LockFile, Settings } from "../schema/index.js";
-import { linkServer, mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
+import { launchesAs, linkServer, mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { withStateLock } from "../store/pending.js";
 import { clientEnabled } from "../store/settings.js";
 
@@ -81,7 +81,7 @@ export async function syncClients(options: SyncOptions): Promise<SyncResult> {
   for (const server of servers) {
     const pinned = Object.hasOwn(current.servers, server.serverId) ? current.servers[server.serverId]! : undefined;
     if (pinned === undefined) continue;
-    if (pinned.transport === "stdio" && pinned.command === server.command && isDeepStrictEqual(pinned.args, server.args)) {
+    if (launchesAs(pinned, server.command, server.args)) {
       ready.push(server);
     } else {
       result.failed.push({ serverId: server.serverId, reason: "latch.lock launches it with another command than the client does; left unwrapped" });

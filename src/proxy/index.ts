@@ -11,6 +11,7 @@ import { LockIntegrity } from "../store/integrity.js";
 import { emptyLockfile, parseLockfile, pinFirstRun, readLockfileText, writeLockfile } from "../store/lockfile.js";
 import { PENDING_FILE, readPending, withStateLock } from "../store/pending.js";
 import { defaultReviewer } from "../config/reviewer.js";
+import { programName } from "../analyze/hash.js";
 import { REJECTED_FILE, readRejected } from "../store/rejected.js";
 import { buildBlockError } from "./blocker.js";
 import { routeFrame, type InterceptDecision, type InterceptorContext } from "./interceptor.js";
@@ -152,7 +153,8 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     log(`server "${options.serverId}" is not in ${options.lockfilePath}; its tool calls stay blocked until it is pinned`);
   }
 
-  logger.debug(`starting ${options.serverId}: ${[options.command, ...options.args].join(" ")}`);
+  // The program only: arguments may hold a key (`--token ...`), and logs end up in bug reports.
+  logger.debug(`starting ${options.serverId}: ${programName(options.command)} with ${options.args.length} argument(s)`);
   const child = spawnUpstream(options.command, options.args);
   await new Promise<void>((resolve, reject) => {
     child.once("spawn", resolve);

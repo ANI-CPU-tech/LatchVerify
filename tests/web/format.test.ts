@@ -164,19 +164,21 @@ describe("serverSummaries", () => {
       blockedCalls: 1,
       status: { label: "High-risk change", tone: "destructive" },
     });
-    expect(weather!.command).toContain("demo/weather-server.ts");
+    expect(weather!.program).toBe("npx");
   });
 
   it("says a server with nothing pending matches latch.lock, and lists unpinned servers last", () => {
     const summaries = serverSummaries(lock, [], [{ kind: "list_changed", at, serverId: "aaa-unpinned" }]);
     expect(summaries.map((s) => s.id)).toEqual([...Object.keys(lock.servers).sort(), "aaa-unpinned"]);
     expect(summaries[0]!.status).toEqual({ label: "Matches latch.lock", tone: "success" });
-    expect(summaries.at(-1)).toMatchObject({ pinned: false, transport: null, command: null, status: { label: "Not pinned" } });
+    expect(summaries.at(-1)).toMatchObject({ pinned: false, transport: null, program: null, status: { label: "Not pinned" } });
   });
 
-  it("quotes arguments that need it", () => {
-    const custom = { ...lock, servers: { s: { transport: "stdio" as const, command: "node", args: ["my server.js", "--x=1"], tools: [] } } };
-    expect(serverSummaries(custom, [], [])[0]!.command).toBe('node "my server.js" --x=1');
+  it("names the program only, and says when a linked server has not run yet", () => {
+    const custom = { ...lock, servers: { s: { transport: "stdio" as const, program: "node", launch: "a".repeat(64), tools: [], trustOnFirstUse: true as const } } };
+    const [summary] = serverSummaries(custom, [], []);
+    expect(summary!.program).toBe("node");
+    expect(summary!.status).toEqual({ label: "Linked, waiting for first run", tone: "neutral" });
   });
 
   it("counts tools and finds the latest approval", () => {

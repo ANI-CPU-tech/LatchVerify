@@ -46,10 +46,10 @@ export function Servers() {
                   {server.status.label}
                 </Badge>
               </div>
-              {server.command !== null ? (
-                <code className="block truncate rounded-sm bg-muted px-2 py-1 font-mono text-xs" title={server.command}>
-                  {server.command}
-                </code>
+              {server.program !== null ? (
+                <p className="text-xs text-muted-foreground">
+                  Runs <code className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-foreground">{server.program}</code>
+                </p>
               ) : (
                 <p className="text-xs text-muted-foreground">Not in latch.lock: every call to it is blocked as unpinned.</p>
               )}

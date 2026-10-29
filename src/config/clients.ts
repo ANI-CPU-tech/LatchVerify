@@ -228,6 +228,30 @@ async function readClientConfig(client: ClientId, { path, serversPath }: ClientL
   return client === "claude-code" ? [config, ...claudeCodeProjects(config, parsed.value)] : [config];
 }
 
+/** Keys under which MCP configs keep their server maps, across clients and project files. */
+const SERVER_MAP_KEYS = ["mcpServers", "servers", "context_servers"] as const;
+
+/**
+ * The stdio servers of any MCP config file (a project's .mcp.json, a client's config), by id, as
+ * detection reduces them: launch and env variable names, no env values. Wrapped entries are given
+ * back unwrapped, with their real launch. For `latch verify`, which needs launch lines that
+ * latch.lock does not keep.
+ *
+ * @throws Error naming the file when it cannot be read or is not a JSON object.
+ */
+export async function readServersFile(path: string): Promise<Record<string, ClientServerEntry>> {
+  const parsed = parseJsonc(await readFile(path, "utf8"));
+  if (!parsed.ok) throw new Error(`${path} is not valid JSON: ${parsed.error}`);
+  if (!isPlainObject(parsed.value)) throw new Error(`${path} is not a JSON object`);
+  const servers: Record<string, ClientServerEntry> = {};
+  for (const key of SERVER_MAP_KEYS) {
+    for (const [id, entry] of Object.entries(stdioServers(parsed.value[key]))) {
+      if (!Object.hasOwn(servers, id)) Object.defineProperty(servers, id, { value: unwrapProxy(entry), enumerable: true, writable: true, configurable: true });
+    }
+  }
+  return servers;
+}
+
 /**
  * The stdio entries of a server map, each reduced to its command, args and env variable names.
  * Env values and every other key are left behind here, right after parsing.

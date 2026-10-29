@@ -14,7 +14,7 @@ import {
 } from "../config/clients.js";
 import { linkServer, mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { withStateLock } from "../store/pending.js";
-import { commandLine, proxiedEntry } from "./init.js";
+import { programOf, proxiedEntry } from "./init.js";
 import { printable } from "./text.js";
 
 export interface AddOptions {
@@ -120,7 +120,7 @@ export async function runAdd(options: AddOptions): Promise<number> {
   say(`${pc.green("✔")} ${printable(name)}: ${verb("linked", "would link")}; its tools are pinned the first time ${client} starts it`);
   if (options.dryRun) {
     say(`would write ${printable(lockfilePath)} and add ${printable(name)} to ${printable(config.path)}:`);
-    say(`  ${commandLine(entry.command, entry.args ?? [])}`);
+    say(`  ${programOf(command)}, started through latch proxy`);
     return 0;
   }
 

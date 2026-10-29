@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Writable } from "node:stream";
@@ -5,12 +6,18 @@ import pc from "picocolors";
 import { analyzeToolList } from "../proxy/analysis.js";
 import { captureTools } from "../proxy/capture.js";
 import type { CapabilityDelta, Finding, LockFile, ServerEntry, Tier } from "../schema/index.js";
-import { readLockfile } from "../store/lockfile.js";
+import { detectClients, readServersFile, unwrapProxy, type ClientServerEntry } from "../config/clients.js";
+import { launchesAs, readLockfile } from "../store/lockfile.js";
 import { plural, printable } from "./text.js";
 import { VERIFY_EXIT } from "./exit-codes.js";
 
 export interface VerifyOptions {
   lockfilePath: string;
+  /**
+   * MCP config files to take the servers' launch lines from (--config), since latch.lock keeps only
+   * a hash of each. Defaults to ./.mcp.json when it exists, then this machine's client configs.
+   */
+  configs?: string[];
   /** Emit a machine-readable report instead of coloured text. */
   json: boolean;
   /** Deadline for capturing each server's tools. Defaults to DEFAULT_CAPTURE_TIMEOUT_MS. */
@@ -44,8 +51,8 @@ export interface ToolReport {
 
 export interface ServerReport {
   serverId: string;
-  command: string;
-  args: string[];
+  /** The program the server runs (latch.lock's `program`); never its arguments, which may hold a key. */
+  program: string;
   status: VerifyStatus;
   /** Protocol version the server answered with; null when it named none. */
   specVersion?: string | null;
@@ -56,7 +63,7 @@ export interface ServerReport {
 }
 
 /** Format version of the --json report; bumped on incompatible changes. */
-export const VERIFY_REPORT_VERSION = 1;
+export const VERIFY_REPORT_VERSION = 2;
 
 /** The --json report. Strings are as the servers sent them; JSON escaping keeps them inert. */
 export interface VerifyReport {
@@ -113,23 +120,76 @@ async function buildReport(options: VerifyOptions): Promise<VerifyReport> {
     return failed(error instanceof Error ? error.message : String(error));
   }
 
+  let sources: LaunchSource[];
+  try {
+    sources = await launchSources(options.configs);
+  } catch (error) {
+    return failed(error instanceof Error ? error.message : String(error));
+  }
   const servers: ServerReport[] = [];
   for (const serverId of Object.keys(lock.servers).sort()) {
-    servers.push(await verifyServer(lock, serverId, lock.servers[serverId]!, options.timeoutMs));
+    servers.push(await verifyServer(lock, serverId, lock.servers[serverId]!, sources, options.timeoutMs));
   }
   const status = servers.reduce<VerifyStatus>((worst, server) => (EXIT_FOR[server.status] > EXIT_FOR[worst] ? server.status : worst), "ok");
   return { version: VERIFY_REPORT_VERSION, lockfile, status, exitCode: EXIT_FOR[status], servers };
 }
 
-async function verifyServer(lock: LockFile, serverId: string, server: ServerEntry, timeoutMs: number | undefined): Promise<ServerReport> {
-  const base = { serverId, command: server.command, args: server.args };
+/** A config file's servers, to find launch lines in. */
+interface LaunchSource {
+  path: string;
+  servers: Record<string, ClientServerEntry>;
+}
+
+/**
+ * Where launch lines come from: the `configs` given, else ./.mcp.json (a project's committed
+ * servers) when it exists, then every client config on this machine. A file named with --config
+ * that cannot be read stops verify; the defaults are skipped when unreadable.
+ */
+async function launchSources(configs: readonly string[] | undefined): Promise<LaunchSource[]> {
+  if (configs !== undefined && configs.length > 0) {
+    return Promise.all(configs.map(async (path) => ({ path: resolve(path), servers: await readServersFile(resolve(path)) })));
+  }
+  const sources: LaunchSource[] = [];
+  const project = resolve(".mcp.json");
+  if (existsSync(project)) sources.push({ path: project, servers: await readServersFile(project) });
+  for (const config of (await detectClients()).configs) {
+    sources.push({ path: config.path, servers: Object.fromEntries(Object.entries(config.servers).map(([id, entry]) => [id, unwrapProxy(entry)])) });
+  }
+  return sources;
+}
+
+/** The launch of `serverId` that latch.lock pinned, from the first source that has one, or why there is none. */
+function findLaunch(serverId: string, server: ServerEntry, sources: readonly LaunchSource[]): ClientServerEntry | string {
+  const seen: string[] = [];
+  for (const source of sources) {
+    if (!Object.hasOwn(source.servers, serverId)) continue;
+    const entry = source.servers[serverId]!;
+    if (launchesAs(server, entry.command, entry.args ?? [])) return entry;
+    seen.push(source.path);
+  }
+  return seen.length > 0
+    ? `${seen.join(", ")} start${seen.length === 1 ? "s" : ""} it differently than latch.lock pinned it; review the change with \`latch init\` or fix the config`
+    : "no launch line for it: latch.lock keeps only a hash of it, so pass the MCP config that starts it with --config (for example .mcp.json)";
+}
+
+async function verifyServer(
+  lock: LockFile,
+  serverId: string,
+  server: ServerEntry,
+  sources: readonly LaunchSource[],
+  timeoutMs: number | undefined,
+): Promise<ServerReport> {
+  const base = { serverId, program: server.program };
   if (server.transport !== "stdio") {
     return { ...base, status: "error", error: `transport "${server.transport}" is not supported; only stdio servers can be verified`, tools: [] };
   }
+  const launch = findLaunch(serverId, server, sources);
+  if (typeof launch === "string") return { ...base, status: "error", error: launch, tools: [] };
 
   let captured;
   try {
-    captured = await captureTools(server.command, server.args, timeoutMs === undefined ? {} : { timeoutMs });
+    // The process environment only: env values in a config (keys) are never read, so CI passes its secrets as its own env.
+    captured = await captureTools(launch.command, launch.args ?? [], timeoutMs === undefined ? {} : { timeoutMs });
   } catch (error) {
     return { ...base, status: "error", error: error instanceof Error ? error.message : String(error), tools: [] };
   }
@@ -176,7 +236,7 @@ function renderText(report: VerifyReport): string {
   const count = report.servers.length;
   lines.push(pc.bold(`latch verify: ${count} ${count === 1 ? "server" : "servers"} in ${report.lockfile}`));
   for (const server of report.servers) {
-    lines.push("", `${pc.bold(printable(server.serverId))}  ${pc.dim(printable([server.command, ...server.args].join(" ")))}`);
+    lines.push("", `${pc.bold(printable(server.serverId))}  ${pc.dim(printable(server.program))}`);
     if (server.error !== undefined) {
       lines.push(pc.red(`  ✖ could not verify: ${printable(server.error)}`));
       continue;

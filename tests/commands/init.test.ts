@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { launchHash, programName } from "../../src/analyze/hash.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { collectServers, runInit, type InitOptions } from "../../src/commands/init.js";
 import { LockFileSchema, type LockFile } from "../../src/schema/index.js";
@@ -148,7 +149,9 @@ describe.skipIf(process.platform === "win32")("runInit", { timeout: 30_000 }, ()
     expect(text).toContain("✔ weather: would link; its tools are pinned the first time claude-desktop starts it");
     expect(text).toContain(`would write ${lockfilePath} with 1 server`);
     expect(text).toContain(`would rewrite ${config}:`);
-    expect(text).toContain(`  weather: ${[INSTALL_LAUNCH.command, ...INSTALL_LAUNCH.args].join(" ")} --lockfile ${lockfilePath} --state-dir ${join(home, "repo", ".latch")} proxy --server weather -- `);
+    // The program only: the rest of the launch line may hold a key.
+    expect(text).toContain(`  weather: ${basename(process.execPath)}, started through latch proxy`);
+    expect(text).not.toContain("weather-server.ts");
     expect(await readFile(config, "utf8")).toBe(before);
     expect(await files(config)).toEqual(["claude_desktop_config.json"]);
     await expect(readdir(join(home, "repo"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -166,7 +169,7 @@ describe.skipIf(process.platform === "win32")("runInit", { timeout: 30_000 }, ()
     expect(JSON.parse(await readFile(config, "utf8"))).toEqual({ mcpServers: { weather: expectedEntry(weatherEntry) }, other: 1 });
     expect(await files(config)).toEqual(["claude_desktop_config.json"]);
 
-    expect((await lockOnDisk()).servers.weather).toEqual({ transport: "stdio", command: weatherEntry.command, args: weatherEntry.args, tools: [], trustOnFirstUse: true });
+    expect((await lockOnDisk()).servers.weather).toEqual({ transport: "stdio", program: programName(weatherEntry.command), launch: launchHash(weatherEntry.command, weatherEntry.args), tools: [], trustOnFirstUse: true });
   });
 
   it("writes an explicit state directory into the wrapped entry's args, never its env", async () => {
@@ -231,19 +234,19 @@ describe.skipIf(process.platform === "win32")("runInit", { timeout: 30_000 }, ()
     expect(text).not.toContain("sk-secret");
     expect(JSON.parse(await readFile(config, "utf8")).mcpServers.absent).toEqual(expectedEntry(absent, "absent"));
     expect(await readFile(lockfilePath, "utf8")).not.toContain("sk-secret");
-    expect((await lockOnDisk()).servers.absent).toEqual({ transport: "stdio", command: absent.command, args: absent.args, tools: [], trustOnFirstUse: true });
+    expect((await lockOnDisk()).servers.absent).toEqual({ transport: "stdio", program: programName(absent.command), launch: launchHash(absent.command, absent.args), tools: [], trustOnFirstUse: true });
   });
 
   it("leaves a server alone when latch.lock launches it differently", async () => {
     const lock = example();
-    lock.servers.weather!.command = "something-else";
+    lock.servers.weather!.launch = launchHash("something-else", ["tsx", "demo/weather-server.ts"]);
     await mkdir(dirname(lockfilePath), { recursive: true });
     await writeFile(lockfilePath, JSON.stringify(lock));
     const config = await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
     const before = await readFile(config, "utf8");
     const { code, text } = await init();
     expect(code).toBe(1);
-    expect(text).toMatch(/✖ weather: latch\.lock launches it as something-else tsx demo\/weather-server\.ts, but the client runs .*; left unchanged/);
+    expect(text).toContain(`✖ weather: the client starts it differently than latch.lock pinned it (npx, client: ${basename(process.execPath)}); left unchanged`);
     expect(await readFile(config, "utf8")).toBe(before);
   });
 

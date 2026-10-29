@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { z } from "zod";
-import { LOCKFILE_VERSION, LockFileSchema, type LockFile, type PendingChange, type ToolRecord } from "../schema/index.js";
+import { launchHash, programName } from "../analyze/hash.js";
+import { LOCKFILE_VERSION, LockFileSchema, type LockFile, type PendingChange, type ServerEntry, type ToolRecord } from "../schema/index.js";
 import { LockIntegrity } from "./integrity.js";
 import { replaceFile } from "./replace.js";
 
@@ -31,11 +32,32 @@ const errorCode = (error: unknown): string | undefined =>
   error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
 
 /**
+ * Lockfiles written before ServerEntry had `program` and `launch` kept each server's `command` and
+ * `args`, launch line and all. Such an entry is read as the new shape: its program name and the
+ * hash of its launch line (launchHash); the line itself is dropped, and the next write leaves it
+ * out of the file. Anything else is returned untouched, for the schema to judge.
+ */
+function withoutLaunchLines(data: unknown): unknown {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return data;
+  const servers = (data as { servers?: unknown }).servers;
+  if (typeof servers !== "object" || servers === null || Array.isArray(servers)) return data;
+  const converted = Object.fromEntries(
+    Object.entries(servers).map(([id, entry]) => {
+      if (typeof entry !== "object" || entry === null || "launch" in entry) return [id, entry];
+      const { command, args, ...rest } = entry as Record<string, unknown>;
+      if (typeof command !== "string" || !Array.isArray(args) || !args.every((arg) => typeof arg === "string")) return [id, entry];
+      return [id, { ...rest, program: programName(command), launch: launchHash(command, args as string[]) }];
+    }),
+  );
+  return { ...data, servers: converted };
+}
+
+/**
  * Validates parsed JSON as a lockfile this version of latch understands. Throws LockfileError
  * listing every schema problem with its field path, or an unsupported version.
  */
 function validateLockfile(path: string, data: unknown): LockFile {
-  const result = LockFileSchema.safeParse(data);
+  const result = LockFileSchema.safeParse(withoutLaunchLines(data));
   if (!result.success) throw new LockfileError(path, `invalid lockfile\n${z.prettifyError(result.error)}`, { cause: result.error });
   if (result.data.version !== LOCKFILE_VERSION) {
     throw new LockfileError(path, `unsupported lockfile version "${result.data.version}" (this latch reads version "${LOCKFILE_VERSION}")`);
@@ -233,8 +255,16 @@ export function linkServer(lock: LockFile, serverId: string, command: string, ar
   return {
     ...lock,
     generatedAt: now.toISOString(),
-    servers: { ...lock.servers, [serverId]: { transport: "stdio", command, args: [...args], tools: [], trustOnFirstUse: true } },
+    servers: {
+      ...lock.servers,
+      [serverId]: { transport: "stdio", program: programName(command), launch: launchHash(command, args), tools: [], trustOnFirstUse: true },
+    },
   };
+}
+
+/** True when `server` is pinned for exactly this launch line. */
+export function launchesAs(server: ServerEntry, command: string, args: readonly string[]): boolean {
+  return server.transport === "stdio" && server.launch === launchHash(command, args);
 }
 
 /**
