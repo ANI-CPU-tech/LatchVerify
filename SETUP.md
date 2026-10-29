@@ -17,7 +17,9 @@ Commands are written for bash or zsh; fish equivalents are noted where they diff
 | Approve or reject queued changes | `latch review` (terminal) | works |
 | Browser review screen | `latch review --ui`, or `pnpm ui` for development | works |
 | Demo servers (benign and rug pull), development only | `pnpm demo:benign`, `pnpm demo:evil` | works |
-| Simulation page, development only | `LATCH_DEV=1` with `pnpm ui` or `latch review --ui` | works |
+| Simulation and Dev Tools pages, development only | `LATCH_DEV=1` with `pnpm ui` or `latch review --ui` | works |
+| Add a demo server to a client | `pnpm demo:add <preset> --client <id>` | works |
+| Background sync and desktop notifications | `latch watch` (`--once`, `--no-notify`) | works |
 | LLM advisory pass | — | built in `src/analyze/llm.ts`, **not wired in yet** |
 
 ## 1. Install (once)
@@ -52,7 +54,7 @@ ignored. Every variable has a working default:
 | `LATCH_LOG_LEVEL` | `info` | `debug` to see every frame the proxy holds, rewrites or answers; `warn` for a quieter stderr |
 | `LATCH_LLM_ENABLED`, `LATCH_LLM_API_KEY` | `false`, empty | you want the optional LLM advisory pass (any OpenAI-compatible API; see `LATCH_LLM_BASE_URL` and `LATCH_LLM_MODEL`) |
 | `LATCH_INTEGRITY_DIR` | `integrity` next to the per-user lockfile | tests: where lockfile integrity records and their key live |
-| `LATCH_DEV` | `false` | development: the review UI adds the Simulation page and the API serves `POST /api/simulate` |
+| `LATCH_DEV` | `false` | development: the review UI adds the Simulation and Dev Tools pages, and the API serves `POST /api/simulate` and `/api/dev/presets` |
 | `DEMO_MUTATE` | unset | `1` makes the evil demo server start already poisoned |
 
 No `LATCH_*` variable ever reaches a server behind the proxy: the proxy removes them all from
@@ -140,7 +142,8 @@ without a restart.
 
 The UI has seven pages: Overview, MCP Servers, Review Queue, Approved Tools, Audit
 Log, Git & CI, and Settings. With `LATCH_DEV=1` set for the API (in `.env`, or before
-`pnpm ui` or `latch review --ui`), an eighth, Simulation, rehearses the demo rug pull in memory. Settings has six themes plus "Follow system"; the
+`pnpm ui` or `latch review --ui`), two more appear: Simulation rehearses the demo rug pull in
+memory, and Dev Tools adds the demo servers to an MCP client in one click. Settings has six themes plus "Follow system"; the
 choice is kept in the browser's local storage.
 
 ## 5. Use it with a real MCP client (optional)
@@ -151,21 +154,22 @@ latch --lockfile "$PWD/latch.lock" init             # pins tools, wraps client c
 ```
 
 `init` detects the configs of every supported client (the list and paths are in
-[INSTALL.md](INSTALL.md#what-installing-does)), edits only the entries it wraps (comments in the
-file survive), keeps a timestamped `.bak` next to every config it rewrites (the 5 newest), and
-puts `LATCH_LOCKFILE_PATH` and `LATCH_STATE_DIR` into each wrapped entry so the proxy finds the
-lockfile wherever the client starts it. A config it cannot read is reported and left alone.
-Restart the client afterwards, then commit `latch.lock`. To undo, restore the `.bak` copy or
-run `latch setup --remove --all`.
+[INSTALL.md](INSTALL.md#what-installing-does)), changes only the `command` and `args` of the
+entries it wraps (env, where keys live, and comments stay as they are), and passes `--lockfile` and
+`--state-dir` in those args so the proxy finds the lockfile wherever the client starts it. It
+starts no server: each is recorded in `latch.lock` and its tools are pinned the first time the
+client starts it. A config it cannot read is reported and left alone. Restart the client
+afterwards, then commit `latch.lock`. To undo, run `latch setup --remove --all`.
 
-Without a project, `latch setup` does the same for Claude Code in one step (`--all` for every
-client), with a
-per-user lockfile instead of `./latch.lock` (`~/.config/latchverify/latch.lock` on Linux):
+Without a project, `latch setup` does the same for the clients you choose, with a per-user
+lockfile instead of `./latch.lock` (`~/.config/latchverify/latch.lock` on Linux):
 
 ```sh
-latch setup --dry-run   # preview: writes nothing
-latch setup             # creates the per-user latch.lock, pins tools, wraps ~/.claude.json
-latch setup --remove    # gives Claude Code its original server entries back; keeps latch.lock
+latch setup                          # lists the clients found and asks which to connect
+latch setup --client claude-code     # connects one without asking (--all: every client)
+latch setup --dry-run --all          # preview: writes nothing
+latch setup --remove --client claude-code   # original entries back; keeps latch.lock
+latch watch                          # keeps connected clients linked, with desktop notifications
 ```
 
 `latch review` and `latch verify` open that lockfile from any directory without `./latch.lock`.
@@ -176,6 +180,6 @@ latch setup --remove    # gives Claude Code its original server entries back; ke
 |---|---|
 | `latch: command not found` | `pnpm link --global`, or use `node dist/cli.js` |
 | `latch review --ui`: "the review UI is not built" | `pnpm build` |
-| Every tool call blocked as `unpinned` from a client | the proxy found no lockfile; set `LATCH_LOCKFILE_PATH` in the client entry (`latch init` does this) |
+| Every tool call blocked as `unpinned` from a client | the proxy found no lockfile; pass `--lockfile <path>` before `proxy` in the client entry (`latch init` and `latch setup` do this) |
 | `port 7777 is in use` | `--port <other>` or set `LATCH_UI_PORT` for `pnpm ui` |
 | The proxy Verify session does not block call 6 | the server started slowly; wait longer before sending call 6 |

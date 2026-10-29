@@ -19,18 +19,22 @@ every message in between and steps in at three points.
                               └────────────────────┘
 ```
 
-`latch init` (or `latch add`, for one server) rewrites each server entry in the client
-config. This:
+`latch init`, `latch setup` (or `latch add`, for one server) and the background sync rewrite each
+server entry of a client the user connected. This:
 
 ```json
-{ "command": "node", "args": ["weather.js"] }
+{ "command": "node", "args": ["weather.js"], "env": { "API_KEY": "..." } }
 ```
 
 becomes this:
 
 ```json
-{ "command": "/usr/bin/node", "args": ["/path/to/latchverify/dist/cli.js", "proxy", "--server", "weather", "--", "node", "weather.js"] }
+{ "command": "/usr/bin/node", "args": ["--max-semi-space-size=1", "/path/to/latchverify/dist/cli.js", "--lockfile", "/home/me/.config/latchverify/latch.lock", "--state-dir", "/home/me/.config/latchverify/.latch", "proxy", "--server", "weather", "--", "node", "weather.js"], "env": { "API_KEY": "..." } }
 ```
+
+Only `command` and `args` change, edited in place in the file; the entry's `env` is never read
+into LatchVerify's data or written. Unlinking needs nothing but the args after `--`, so no copy of
+the config is kept.
 
 The entry names node and `dist/cli.js` by absolute path: clients start servers without
 the user's shell setup, so a `latch` on the user's PATH (or a shell function) may not be
@@ -122,6 +126,46 @@ Delete the entry from `rejected.json` to take a rejection back.
 `latch verify` runs the same capture → tier pipeline in CI against every server in
 `latch.lock` and exits non-zero on tier-2+ drift. See [LOCKFILE.md](LOCKFILE.md).
 
+## Linking: consent, first run and the background sync
+
+- **Consent per client.** Nothing is linked until the user connects that client: `latch setup`
+  asks in a terminal, `--client` and `--all` (and the Windows installer's checkbox) are the
+  answer, and the MCP Servers page has Connect and Disconnect. The answers live in
+  `settings.json` (true, false, or not asked). A client never asked about is only reported.
+- **Pin on first run.** Linking records a server in `latch.lock` with its program name, a hash of
+  its launch line and `trustOnFirstUse`, and starts nothing. The proxy, which the client starts
+  with the client's own env, pins the tools of the server's first complete `tools/list`
+  (`pinFirstRun`), holding back any with a critical finding as a tier-3 change, and only if the
+  `latch.lock` it reads is one the integrity record vouches for.
+- **Background sync.** `latch watch` (`src/daemon/`) watches the folders of the client configs,
+  syncs one second after a change and every minute: new servers of connected clients are linked,
+  entries a client turned back are re-wrapped, entries of a moved install are repaired. It reads
+  only the bytes appended to `events.jsonl` and shows desktop notifications (notify-send on Linux,
+  a toast on Windows) for changes waiting at start, each change a proxy queues, blocked calls
+  (repeats summed per minute) and clients found but not asked about. One watcher runs per state
+  directory.
+
+## Keys in client configs
+
+Client configs hold the servers' API keys, in `env` and sometimes in arguments. LatchVerify
+reads configs but never touches keys:
+
+- Env values are dropped right after a config is parsed: detection keeps each entry's command,
+  arguments and env variable names only. Edits write `command` and `args`, and delete only the
+  two `LATCH_*` variables older versions added, by name.
+- `latch.lock` holds a hash of each launch line and the program's name, never arguments.
+  Messages, logs, the API and the dashboard show the program name only.
+- LatchVerify never starts a server with a client's env: pinning happens on the first run,
+  inside the proxy the client starts.
+- No copy of a config is made. Copies earlier versions left (`<config>.<date>.bak`) are listed by
+  `latch setup` and `latch init` for the user to delete.
+- `tests/canary.test.ts` puts a fake key in the env and the arguments of every server of four
+  clients, runs every command, the proxy and the API, and fails if the key appears in any
+  output or any file LatchVerify wrote.
+
+The one place a key passes through LatchVerify is the proxy the client starts: it receives the
+server's env from the client and hands it to the server, in memory, as the client itself does.
+
 ## Threat model: what the proxy protects against, and what it does not
 
 LatchVerify stands between a client and a server that may turn hostile after it was
@@ -190,6 +234,8 @@ serialized.
 | `src/store/*` | `latch.lock` and its integrity records, pending queue, rejections, event log (rotated at 5 MB), the shared file lock |
 | `src/log.ts` | Leveled stderr logging (`LATCH_LOG_LEVEL`) |
 | `src/commands/*` | One file per CLI command |
-| `src/config/*` | Env loading and MCP client config detection and rewriting |
-| `src/ui/*` | hono review API, bound to 127.0.0.1 |
+| `src/config/*` | Env loading, MCP client config detection and rewriting (env values dropped at parse) |
+| `src/daemon/*` | Background sync (`sync.ts`), watcher (`watch.ts`) and desktop notifications (`notify.ts`) |
+| `src/dev/*` | Demo presets for the Dev Tools page and `pnpm demo:add` (development only) |
+| `src/ui/*` | hono review API, bound to 127.0.0.1, with the clients and settings endpoints |
 | `web/` | React review UI |

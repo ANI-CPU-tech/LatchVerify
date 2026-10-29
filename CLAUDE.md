@@ -52,6 +52,14 @@ a regression test first.
   Logs go to stderr and `.latch/events.jsonl`.
 - **No `LATCH_*` variable reaches a guarded server** (`serverEnvironment` in
   `proxy/transport.ts`). Never pass LatchVerify's paths or keys to a server another way.
+- **Read configs, never touch keys.** Env values of client configs are dropped right after
+  parsing (`stdioServers` keeps command, args and env variable names); edits write `command` and
+  `args` only (plus deleting the two old `LATCH_*` variables by name). `latch.lock` keeps a
+  launch hash and a program name, never arguments; messages, logs, the API and the dashboard
+  show the program name only. Never start a server with a client's env (pinning happens on the
+  first run, in the proxy). Never copy a config. `tests/canary.test.ts` enforces this.
+- **Consent per client.** Nothing links a client the user has not connected
+  (`settings.json` `clients[id] === true`); a client never asked about is only reported.
 - **Blocks are JSON-RPC errors.** A blocked `tools/call` gets an error response
   (code `-32001`) whose message the model can read and relay ("blocked pending
   review — run `latch review`"). Never drop or hang the request.
@@ -100,8 +108,19 @@ that blocks on every reword gets disabled by its users.
   fails without one). `detectClients()` returns `{ configs, problems }`: a config that exists but
   cannot be used is a problem, reported and never rewritten. Claude Code's per-project servers in
   `~/.claude.json` are extra configs with a `scope`; project `.mcp.json` files are never written
-  (shared through git). `writeClientConfig` edits changed entries in place with `setJsonc` and keeps
-  the 5 newest `.bak` copies.
+  (shared through git). `writeClientConfig` edits `command` and `args` in place with `setJsonc`;
+  it makes no copy. `findOldBackups` lists `.bak` copies earlier versions left, for the user to
+  delete. Ids and names: `config/client-ids.ts`, `config/client-names.ts` (light, for startup).
+- Linking: `linkServer` records a server with `program`, `launch` (`launchHash`) and
+  `trustOnFirstUse`; the proxy's `pinFirstRun` pins its first complete tool list (trusted
+  `latch.lock` only). `mergeServers` + `withStateLock` keep concurrent pins and approvals.
+- Background: `src/daemon/` (`sync.ts` syncClients, `watch.ts` startWatcher behind `latch watch`,
+  `notify.ts` desktop notifications via notify-send or a PowerShell toast). Settings:
+  `src/store/settings.ts` (`settings.json` beside the per-user lockfile).
+- Dev: `src/dev/presets.ts` (demo presets; `demo/` referenced by path, never imported), the Dev
+  Tools page and `pnpm demo:add`.
+- Memory: commands load on demand (`cli.ts`); `tests/startup.test.ts` pins the startup import
+  graph. Wrapped entries start node with `PROXY_NODE_FLAGS` (`--max-semi-space-size=1`).
 - Per-user lockfile: `src/config/paths.ts` `userLockfilePath()` (`%APPDATA%\LatchVerify`,
   `~/.config/latchverify`, `~/Library/Application Support/LatchVerify`). `statePaths` falls
   back to it only when no flag or env names a lockfile and `./latch.lock` is absent.
@@ -117,10 +136,12 @@ that blocks on every reword gets disabled by its users.
 
 ## Review UI
 
-**API** (`src/ui/routes.ts`): `GET /api/info` (`{ version, dev }`), `GET /api/pending`, `GET /api/pending/:id`,
+**API** (`src/ui/routes.ts`): `GET /api/info` (`{ version, dev }`), `GET /api/clients`
+(per client: answer, files, each server's program, link and pin state; never args or env),
+`POST /api/clients/:id/connect|disconnect`, `GET|PUT /api/settings`, `GET /api/pending`, `GET /api/pending/:id`,
 `POST /api/pending/:id/approve|reject`, `GET /api/events?limit=`, `GET /api/lockfile`,
 `GET /api/lockfile/git` (read-only `git status`/`git log` of `latch.lock`, in
-`src/ui/git.ts`), `POST /api/simulate` (development mode only, otherwise 404: a rug pull rehearsed in memory by
+`src/ui/git.ts`), `/api/dev/presets` (development mode only), `POST /api/simulate` (development mode only, otherwise 404: a rug pull rehearsed in memory by
 `src/ui/simulation.ts` with the proxy's own analyzeToolList, applyApproval, shouldBlock and
 buildBlockError; it reads and writes no file, body capped at 1 MiB). It answers only on
 loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a loopback
@@ -144,9 +165,9 @@ loopback hosts; writes, and every POST, need the `X-Latch-Client` header and a l
   the change it lands on; `navigate(route, { replace: true })` keeps that out of the Back history.
 - Dropdowns use `components/Select.tsx` (themed, WAI-ARIA select-only combobox; key logic in
   `lib/listbox.ts`), never a native `<select>`, whose popup the OS paints in its own colors.
-- `lib/data.tsx` loads the queue, lockfile, events and git status once and shares them
+- `lib/data.tsx` loads the queue, lockfile, events, git status, clients and settings once and shares them
   with every page. It polls every 3 s while the API is connected. Refresh, or a decision,
-  reloads all four.
+  reloads them all.
 - `lib/api.ts` validates every response with the shared zod schemas
   (`src/schema/event.ts` holds the event log schema for this reason).
 - `lib/format.ts` holds the pure view logic (plain-language explanations, server
@@ -238,7 +259,7 @@ next to the name, with a foreground glow so its dark outline reads on dark theme
    `proxy/index.ts`. Integration-test with `demo/evil-server.ts`.
 6. `store/pending.ts`, `store/events.ts`.
 7. Commands: `verify` (the CI contract), then `inspect`, `init`, `review`, `add` (one
-   server; shares `pinServer` and `proxiedEntry` with `init`).
+   server; shares `proxiedEntry` with `init`).
 8. `ui/` routes and wiring `web/` to `lib/api.ts`.
 9. `analyze/llm.ts` last. It is optional and off by default.
 

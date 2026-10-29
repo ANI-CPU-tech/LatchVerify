@@ -72,8 +72,14 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
 
 **Installers** for Windows, Debian/Ubuntu, Arch/CachyOS and other Linux come with each
 [release](https://github.com/vinayakkam/LatchVerify/releases). They bring their own Node.js
-and link every MCP client they find as they install: the servers go behind the proxy and their
-tools are pinned in your own `latch.lock`, created for you. See [INSTALL.md](INSTALL.md).
+and create your own `latch.lock`. They connect an MCP client only when you say so (`latch setup`
+asks, the Windows installer has a checkbox); a connected client's servers go behind the proxy and
+are pinned on their first run. See [INSTALL.md](INSTALL.md).
+
+**Your keys stay yours.** LatchVerify reads client configs but never their keys: env values are
+dropped as soon as a file is parsed, only `command` and `args` are edited, `latch.lock` keeps a hash
+of each launch line instead of its arguments, nothing is copied, and LatchVerify never starts a
+server with a client's env. A canary test holds it to that.
 
 **From source** (requires Node 22+ and pnpm):
 
@@ -87,12 +93,13 @@ pnpm link --global   # puts `latch` on your PATH
 
 | Command | What it does |
 |---|---|
-| `latch init` | Detect MCP client configs (Claude Desktop, Claude Code and its projects, Cursor, VS Code, VS Code Insiders, VSCodium, Cline, Cline CLI, Gemini CLI, Zed, LM Studio, Amazon Q), wrap the chosen servers with the proxy, and pin their current tools in `latch.lock`. Configs with comments are edited in place; a config that cannot be read is reported and left alone. |
-| `latch setup` | Link Claude Code (or `--client <id>`, or `--all` clients) with no questions, as the installers do (`--all`): wrap the servers and pin their tools in the per-user `latch.lock`, created if needed. `--remove` restores the original entries. |
-| `latch add` | Put one server behind latch: pin its tools and add it, wrapped, to one client config (Claude Desktop by default). `latch add github --env GITHUB_PERSONAL_ACCESS_TOKEN -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server` |
+| `latch init` | Detect MCP client configs (Claude Desktop, Claude Code and its projects, Cursor, VS Code, VS Code Insiders, VSCodium, Cline, Cline CLI, Gemini CLI, Zed, LM Studio, Amazon Q), wrap the chosen servers with the proxy (only their `command` and `args`; env, where keys live, is never read or written), and record them in `latch.lock`; their tools are pinned the first time the client starts them. Configs with comments are edited in place; a config that cannot be read is reported and left alone. |
+| `latch setup` | List the MCP clients on this machine and ask which to connect; `--client <id>` or `--all` connect without asking. Uses the per-user `latch.lock`, created if needed. `--remove` disconnects (original entries back). Nothing is connected without your say-so. |
+| `latch watch` | Keep connected clients linked in the background (new servers included) and show desktop notifications for changes to review, blocked calls and new clients. `--once` syncs one time. |
+| `latch add` | Put one server behind latch: record it in `latch.lock` and add it, wrapped, to one client config (Claude Desktop by default); its tools are pinned on its first run. `latch add github --env GITHUB_PERSONAL_ACCESS_TOKEN -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server` |
 | `latch review` | Walk the pending queue in the terminal, or with `--ui` open the web review screen. Approving rewrites `latch.lock` for you to commit; rejecting keeps that definition blocked, even after a restart. |
 | `latch lock status` / `accept` / `restore` | Check `latch.lock` for edits made outside LatchVerify (a server tampering with its own approvals, or a `git pull`). Proxies ignore such an edit until you `accept` it; `restore` puts back the last version LatchVerify wrote. |
-| `latch verify` | CI check. Spawns every server in `latch.lock`, diffs live tools against pinned ones, and exits non-zero on tier 2+ drift. |
+| `latch verify` | CI check. Starts every server in `latch.lock` (launch lines from `--config .mcp.json` or the client configs, since `latch.lock` keeps only their hash), diffs live tools against pinned ones, and exits non-zero on tier 2+ drift. |
 | `latch inspect` | Print derived capabilities and findings for a server or a saved `tools/list` JSON, without touching the lockfile. |
 
 `latch proxy` also exists. It is hidden from `--help` because only the client configs
@@ -124,7 +131,11 @@ The repository keeps the demo for development and testing. None of it ships in a
 - `pnpm demo:benign` and `pnpm demo:evil`: a benign weather MCP server and its rug-pull twin.
   [docs/DEMO.md](docs/DEMO.md) walks through the rug pull end to end.
 - `LATCH_DEV=1` (in `.env`, or the shell running `pnpm ui` or `latch review --ui`) turns on
-  development mode: the review UI adds the Simulation page, which rehearses the rug pull in memory.
+  development mode: the review UI adds the Simulation page, which rehearses the rug pull in memory,
+  and the Dev Tools page, which adds the demo servers to an MCP client in one click.
+- `pnpm demo:add` does the same from a terminal: `pnpm demo:add` lists the presets
+  (`demo-weather`, `demo-rugpull`, `demo-poisoned`, `demo-devtools`),
+  `pnpm demo:add demo-rugpull --client cursor` adds one, `--remove` takes it out again.
 - Under the Vite dev server only, the Review Queue shows labeled sample data when the API is down.
 
 ## Project layout
