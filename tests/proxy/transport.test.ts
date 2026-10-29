@@ -1,5 +1,8 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -448,6 +451,24 @@ describe("spawnUpstream", () => {
       { LATCH_STATE_DIR: "/home/user/.latch", latch_lower: "x", MCP_TEST_ADDED: "1" },
     );
     expect(JSON.parse(raws[0]!)).toEqual(["MCP_TEST_ADDED", "MCP_TEST_INHERITED"]);
+  });
+
+  // Node refuses to start .cmd and .bat files without a shell (CVE-2024-27980), and npx, pnpm and
+  // most installed MCP servers are .cmd shims on Windows.
+  it.runIf(process.platform === "win32")("starts a .cmd shim found on PATH by its bare name", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "latch-cmd-"));
+    try {
+      await writeFile(join(dir, "latch-shim-test.cmd"), `@"${process.execPath}" -e "console.log(JSON.stringify(process.argv.slice(1)))" %*\r\n`);
+      vi.stubEnv("PATH", `${dir};${process.env.PATH ?? ""}`);
+      const child = spawnUpstream("latch-shim-test", ["hello world", "x"]);
+      const raws: string[] = [];
+      readFrames(child.stdout, (frame) => raws.push(frame.raw));
+      const [code] = (await once(child, "close")) as [number | null];
+      expect(code).toBe(0);
+      expect(JSON.parse(raws[0]!)).toEqual(["hello world", "x"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("reports a missing command as an error event instead of throwing", async () => {

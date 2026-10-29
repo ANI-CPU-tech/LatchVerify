@@ -32,6 +32,7 @@ a regression test first.
 | UI server | `hono` + `@hono/node-server` |
 | Frontend | Vite + React 18 + Tailwind 3, shadcn/ui conventions (hand-written, no shadcn CLI) |
 | Diff | `diff` (jsdiff) |
+| Spawning servers | `cross-spawn` (Windows `.cmd` shims such as `npx` need cmd.exe and its escaping) |
 | Tests | `vitest` |
 | Package manager | `pnpm` (single package, no workspaces; `pnpm-workspace.yaml` only holds pnpm 11 settings) |
 | Optional LLM pass | any OpenAI-compatible chat-completions API via `fetch` (Groq, OpenRouter); no SDK |
@@ -39,7 +40,7 @@ a regression test first.
 ## Hard rules
 
 - **No MCP SDK.** The proxy parses raw line-delimited JSON-RPC with `readline` and
-  spawns the server with `child_process.spawn`. A transparent proxy must forward
+  spawns the server with `cross-spawn` (plain `child_process.spawn` on POSIX). A transparent proxy must forward
   fields it does not model, and SDKs normalize them away. Forward untouched frames
   byte-for-byte (`Frame.raw`), and re-serialize only messages the proxy rewrites.
 - **stdout is the protocol.** In proxy mode nothing but JSON-RPC may go to stdout.

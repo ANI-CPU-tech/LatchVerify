@@ -1,6 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
+import crossSpawn from "cross-spawn";
 
 // Raw line-delimited JSON-RPC. Deliberately NOT the MCP SDK: a transparent
 // proxy must forward fields it does not model, and SDKs normalize them away.
@@ -151,25 +152,25 @@ export function serverEnvironment(base: NodeJS.ProcessEnv, env?: NodeJS.ProcessE
  * stderr stays open when it exits); stdout is the protocol channel, so the caller wires the
  * child's stdout and stdin to readFrames and writeLine.
  *
- * No shell is involved: `command` is resolved on PATH and `args` reach the server literally.
- * The environment is serverEnvironment(process.env, env): LatchVerify's own LATCH_* variables
- * never reach the server.
+ * `command` is resolved on PATH and `args` reach the server literally. On POSIX no shell is
+ * involved. On Windows, cross-spawn resolves PATHEXT, and runs a .cmd or .bat shim (npx, pnpm,
+ * uvx installed by npm) through cmd.exe with every argument escaped for it, since Node refuses to
+ * start batch files without a shell. The environment is serverEnvironment(process.env, env):
+ * LatchVerify's own LATCH_* variables never reach the server.
  *
  * Never throws for a bad command: spawn failures (ENOENT, EACCES) arrive as the child's "error"
  * event, which the caller must handle.
  */
-// shortcut: Windows cannot spawn .cmd shims (npx, pnpm) without a shell; use node plus the
-// script path there, or add cross-spawn if Windows support is needed.
 export function spawnUpstream(
   command: string,
   args: string[],
   env?: NodeJS.ProcessEnv,
 ): ChildProcessWithoutNullStreams {
-  const child = spawn(command, args, {
+  const child = crossSpawn(command, args, {
     stdio: "pipe",
     env: serverEnvironment(process.env, env),
     windowsHide: true,
-  });
+  }) as ChildProcessWithoutNullStreams;
   child.stderr.pipe(process.stderr, { end: false });
   return child;
 }
