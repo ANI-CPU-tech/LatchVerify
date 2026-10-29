@@ -212,7 +212,7 @@ describe("pinServer", () => {
   });
 });
 
-describe.skipIf(process.platform === "win32")("runInit", () => {
+describe.skipIf(process.platform === "win32")("runInit", { timeout: 30_000 }, () => {
   let home: string;
   let lockfilePath: string;
   const weatherEntry = { command: process.execPath, args: ["--import", tsx, join(root, "demo/weather-server.ts")] };
@@ -495,7 +495,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
   });
 });
 
-describe.skipIf(process.platform === "win32")("runInit prompt", () => {
+// These start two demo servers through tsx, which takes seconds when the whole suite runs at once.
+describe.skipIf(process.platform === "win32")("runInit prompt", { timeout: 30_000 }, () => {
   let home: string;
   let lockfilePath: string;
   const weatherEntry = { command: process.execPath, args: ["--import", tsx, join(root, "demo/weather-server.ts")] };
