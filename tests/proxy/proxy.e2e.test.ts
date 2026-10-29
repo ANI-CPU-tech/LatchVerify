@@ -231,11 +231,13 @@ describe("startProxy", () => {
       { holdTimeoutMs: 200 },
     );
     const replies = messages.filter((m) => m.id !== undefined);
-    // The ping is not a call, so it is not held behind them.
-    expect(replies.map((m) => m.id)).toEqual([2, 1, 3]);
-    expect(replies[1]).toMatchObject({ error: { code: -32001, data: { reason: { kind: "unverified" } } } });
-    expect(replies[2]).toMatchObject({ error: { code: -32001, data: { reason: { kind: "unverified" } } } });
+    // The ping is not a call, so it is not held behind them: only the two calls are released.
+    // Its reply's place among theirs depends on how fast the server starts, so it is not checked.
     expect(stderr.join("")).toContain("releasing 2 held client frames");
+    expect(replies.filter((m) => m.id === 2)).toEqual([expect.objectContaining({ result: { raw: expect.stringContaining('"method":"ping"') } })]);
+    const calls = replies.filter((m) => m.id !== 2);
+    expect(calls.map((m) => m.id)).toEqual([1, 3]);
+    for (const call of calls) expect(call).toMatchObject({ error: { code: -32001, data: { reason: { kind: "unverified" } } } });
   });
 
   it("passes the client's answer to a server request while a call is held", async () => {
