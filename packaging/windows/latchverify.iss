@@ -78,7 +78,7 @@ Source: "latch.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "latchverify.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\LatchVerify Review"; Filename: "{app}\latch.cmd"; Parameters: "review --ui"; WorkingDir: "{userdocs}"; IconFilename: "{app}\latchverify.ico"; Comment: "Review MCP tool changes that LatchVerify blocked"
+Name: "{group}\LatchVerify Review"; Filename: "{app}\latch.cmd"; Parameters: "review --ui"; WorkingDir: "{userdocs}"; IconFilename: "{app}\latchverify.ico"; Comment: "Review MCP tool changes that LatchVerify blocked"; AppUserModelID: "io.github.vinayakkam.LatchVerify"
 Name: "{group}\Uninstall LatchVerify"; Filename: "{uninstallexe}"
 
 [Registry]
