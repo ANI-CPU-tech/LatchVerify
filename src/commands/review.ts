@@ -275,9 +275,12 @@ async function logEvent(stateDir: string, event: Parameters<typeof appendEvent>[
 
 const TIER_LABEL = ["auto-passed", "auto-passed", "blocked for review", "hard block"] as const;
 
+/** Characters of the served description shown on a card; the review UI shows all of it. */
+const MAX_CARD_DESCRIPTION = 600;
+
 /**
  * One change as a card: tier and what the proxy does about it, the tool, what changed in its
- * definition, the capability delta and every finding. Strings from the server go through
+ * definition, the description it now serves, the capability delta and every finding. Strings from the server go through
  * printable(), so they cannot carry terminal escapes.
  */
 export function renderChange(change: PendingChange, lock: LockFile): string {
@@ -287,6 +290,11 @@ export function renderChange(change: PendingChange, lock: LockFile): string {
     `  detected  ${change.detectedAt}`,
     `  changed   ${describeDefinitionChange(change)}`,
   ];
+  if (change.description !== undefined) {
+    const shown = [...change.description];
+    const text = shown.length > MAX_CARD_DESCRIPTION ? `${shown.slice(0, MAX_CARD_DESCRIPTION).join("")}…` : change.description;
+    lines.push(`  serves    ${pc.dim('"')}${printable(text)}${pc.dim('"')}`);
+  }
   if (findRecord(lock, change.serverId, change.toolName)?.hashes.composite === change.after.hashes.composite) {
     lines.push(pc.dim("  note      latch.lock already pins this definition; approving only clears it from the queue"));
   }

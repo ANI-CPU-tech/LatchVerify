@@ -19,9 +19,9 @@ export interface DiffPart {
 }
 
 /**
- * What the review screen renders. The review API returns PendingChange records, which store
- * hashes rather than description text, so the description fields are null for live data and
- * only filled in for the bundled sample data.
+ * What the review screen renders. latch.lock stores hashes rather than description text, so a
+ * live change has only the description the server serves now (`change.description`): no
+ * previous text and no diff. The bundled sample data fills in all three.
  */
 export interface ReviewItem {
   change: PendingChange;
@@ -108,9 +108,9 @@ async function call(path: string, init: RequestInit = {}): Promise<Response> {
   return response;
 }
 
-/** A live pending change as the review screen renders it. Description text is not available. */
+/** A live pending change as the review screen renders it: the served description, if recorded. */
 export function toReviewItem(change: PendingChange): ReviewItem {
-  return { change, descriptionBefore: null, descriptionAfter: null, descriptionDiff: null };
+  return { change, descriptionBefore: null, descriptionAfter: change.description ?? null, descriptionDiff: null };
 }
 
 /**
