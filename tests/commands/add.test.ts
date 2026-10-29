@@ -145,6 +145,17 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     expect(await exists(lockfilePath)).toBe(false);
   });
 
+  it("refuses to add to a client config that does not parse, before starting the server", async () => {
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, "{ broken");
+    const { code, text } = await add();
+    expect(code).toBe(1);
+    expect(text).toContain(`✖ ${configPath} is not valid JSON`);
+    expect(text).not.toContain("starting");
+    expect(await readFile(configPath, "utf8")).toBe("{ broken");
+    expect(await exists(lockfilePath)).toBe(false);
+  });
+
   it("refuses a name latch.lock already pins, and writes nothing", async () => {
     await writeConfig({ mcpServers: {} });
     expect((await add({ name: "first" })).code).toBe(0);

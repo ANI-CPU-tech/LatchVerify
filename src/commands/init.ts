@@ -22,7 +22,7 @@ import { captureTools } from "../proxy/capture.js";
 import type { LockFile } from "../schema/index.js";
 import { applyApproval, readLockfile, serializeLockfile, writeLockfile } from "../store/lockfile.js";
 import { defaultReviewer } from "../ui/server.js";
-import { plural, printable } from "./text.js";
+import { plural, printable, problemWarning } from "./text.js";
 
 export interface InitOptions {
   /** Restrict to one client; default is every detected client. */
@@ -234,9 +234,13 @@ export async function runInit(options: InitOptions): Promise<number> {
   const verb = (done: string, planned: string) => (options.dryRun ? planned : done);
 
   const lock = await readLockfile(lockfilePath);
-  const configs = (await detectClients()).filter((config) => options.client === undefined || config.client === options.client);
+  const detection = await detectClients();
+  const wanted = (config: { client: ClientId }) => options.client === undefined || config.client === options.client;
+  const configs = detection.configs.filter(wanted);
+  const problems = detection.problems.filter(wanted);
+  for (const problem of problems) say(pc.yellow(problemWarning(problem)));
   if (configs.length === 0) {
-    say(pc.red(`✖ no MCP client config found${options.client === undefined ? "" : ` for ${options.client}`}. Looked in:`));
+    say(pc.red(`✖ no usable MCP client config found${options.client === undefined ? "" : ` for ${options.client}`}. Looked in:`));
     for (const client of options.client === undefined ? SUPPORTED_CLIENTS : [options.client]) {
       say(`  ${client}: ${printable(clientConfigPath(client))}`);
     }
@@ -248,7 +252,8 @@ export async function runInit(options: InitOptions): Promise<number> {
     say(`  found ${config.client}: ${printable(config.path)} (${plural(Object.keys(config.servers).length, "stdio server")})`);
   }
   const { servers, skipped } = collectServers(configs);
-  let failed = skipped.length > 0;
+  // A config that could not be read keeps its servers unprotected: that is not a clean run.
+  let failed = skipped.length > 0 || problems.length > 0;
   for (const skip of skipped) say(pc.yellow(`! skipping ${printable(skip.serverId)} (${skip.clients.join(", ")}): ${printable(skip.reason)}`));
   if (servers.length === 0) {
     say(failed ? pc.red("✖ no server can be wrapped") : "nothing to wrap: the configs have no stdio servers");

@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { replaceFile } from "../store/replace.js";
+import { parseJsonc, setJsonc } from "./jsonc.js";
 import { appDataDir, platformPath } from "./paths.js";
 
 /** MCP clients whose config files `latch init` knows how to rewrite. */
@@ -24,8 +25,21 @@ export interface ClientConfig {
   client: ClientId;
   path: string;
   servers: Record<string, ClientServerEntry>;
-  /** The full parsed file, so unrelated keys are written back untouched. */
+  /** The full parsed file. Written out only when the file has disappeared by the time it is rewritten. */
   raw: Record<string, unknown>;
+}
+
+/** A client config that exists but cannot be used, and why. It is left untouched. */
+export interface ConfigProblem {
+  client: ClientId;
+  path: string;
+  message: string;
+}
+
+/** What detectClients found: the usable configs, and the ones it had to leave alone. */
+export interface Detection {
+  configs: ClientConfig[];
+  problems: ConfigProblem[];
 }
 
 /**
@@ -67,40 +81,42 @@ export function serversKey(client: ClientId): "servers" | "mcpServers" {
 
 /**
  * Probe clientConfigPath() for every supported client and return, in SUPPORTED_CLIENTS order,
- * the ones whose config file exists and parses as a JSON object. A file that is missing,
- * unreadable or not a JSON object (JSONC with comments included) is skipped: init must never
- * rewrite a file it could not fully read.
+ * the ones whose config file exists and is one JSON object (JSONC: comments and trailing commas
+ * allowed). A missing file means the client is not set up and is not reported. A file that
+ * exists but cannot be read, does not parse, is not an object or keeps its servers in something
+ * other than an object is reported in `problems` and left out: init must never rewrite a file it
+ * could not fully read.
  *
  * `servers` holds only the stdio entries latch can wrap: a non-empty string `command`, `type`
  * absent or "stdio", `args` absent or all strings, `env` absent or an object. HTTP/SSE servers
- * and malformed entries stay in `raw` untouched. Only user-level servers are read; Claude Code's
- * per-project servers in ~/.claude.json are not.
+ * and malformed entries stay in the file untouched. Only user-level servers are read; Claude
+ * Code's per-project servers in ~/.claude.json are not.
  */
-export async function detectClients(): Promise<ClientConfig[]> {
-  const configs = await Promise.all(SUPPORTED_CLIENTS.map((client) => readClientConfig(client, clientConfigPath(client))));
-  return configs.filter((config): config is ClientConfig => config !== undefined);
+export async function detectClients(): Promise<Detection> {
+  const results = await Promise.all(SUPPORTED_CLIENTS.map((client) => readClientConfig(client, clientConfigPath(client))));
+  const detection: Detection = { configs: [], problems: [] };
+  for (const result of results) {
+    if (result === undefined) continue;
+    if ("message" in result) detection.problems.push(result);
+    else detection.configs.push(result);
+  }
+  return detection;
 }
 
-async function readClientConfig(client: ClientId, path: string): Promise<ClientConfig | undefined> {
+async function readClientConfig(client: ClientId, path: string): Promise<ClientConfig | ConfigProblem | undefined> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return undefined;
+    return { client, path, message: `cannot be read (${(error as NodeJS.ErrnoException).code ?? String(error)})` };
   }
-  const raw = parseJsonObject(text);
-  if (raw === undefined) return undefined;
-  return { client, path, servers: stdioServers(raw[serversKey(client)]), raw };
-}
-
-/** The parsed object, or undefined when `text` is not one JSON object. A leading BOM is allowed. */
-function parseJsonObject(text: string): Record<string, unknown> | undefined {
-  try {
-    const value: unknown = JSON.parse(text.replace(/^\uFEFF/, ""));
-    return isPlainObject(value) ? value : undefined;
-  } catch {
-    return undefined;
-  }
+  const parsed = parseJsonc(text);
+  if (!parsed.ok) return { client, path, message: `is not valid JSON: ${parsed.error}` };
+  if (!isPlainObject(parsed.value)) return { client, path, message: "is not a JSON object" };
+  const map = parsed.value[serversKey(client)];
+  if (map !== undefined && !isPlainObject(map)) return { client, path, message: `keeps "${serversKey(client)}" as something other than an object` };
+  return { client, path, servers: stdioServers(map), raw: parsed.value };
 }
 
 function stdioServers(value: unknown): Record<string, ClientServerEntry> {
@@ -220,37 +236,45 @@ function withCommand(entry: ClientServerEntry, command: string, args: string[]):
  * Write `config.servers` into the client's config file, after a timestamped `.bak` copy of the
  * file as it was. Resolves once the new file is flushed to disk.
  *
- * - Servers are merged into the file's server map: entries not in `config.servers` (HTTP
- *   servers, servers the user did not pick) and every unrelated key are kept.
- * - The merge starts from the file as it is now, not from `config.raw`: clients rewrite their
+ * - Only the entries of `config.servers` that differ are edited, in place (setJsonc). Every
+ *   other byte of the file stays as it is: other servers (HTTP servers, servers the user did not
+ *   pick), unrelated keys, comments, trailing commas, indentation, line endings and the final
+ *   newline (or its absence). The diff shows only the changed entries.
+ * - The edit starts from the file as it is now, not from `config.raw`: clients rewrite their
  *   config while they run (Claude Code updates ~/.claude.json constantly), and `latch init` may
  *   sit on a prompt between detecting and writing. `config.raw` is used only if the file is gone.
- * - Nothing is written, and no backup made, when the merged servers equal what the file
- *   already holds, so re-running init is a no-op.
- * - Indentation, CRLF line endings and the trailing newline (or its absence) are kept, so the
- *   diff shows only the changed entries.
+ * - Nothing is written, and no backup made, when every entry already holds the given value,
+ *   so re-running init is a no-op.
  * - The backup and the new file get the original file's permission bits (a new file gets 0600):
  *   configs often hold API tokens in `env`.
  * - A symlinked config (dotfile managers) stays a symlink; its target is rewritten.
  * - The new content goes to a temp file that is fsynced and renamed over the target, so the
  *   client never reads half a config.
  *
- * @throws Error naming the file when it exists but is no longer a JSON object; it is left as is.
+ * @throws Error naming the file when it exists but is no longer a JSON object, or its server
+ * map is no longer an object; it is left as is.
  */
 export async function writeClientConfig(config: ClientConfig): Promise<void> {
   const target = await resolveSymlinks(config.path);
   const current = await readIfExists(target);
-  const base = current === undefined ? config.raw : parseJsonObject(current.text);
-  if (base === undefined) {
+  const before = current?.text ?? `${JSON.stringify(config.raw, null, 2)}\n`;
+  const parsed = parseJsonc(before);
+  if (!parsed.ok || !isPlainObject(parsed.value)) {
     throw new Error(`${config.path} is no longer a JSON object; not rewriting it`);
   }
-
   const key = serversKey(config.client);
-  const existing = isPlainObject(base[key]) ? base[key] : {};
-  const next = { ...base, [key]: { ...existing, ...config.servers } };
-  // Compare values, not text: a hand-formatted file must not be reformatted when nothing changed.
-  if (current !== undefined && isDeepStrictEqual(next, base)) return;
-  const text = formatLike(next, current?.text);
+  const map = parsed.value[key];
+  if (map !== undefined && !isPlainObject(map)) {
+    throw new Error(`${config.path} no longer keeps "${key}" as an object; not rewriting it`);
+  }
+
+  let text = before;
+  for (const [serverId, entry] of Object.entries(config.servers)) {
+    // Compare values, not text: a hand-formatted entry is not reformatted when nothing changed.
+    if (map !== undefined && Object.hasOwn(map, serverId) && isDeepStrictEqual(map[serverId], entry)) continue;
+    text = setJsonc(text, [key, serverId], entry);
+  }
+  if (current !== undefined && text === current.text) return;
 
   const mode = current === undefined ? 0o600 : current.mode;
   if (current !== undefined) await writeBackup(config.path, current.text, mode);
@@ -275,14 +299,6 @@ async function readIfExists(path: string): Promise<{ text: string; mode: number 
     if (isErrno(error, "ENOENT")) return undefined;
     throw error;
   }
-}
-
-/** JSON in the style of `previous`: its indentation, line endings and final newline. */
-function formatLike(value: unknown, previous: string | undefined): string {
-  const indent = previous?.match(/\n([ \t]+)\S/)?.[1] ?? "  ";
-  let text = JSON.stringify(value, null, indent);
-  if (previous === undefined || /\n\s*$/.test(previous)) text += "\n";
-  return previous?.includes("\r\n") ? text.replace(/\n/g, "\r\n") : text;
 }
 
 /** `<path>.<UTC timestamp>.bak`, never overwriting an earlier backup. */

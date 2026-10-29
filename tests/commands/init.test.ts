@@ -392,11 +392,23 @@ describe.skipIf(process.platform === "win32")("runInit", () => {
   it("exits 1 and lists where it looked when no client config exists", async () => {
     const { code, text } = await init();
     expect(code).toBe(1);
-    expect(text).toContain("✖ no MCP client config found. Looked in:");
+    expect(text).toContain("✖ no usable MCP client config found. Looked in:");
     expect(text).toContain(`  cursor: ${clientConfigPath("cursor")}`);
     const one = await init({ client: "vscode" });
-    expect(one.text).toContain("✖ no MCP client config found for vscode. Looked in:");
+    expect(one.text).toContain("✖ no usable MCP client config found for vscode. Looked in:");
     expect(one.text).not.toContain("cursor:");
+  });
+
+  it("warns about a config it cannot read, leaves it alone and exits 1", async () => {
+    await writeConfig("cursor", { mcpServers: { weather: weatherEntry } });
+    const broken = clientConfigPath("vscode");
+    await mkdir(dirname(broken), { recursive: true });
+    await writeFile(broken, '{ "servers": { "x": ');
+    const { code, text } = await init({ dryRun: true });
+    expect(code).toBe(1);
+    expect(text).toContain(`! vscode: ${broken} is not valid JSON: ValueExpected at line 1, column 21; LatchVerify leaves it unchanged`);
+    expect(text).toContain("would pin");
+    expect(await readFile(broken, "utf8")).toBe('{ "servers": { "x": ');
   });
 
   it("reports configs without stdio servers and conflicting ids", async () => {

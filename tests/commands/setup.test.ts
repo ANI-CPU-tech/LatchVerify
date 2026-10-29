@@ -92,6 +92,21 @@ describe.skipIf(process.platform === "win32")("runSetup", () => {
     expect((await lockOnDisk()).servers).toEqual({});
   });
 
+  it("exits 1 and leaves Claude Code's config alone when it does not parse", async () => {
+    const path = clientConfigPath("claude-code");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, "{ broken");
+    const { code, text } = await setup();
+    expect(code).toBe(1);
+    expect(text).toContain(`! claude-code: ${path} is not valid JSON`);
+    expect(text).toContain("Fix the file, or let Claude Code rewrite it, then run `latch setup` again.");
+    expect(await readFile(path, "utf8")).toBe("{ broken");
+    // The per-user lockfile is still created, so review and verify find it.
+    await lockOnDisk();
+    expect((await runUnlink({ client: "claude-code", dryRun: false, output: new PassThrough() }))).toBe(1);
+    expect(await readFile(path, "utf8")).toBe("{ broken");
+  });
+
   it("writes nothing on a dry run", async () => {
     const config = await claudeConfig({ mcpServers: { weather } });
     const before = await readFile(config, "utf8");

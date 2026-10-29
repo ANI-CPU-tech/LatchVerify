@@ -6,7 +6,7 @@ import pc from "picocolors";
 import { clientConfigPath, detectClients, unwrapProxy, writeClientConfig, type ClientId, type ClientServerEntry, type ProxyLaunch } from "../config/clients.js";
 import { emptyLockfile, writeLockfile } from "../store/lockfile.js";
 import { runInit } from "./init.js";
-import { plural, printable } from "./text.js";
+import { plural, printable, problemWarning } from "./text.js";
 
 /** How each client is named to people. */
 export const CLIENT_NAMES: Record<ClientId, string> = {
@@ -59,9 +59,15 @@ export async function runSetup(options: SetupOptions): Promise<number> {
 
   say(pc.bold(`latch setup: linking ${name} to ${printable(lockfilePath)}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
 
-  const installed = (await detectClients()).some((config) => config.client === options.client);
+  const detection = await detectClients();
+  const installed = detection.configs.some((config) => config.client === options.client);
+  const problem = detection.problems.find((candidate) => candidate.client === options.client);
   let code = 0;
-  if (installed) {
+  if (problem !== undefined) {
+    say(pc.yellow(problemWarning(problem)));
+    say(`  Fix the file, or let ${name} rewrite it, then run \`latch setup\` again.`);
+    code = 1;
+  } else if (installed) {
     code = await runInit({
       client: options.client,
       dryRun: options.dryRun,
@@ -120,7 +126,13 @@ export async function runUnlink(options: UnlinkOptions): Promise<number> {
   const name = CLIENT_NAMES[options.client];
   say(pc.bold(`latch setup --remove: unlinking ${name}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
 
-  const config = (await detectClients()).find((candidate) => candidate.client === options.client);
+  const detection = await detectClients();
+  const problem = detection.problems.find((candidate) => candidate.client === options.client);
+  if (problem !== undefined) {
+    say(pc.red(problemWarning(problem)));
+    return 1;
+  }
+  const config = detection.configs.find((candidate) => candidate.client === options.client);
   if (config === undefined) {
     say(`nothing to unlink: ${name} is not set up on this machine (no ${printable(clientConfigPath(options.client))})`);
     return 0;

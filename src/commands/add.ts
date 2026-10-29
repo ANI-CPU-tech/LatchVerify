@@ -105,7 +105,10 @@ export async function runAdd(options: AddOptions): Promise<number> {
   }
 
   const lock = await readLockfile(lockfilePath);
-  const detected = (await detectClients()).find((found) => found.client === client);
+  const detection = await detectClients();
+  const problem = detection.problems.find((found) => found.client === client);
+  if (problem !== undefined) return fail(`${problem.path} ${problem.message}; fix it before adding a server to it`);
+  const detected = detection.configs.find((found) => found.client === client);
   const config: ClientConfig = detected ?? { client, path: clientConfigPath(client), servers: {}, raw: {} };
   say(pc.bold(`latch add ${printable(name)}: ${printable(lockfilePath)}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
   // The raw map, not config.servers: an HTTP server of that name must not be replaced either.

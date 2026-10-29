@@ -272,7 +272,7 @@ describe.skipIf(onWindows)("detectClients", () => {
 
   it("finds nothing in an empty home", async () => {
     home = await fakeHome();
-    expect(await detectClients()).toEqual([]);
+    expect(await detectClients()).toEqual({ configs: [], problems: [] });
   });
 
   it("returns every client whose config exists, in SUPPORTED_CLIENTS order", async () => {
@@ -281,7 +281,8 @@ describe.skipIf(onWindows)("detectClients", () => {
     for (const client of [...SUPPORTED_CLIENTS].reverse()) {
       await writeConfig(client, { [serversKey(client)]: { weather }, other: 1 });
     }
-    const found = await detectClients();
+    const { configs: found, problems } = await detectClients();
+    expect(problems).toEqual([]);
     expect(found.map((config) => config.client)).toEqual([...SUPPORTED_CLIENTS]);
     for (const config of found) {
       expect(config.path).toBe(clientConfigPath(config.client));
@@ -295,7 +296,7 @@ describe.skipIf(onWindows)("detectClients", () => {
     expect(SUPPORTED_CLIENTS.map(serversKey)).toEqual(["mcpServers", "mcpServers", "mcpServers", "servers"]);
     await writeConfig("vscode", { mcpServers: { a: { command: "a" } }, servers: { b: { type: "stdio", command: "b" } } });
     await writeConfig("cursor", { servers: { a: { command: "a" } }, mcpServers: { b: { command: "b" } } });
-    const found = await detectClients();
+    const { configs: found } = await detectClients();
     expect(found.find((c) => c.client === "vscode")?.servers).toEqual({ b: { type: "stdio", command: "b" } });
     expect(found.find((c) => c.client === "cursor")?.servers).toEqual({ b: { command: "b" } });
   });
@@ -316,7 +317,7 @@ describe.skipIf(onWindows)("detectClients", () => {
       nothing: null,
     };
     await writeConfig("claude-desktop", { mcpServers });
-    const [config] = await detectClients();
+    const [config] = (await detectClients()).configs;
     expect(config!.servers).toEqual({ ok: mcpServers.ok, typed: mcpServers.typed });
     expect(config!.raw).toEqual({ mcpServers });
   });
@@ -324,38 +325,48 @@ describe.skipIf(onWindows)("detectClients", () => {
   it("detects a config without servers, with an empty server map", async () => {
     home = await fakeHome();
     await writeConfig("cursor", { theme: "dark" });
-    await writeConfig("claude-code", { mcpServers: [] });
-    expect((await detectClients()).map((c) => [c.client, c.servers])).toEqual([
-      ["claude-code", {}],
-      ["cursor", {}],
-    ]);
+    expect((await detectClients()).configs.map((c) => [c.client, c.servers])).toEqual([["cursor", {}]]);
   });
 
-  it("skips files that are not one JSON object, including JSONC", async () => {
+  it("reads JSONC: comments and trailing commas", async () => {
+    home = await fakeHome();
+    await writeConfig("vscode", '{\n  // mine\n  "servers": {\n    "a": { "type": "stdio", "command": "a", }, /* b */\n  },\n}\n');
+    expect((await detectClients()).configs.map((c) => [c.client, c.servers])).toEqual([["vscode", { a: { type: "stdio", command: "a" } }]]);
+  });
+
+  it("reports files it cannot use instead of skipping them silently", async () => {
     home = await fakeHome();
     await writeConfig("claude-desktop", "{ not json");
     await writeConfig("claude-code", "[1, 2]");
-    await writeConfig("cursor", '{\n  // comment\n  "mcpServers": {}\n}');
+    await writeConfig("cursor", { mcpServers: [] });
     await writeConfig("vscode", "");
-    expect(await detectClients()).toEqual([]);
+    expect(await detectClients()).toEqual({
+      configs: [],
+      problems: [
+        { client: "claude-desktop", path: clientConfigPath("claude-desktop"), message: "is not valid JSON: InvalidSymbol at line 1, column 3" },
+        { client: "claude-code", path: clientConfigPath("claude-code"), message: "is not a JSON object" },
+        { client: "cursor", path: clientConfigPath("cursor"), message: 'keeps "mcpServers" as something other than an object' },
+        { client: "vscode", path: clientConfigPath("vscode"), message: "is not valid JSON: ValueExpected at line 1, column 1" },
+      ],
+    });
   });
 
-  it("skips a config path that is a directory", async () => {
+  it("reports a config path it cannot read", async () => {
     home = await fakeHome();
     await mkdir(clientConfigPath("cursor"), { recursive: true });
-    expect(await detectClients()).toEqual([]);
+    expect(await detectClients()).toEqual({ configs: [], problems: [{ client: "cursor", path: clientConfigPath("cursor"), message: "cannot be read (EISDIR)" }] });
   });
 
   it("accepts a leading byte-order mark", async () => {
     home = await fakeHome();
     await writeConfig("cursor", `\uFEFF${JSON.stringify({ mcpServers: { a: { command: "a" } } })}`);
-    expect((await detectClients())[0]?.servers).toEqual({ a: { command: "a" } });
+    expect((await detectClients()).configs[0]?.servers).toEqual({ a: { command: "a" } });
   });
 
   it("keeps a server named __proto__ as a plain key", async () => {
     home = await fakeHome();
     await writeConfig("cursor", '{"mcpServers":{"__proto__":{"command":"node"}}}');
-    const [config] = await detectClients();
+    const [config] = (await detectClients()).configs;
     expect(Object.hasOwn(config!.servers, "__proto__")).toBe(true);
     expect(Object.getPrototypeOf(config!.servers)).toBe(Object.prototype);
   });
@@ -375,7 +386,7 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
   async function detected(contents: unknown, client: ClientId = "claude-desktop"): Promise<ClientConfig> {
     home = await fakeHome();
     await writeConfig(client, contents);
-    const config = (await detectClients()).find((c) => c.client === client);
+    const config = (await detectClients()).configs.find((c) => c.client === client);
     if (config === undefined) throw new Error("config not detected");
     return config;
   }
@@ -406,7 +417,7 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
     const config = wrapAll(await detected({ mcpServers: { weather }, other: 1 }));
     await writeClientConfig(config);
     const after = await readFile(config.path, "utf8");
-    await writeClientConfig(wrapAll((await detectClients())[0]!));
+    await writeClientConfig(wrapAll((await detectClients()).configs[0]!));
     expect(await readFile(config.path, "utf8")).toBe(after);
     expect(await backups(config.path)).toHaveLength(1);
   });
@@ -480,6 +491,42 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
       expect(JSON.parse(written).mcpServers.weather.command).toBe("latch");
       await rm(home, { recursive: true, force: true });
     }
+  });
+
+  it("edits a JSONC config in place: comments, trailing commas and other entries survive byte for byte", async () => {
+    const original = `{
+  // Servers for this machine.
+  "servers": {
+    "weather": { "type": "stdio", "command": "npx", "args": ["tsx", "demo/weather-server.ts"] },
+    /* remote one, not wrapped */
+    "remote": { "type": "http", "url": "https://mcp.example", },
+  },
+  "inputs": [],
+}
+`;
+    const config = await detected(original, "vscode");
+    await writeClientConfig(wrapAll(config));
+    const written = await readFile(config.path, "utf8");
+    const wrapped = wrapWithProxy("weather", { type: "stdio", ...weather });
+    expect(written).toBe(`{
+  // Servers for this machine.
+  "servers": {
+    "weather": ${JSON.stringify(wrapped, null, 2).replace(/\n/g, "\n    ")},
+    /* remote one, not wrapped */
+    "remote": { "type": "http", "url": "https://mcp.example", },
+  },
+  "inputs": [],
+}
+`);
+    const [backup] = await backups(config.path);
+    expect(await readFile(join(dirname(config.path), backup!), "utf8")).toBe(original);
+  });
+
+  it("refuses to rewrite a file whose server map stopped being an object", async () => {
+    const config = await detected({ mcpServers: { weather } });
+    await writeFile(config.path, '{"mcpServers": "gone"}');
+    await expect(writeClientConfig(wrapAll(config))).rejects.toThrow(`${config.path} no longer keeps "mcpServers" as an object; not rewriting it`);
+    expect(await readFile(config.path, "utf8")).toBe('{"mcpServers": "gone"}');
   });
 
   it("keeps the original permissions on the new file and the backup", async () => {
