@@ -3,7 +3,7 @@
 Every installer carries its own Node.js 22, so you do not need Node.js, pnpm or anything else.
 Git is optional: with it, approvals are recorded under your `git config user.email`.
 
-Download the file for your system from the [latest release](https://github.com/vinayakkam/LatchVerify/releases/latest).
+Download the file for your system from the [latest release](https://github.com/ANI-CPU-tech/LatchVerify/releases/latest).
 
 ## What installing does
 

@@ -130,7 +130,8 @@ async function main(): Promise<void> {
         paused = !paused;
         return refreshTray();
       case "updates":
-        await updates.check(true);
+        if (updates.label().startsWith("Install")) await updates.install();
+        else await updates.check(true);
         return refreshTray();
       case "quit":
         quitting = true;

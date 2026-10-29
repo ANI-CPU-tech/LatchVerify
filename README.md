@@ -71,7 +71,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
 ## Install
 
 **Installers** for Windows, Debian/Ubuntu, Arch/CachyOS and other Linux come with each
-[release](https://github.com/vinayakkam/LatchVerify/releases). They bring their own Node.js
+[release](https://github.com/ANI-CPU-tech/LatchVerify/releases). They bring their own Node.js
 and create your own `latch.lock`. They connect an MCP client only when you say so (`latch setup`
 asks, the Windows installer has a checkbox); a connected client's servers go behind the proxy and
 are pinned on their first run. See [INSTALL.md](INSTALL.md).

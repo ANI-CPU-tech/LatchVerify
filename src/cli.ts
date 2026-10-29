@@ -138,6 +138,12 @@ program
     run(async (env) => (await import("./commands/watch.js")).runWatch({ ...opts, ...setupGlobals(), logLevel: env.logLevel })),
   );
 
+program
+  .command("update")
+  .description("install the newest LatchVerify release (signed); --check only says whether there is one")
+  .option("--check", "only check, install nothing", false)
+  .action((opts: { check: boolean }) => run(async () => (await import("./commands/update.js")).runUpdate(opts)));
+
 const lock = program
   .command("lock")
   .description("check latch.lock for edits made outside LatchVerify, and accept or undo them");

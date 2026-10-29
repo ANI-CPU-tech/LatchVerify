@@ -31,9 +31,9 @@ AppName=LatchVerify
 AppVersion={#AppVersion}
 AppVerName=LatchVerify {#AppVersion}
 AppPublisher=LatchVerify contributors
-AppPublisherURL=https://github.com/vinayakkam/LatchVerify
-AppSupportURL=https://github.com/vinayakkam/LatchVerify/issues
-AppUpdatesURL=https://github.com/vinayakkam/LatchVerify/releases
+AppPublisherURL=https://github.com/ANI-CPU-tech/LatchVerify
+AppSupportURL=https://github.com/ANI-CPU-tech/LatchVerify/issues
+AppUpdatesURL=https://github.com/ANI-CPU-tech/LatchVerify/releases
 VersionInfoVersion={#FileVersion}
 VersionInfoProductVersion={#FileVersion}
 VersionInfoDescription=LatchVerify installer
@@ -76,6 +76,8 @@ Source: "{#StageDir}\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recurses
 Source: "{#StageDir}\node\*"; DestDir: "{app}\node"; Flags: ignoreversion recursesubdirs
 Source: "latch.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "latchverify.ico"; DestDir: "{app}"; Flags: ignoreversion
+; How `latch update` and the app install updates (src/update): with this installer.
+Source: "install-kind"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\LatchVerify Review"; Filename: "{app}\latch.cmd"; Parameters: "review --ui"; WorkingDir: "{userdocs}"; IconFilename: "{app}\latchverify.ico"; Comment: "Review MCP tool changes that LatchVerify blocked"; AppUserModelID: "io.github.vinayakkam.LatchVerify"

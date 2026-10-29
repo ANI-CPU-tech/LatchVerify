@@ -31,7 +31,7 @@ export function downloads(version: string): string {
     `| Arch / CachyOS (x64) | \`latchverify-bin-<version>-1-x86_64.pkg.tar.zst\` | \`sudo pacman -U latchverify-bin-*.pkg.tar.zst\` |`,
     `| Other Linux (x64) | \`latchverify-${version}-linux-x64.tar.gz\` | Unpack, then run \`./install.sh\` |`,
     "",
-    "Installing links Claude Code for you: its MCP servers start behind latch and their tools are pinned in your own `latch.lock`. Restart Claude Code afterwards. See [INSTALL.md](https://github.com/vinayakkam/LatchVerify/blob/main/INSTALL.md).",
+    "After installing, choose which MCP clients to connect (the Windows installer asks; on Linux run `latch setup`). An installed LatchVerify updates itself from signed releases. See [INSTALL.md](https://github.com/ANI-CPU-tech/LatchVerify/blob/main/INSTALL.md).",
     "",
     "Check a download against `SHA256SUMS`: `sha256sum -c SHA256SUMS --ignore-missing` (Linux) or `Get-FileHash <file>` (PowerShell).",
   ].join("\n");

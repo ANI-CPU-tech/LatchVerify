@@ -7,7 +7,7 @@ Depends: libc6 (>= 2.28), libstdc++6, libgcc-s1
 Recommends: git
 Installed-Size: @INSTALLED_SIZE@
 Maintainer: @MAINTAINER@
-Homepage: https://github.com/vinayakkam/LatchVerify
+Homepage: https://github.com/ANI-CPU-tech/LatchVerify
 Description: capability-diffing security proxy for MCP servers
  LatchVerify pins Model Context Protocol tool definitions in latch.lock and
  blocks tools/call when a tool gains capabilities without review.

@@ -21,6 +21,8 @@ trap 'rm -rf "$tmp"' EXIT
 dir="$tmp/$name"
 mkdir -p "$dir"
 cp -a "$stage/app" "$stage/node" "$dir/"
+# How `latch update` and the app install updates (src/update): this is the portable archive.
+printf 'tarball\n' > "$dir/install-kind"
 install -m 755 "$repo/packaging/linux/latch" "$repo/packaging/linux/latchverify-review" "$repo/packaging/linux/install.sh" "$repo/packaging/linux/uninstall.sh" "$dir/"
 install -m 644 "$repo/packaging/linux/io.github.vinayakkam.LatchVerify.desktop" "$repo/LICENSE" "$dir/"
 install -m 644 "$repo/web/public/favicon.svg" "$dir/io.github.vinayakkam.LatchVerify.svg"

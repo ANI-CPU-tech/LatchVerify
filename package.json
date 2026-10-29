@@ -4,6 +4,10 @@
   "description": "Capability-diffing security proxy for Model Context Protocol servers. Pins tool definitions in a git-committed lockfile and blocks unreviewed capability drift.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ANI-CPU-tech/LatchVerify.git"
+  },
   "bin": {
     "latch": "./dist/cli.js"
   },

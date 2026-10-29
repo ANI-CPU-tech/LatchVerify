@@ -27,6 +27,8 @@ trap 'rm -rf "$root"' EXIT
 lib="$root/usr/lib/latchverify"
 mkdir -p "$lib" "$root/usr/bin" "$root/DEBIAN"
 cp -a "$stage/app" "$stage/node" "$lib/"
+# How `latch update` and the app install updates (src/update): this is the deb.
+printf 'deb\n' > "$lib/install-kind"
 install -m 755 "$repo/packaging/linux/latch" "$repo/packaging/linux/latchverify-review" "$repo/packaging/linux/link-user" "$lib/"
 ln -s ../lib/latchverify/latch "$root/usr/bin/latch"
 ln -s ../lib/latchverify/latchverify-review "$root/usr/bin/latchverify-review"

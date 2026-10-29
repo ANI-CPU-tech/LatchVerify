@@ -59,6 +59,14 @@ describe("the build-installers workflow", () => {
     expect(release).toContain("fail_on_unmatched_files: true");
   });
 
+  it("signs and uploads latest.json for full releases only, failing without the update key", () => {
+    const release = job("release");
+    expect(release).toContain("LATCH_UPDATE_SIGNING_KEY: ${{ secrets.LATCH_UPDATE_SIGNING_KEY }}");
+    expect(release).toContain("packaging/make-latest-json.ts");
+    expect(release).toMatch(/latest\.json/);
+    expect(release.indexOf("make-latest-json.ts")).toBeGreaterThan(release.indexOf("packaging/release-notes.ts"));
+  });
+
   it("signs the Windows installer only when the certificate secret is set", () => {
     const windows = job("windows");
     expect(windows).toContain("WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}");

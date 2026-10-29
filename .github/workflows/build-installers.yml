@@ -263,3 +263,19 @@ jobs:
             packages/*.pkg.tar.zst
             packages/SHA256SUMS
           fail_on_unmatched_files: true
+      # The update manifest the apps check, for releases only: pre-releases are never offered.
+      - name: Sign the update manifest (latest.json)
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          LATCH_UPDATE_SIGNING_KEY: ${{ secrets.LATCH_UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$LATCH_UPDATE_SIGNING_KEY" ]; then
+            echo "::error::The LATCH_UPDATE_SIGNING_KEY secret is not set, so installed apps could not verify this release; see packaging/keygen.ts"
+            exit 1
+          fi
+          pnpm -s exec tsx packaging/make-latest-json.ts "$VERSION" packages > "$RUNNER_TEMP/latest.json"
+      - uses: softprops/action-gh-release@v2
+        if: ${{ !contains(github.ref_name, '-') }}
+        with:
+          files: ${{ runner.temp }}/latest.json
+          fail_on_unmatched_files: true
