@@ -122,6 +122,40 @@ Delete the entry from `rejected.json` to take a rejection back.
 `latch verify` runs the same capture → tier pipeline in CI against every server in
 `latch.lock` and exits non-zero on tier-2+ drift. See [LOCKFILE.md](LOCKFILE.md).
 
+## Threat model: what the proxy protects against, and what it does not
+
+LatchVerify stands between a client and a server that may turn hostile after it was
+approved: a rug pull through `list_changed`, a hidden instruction in a description, a new
+capability. Within that, it also protects against the guarded server itself, which runs as
+the same OS user as LatchVerify and can read and write the same files:
+
+- **Its own approvals.** No `LATCH_*` variable reaches the server's environment, so it is
+  not told where `latch.lock`, the review queue or the LLM API key are. Every lockfile
+  LatchVerify writes is recorded in an HMAC-signed integrity record under a per-user key
+  (`store/integrity.ts`), kept in the per-user LatchVerify directory, not in the state
+  directory. A proxy refuses a `latch.lock` the record does not vouch for, keeps the version
+  it trusts, and logs `lock_tampered`. `latch lock accept` trusts an edit made by a person
+  (a `git pull`, a merge); `latch lock restore` undoes it.
+- **Its tool descriptions.** A tier-3 tool reaches the model as its name and a "withheld"
+  notice, never its own text.
+- **The review queue.** Editing `pending.json` does not unblock a tier-2 or tier-3 change:
+  the proxy re-derives every change from the server's own tool list, and a change it has
+  seen stays blocked in memory for the session. Deleting an entry from `rejected.json` takes
+  that rejection back, so the definition is queued again; a tier-2 or tier-3 one stays
+  blocked, a tier-0 or tier-1 one auto-passes as it would have without the rejection.
+
+What it cannot do:
+
+- **Prevent a same-user attacker.** A program written against LatchVerify can read the
+  integrity key, forge a record, or delete one before any proxy has seen it (a proxy accepts
+  a lockfile with no record, so lockfiles written before integrity records existed keep
+  working). Tamper detection stops generic and scripted edits, and `latch verify` in CI still
+  catches a forged approval in the committed `latch.lock`. Real prevention needs the proxy
+  to run as a separate OS account, which needs admin rights and changes how clients start
+  servers.
+- **Guard servers it does not wrap.** HTTP and SSE servers in a client config are left
+  alone; bridge them to stdio (for example with `mcp-remote`) to put them behind the proxy.
+
 ## Why raw JSON-RPC instead of the MCP SDK
 
 The official SDKs are built for writing clients and servers. They parse messages
@@ -140,19 +174,21 @@ into typed objects and re-serialize them. For a proxy that causes three problems
 So `proxy/transport.ts` reads stdin and the child's stdout with `readline`, one
 JSON-RPC message per line, and keeps the original line (`Frame.raw`). Untouched
 frames are written back byte-for-byte. Only messages the proxy rewrites or creates
-(block errors, its own `tools/list` re-fetch) are serialized.
+(block errors, its own `tools/list` re-fetch, a tool list with tier-3 tools withheld) are
+serialized.
 
 ## Module map
 
 | Path | Responsibility |
 |---|---|
 | `src/schema/` | zod schemas and inferred types. The shared contract. |
-| `src/proxy/transport.ts` | JSON-RPC types, line framing, spawning the child |
+| `src/proxy/transport.ts` | JSON-RPC types, line framing (capped at 64 MiB a line), spawning the child without LatchVerify's own variables |
 | `src/proxy/interceptor.ts` | Routing frames to the three interception handlers |
 | `src/proxy/blocker.ts` | Block verdict and the JSON-RPC error |
-| `src/proxy/index.ts` | `startProxy` lifecycle and signal forwarding |
+| `src/proxy/index.ts` | `startProxy` lifecycle, signal forwarding, SIGTERM/SIGKILL escalation, lockfile integrity checks |
 | `src/analyze/*` | Hashing, capability extraction, detectors, diff, tiers, LLM pass |
-| `src/store/*` | `latch.lock`, pending queue, event log |
+| `src/store/*` | `latch.lock` and its integrity records, pending queue, rejections, event log (rotated at 5 MB), the shared file lock |
+| `src/log.ts` | Leveled stderr logging (`LATCH_LOG_LEVEL`) |
 | `src/commands/*` | One file per CLI command |
 | `src/config/*` | Env loading and MCP client config detection and rewriting |
 | `src/ui/*` | hono review API, bound to 127.0.0.1 |

@@ -91,7 +91,8 @@ pnpm link --global   # puts `latch` on your PATH
 | `latch init` | Detect MCP client configs (Claude Desktop, Claude Code, Cursor, VS Code), wrap the chosen servers with the proxy, and pin their current tools in `latch.lock`. |
 | `latch setup` | Link Claude Code (or `--client <id>`) with no questions, as the installers do: wrap its servers and pin their tools in the per-user `latch.lock`, created if needed. `--remove` restores the original entries. |
 | `latch add` | Put one server behind latch: pin its tools and add it, wrapped, to one client config (Claude Desktop by default). `latch add github --env GITHUB_PERSONAL_ACCESS_TOKEN -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server` |
-| `latch review` | Walk the pending queue in the terminal, or with `--ui` open the web review screen. Approving rewrites `latch.lock` for you to commit. |
+| `latch review` | Walk the pending queue in the terminal, or with `--ui` open the web review screen. Approving rewrites `latch.lock` for you to commit; rejecting keeps that definition blocked, even after a restart. |
+| `latch lock status` / `accept` / `restore` | Check `latch.lock` for edits made outside LatchVerify (a server tampering with its own approvals, or a `git pull`). Proxies ignore such an edit until you `accept` it; `restore` puts back the last version LatchVerify wrote. |
 | `latch verify` | CI check. Spawns every server in `latch.lock`, diffs live tools against pinned ones, and exits non-zero on tier 2+ drift. |
 | `latch inspect` | Print derived capabilities and findings for a server or a saved `tools/list` JSON, without touching the lockfile. |
 

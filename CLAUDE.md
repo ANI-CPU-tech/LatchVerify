@@ -45,6 +45,8 @@ a regression test first.
   byte-for-byte (`Frame.raw`), and re-serialize only messages the proxy rewrites.
 - **stdout is the protocol.** In proxy mode nothing but JSON-RPC may go to stdout.
   Logs go to stderr and `.latch/events.jsonl`.
+- **No `LATCH_*` variable reaches a guarded server** (`serverEnvironment` in
+  `proxy/transport.ts`). Never pass LatchVerify's paths or keys to a server another way.
 - **Blocks are JSON-RPC errors.** A blocked `tools/call` gets an error response
   (code `-32001`) whose message the model can read and relay ("blocked pending
   review — run `latch review`"). Never drop or hang the request.
@@ -74,9 +76,16 @@ that blocks on every reword gets disabled by its users.
   interception points, `blocker.ts` verdict and error).
 - Analysis pipeline: `src/analyze/` (hash, capabilities, unicode, patterns,
   differ, tiers, llm).
-- State: `src/store/` (`lockfile.ts` for `latch.lock`; `pending.ts` and
-  `events.ts` for `.latch/`). Atomic writes end with `replace.ts` `replaceFile`, which retries
-  the rename on Windows while another process holds the target.
+- State: `src/store/` (`lockfile.ts` for `latch.lock`; `pending.ts`, `rejected.ts` and
+  `events.ts` for `.latch/`). Atomic writes go through `replace.ts` (`writeFileAtomic`, ending
+  with `replaceFile`, which retries the rename on Windows while another process holds the
+  target). `lock.ts` `withFileLock` is the cross-process lock (owner token, heartbeat).
+- Tamper detection: `src/store/integrity.ts` `LockIntegrity`. `writeLockfile` records every
+  lockfile it writes (HMAC under a per-user key in `integrityDir()`); the proxy refuses a
+  `latch.lock` the record does not vouch for. `latch lock status|accept|restore`
+  (`commands/lock.ts`) handles edits made outside LatchVerify. Tests point
+  `LATCH_INTEGRITY_DIR` at a temp dir (`tests/setup.ts`).
+- Logging: `src/log.ts` `createLogger`, leveled by `LATCH_LOG_LEVEL`, stderr only.
 - CLI: `src/cli.ts` wires `src/commands/*`. `latch setup` (`commands/setup.ts`) is
   `latch init` for one client with no questions, plus `--remove` to unwrap; installers run it.
 - Per-user lockfile: `src/config/paths.ts` `userLockfilePath()` (`%APPDATA%\LatchVerify`,

@@ -40,30 +40,23 @@ so they do not need `latch` on PATH. For the commands below, without
 
 ## 2. Environment variables: none are required
 
-**Nothing reads a `.env` file.** `loadEnv()` exists in `src/config/env.ts` but is not
-called yet, and the review server reads `process.env` directly. Copying
-`.env.example` to `.env` has no effect unless you export the variables into your shell.
-Every variable has a working default:
+`latch` loads the `LATCH_*` lines of a `.env` file in the directory it runs in (copy
+`.env.example`); variables already set in the shell win, and every other line of the file is
+ignored. Every variable has a working default:
 
 | Variable | Default | Set it when |
 |---|---|---|
 | `LATCH_LOCKFILE_PATH` | `./latch.lock` | running `pnpm ui`, or `latch proxy` from another directory |
-| `LATCH_STATE_DIR` | `./.latch` | same |
+| `LATCH_STATE_DIR` | `.latch` next to the lockfile | same |
 | `LATCH_UI_PORT` | `7777` | `pnpm ui` should use another API port |
 | `LATCH_REVIEWER` | `git config user.email`, else the OS user | approvals should be recorded under another name |
+| `LATCH_LOG_LEVEL` | `info` | `debug` to see every frame the proxy holds, rewrites or answers; `warn` for a quieter stderr |
+| `LATCH_LLM_ENABLED`, `LATCH_LLM_API_KEY` | `false`, empty | you want the optional LLM advisory pass (any OpenAI-compatible API; see `LATCH_LLM_BASE_URL` and `LATCH_LLM_MODEL`) |
+| `LATCH_INTEGRITY_DIR` | `integrity` next to the per-user lockfile | tests: where lockfile integrity records and their key live |
 | `DEMO_MUTATE` | unset | `1` makes the evil demo server start already poisoned |
-| `ANTHROPIC_API_KEY`, `LATCH_LLM_ENABLED` | empty, `false` | no effect yet: the LLM pass is not wired in |
 
-To load a `.env` anyway:
-
-```sh
-cp .env.example .env
-set -a; . ./.env; set +a                                   # bash / zsh
-```
-
-```fish
-for l in (string match -rv '^\s*(#|$)' < .env); set -gx (string split -m1 = $l); end   # fish
-```
+No `LATCH_*` variable ever reaches a server behind the proxy: the proxy removes them all from
+the server's environment.
 
 `.env` is gitignored; never commit it.
 
