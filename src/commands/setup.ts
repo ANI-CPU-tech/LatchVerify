@@ -14,6 +14,14 @@ export const CLIENT_NAMES: Record<ClientId, string> = {
   "claude-code": "Claude Code",
   cursor: "Cursor",
   vscode: "VS Code",
+  "vscode-insiders": "VS Code Insiders",
+  vscodium: "VSCodium",
+  cline: "Cline (VS Code)",
+  "cline-cli": "Cline CLI",
+  "gemini-cli": "Gemini CLI",
+  zed: "Zed",
+  "lm-studio": "LM Studio",
+  "amazon-q": "Amazon Q Developer",
 };
 
 export interface SetupOptions {
@@ -127,41 +135,45 @@ export async function runUnlink(options: UnlinkOptions): Promise<number> {
   say(pc.bold(`latch setup --remove: unlinking ${name}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
 
   const detection = await detectClients();
-  const problem = detection.problems.find((candidate) => candidate.client === options.client);
-  if (problem !== undefined) {
-    say(pc.red(problemWarning(problem)));
-    return 1;
-  }
-  const config = detection.configs.find((candidate) => candidate.client === options.client);
-  if (config === undefined) {
-    say(`nothing to unlink: ${name} is not set up on this machine (no ${printable(clientConfigPath(options.client))})`);
-    return 0;
+  const problems = detection.problems.filter((candidate) => candidate.client === options.client);
+  for (const problem of problems) say(pc.red(problemWarning(problem)));
+  const configs = detection.configs.filter((candidate) => candidate.client === options.client);
+  if (configs.length === 0) {
+    if (problems.length === 0) say(`nothing to unlink: ${name} is not set up on this machine (no ${printable(clientConfigPath(options.client))})`);
+    return problems.length > 0 ? 1 : 0;
   }
 
-  const restored: Record<string, ClientServerEntry> = {};
-  for (const [serverId, entry] of Object.entries(config.servers)) {
-    const real = unwrapProxy(entry);
-    if (real === entry) continue;
-    restored[serverId] = withoutLatchEnv(real);
+  // A client can keep servers in more than one file (Amazon Q): each is restored on its own.
+  let code = problems.length > 0 ? 1 : 0;
+  let restoredAny = false;
+  for (const config of configs) {
+    const restored: Record<string, ClientServerEntry> = {};
+    for (const [serverId, entry] of Object.entries(config.servers)) {
+      const real = unwrapProxy(entry);
+      if (real === entry) continue;
+      restored[serverId] = withoutLatchEnv(real);
+    }
+    const ids = Object.keys(restored);
+    if (ids.length === 0) {
+      say(`nothing to unlink: no server in ${printable(config.path)} runs through latch`);
+      continue;
+    }
+    if (options.dryRun) {
+      say(`would restore ${plural(ids.length, "server")} in ${printable(config.path)}, keeping a .bak copy: ${printable(ids.join(", "))}`);
+      continue;
+    }
+    try {
+      await writeClientConfig({ ...config, servers: restored });
+    } catch (error) {
+      say(pc.red(`✖ could not rewrite ${printable(config.path)}: ${printable(error instanceof Error ? error.message : String(error))}`));
+      code = 1;
+      continue;
+    }
+    restoredAny = true;
+    say(`${pc.green("✔")} restored ${plural(ids.length, "server")} in ${printable(config.path)} (the previous file is kept as a .bak copy): ${printable(ids.join(", "))}`);
   }
-  const ids = Object.keys(restored);
-  if (ids.length === 0) {
-    say(`nothing to unlink: no server in ${printable(config.path)} runs through latch`);
-    return 0;
-  }
-  if (options.dryRun) {
-    say(`would restore ${plural(ids.length, "server")} in ${printable(config.path)}, keeping a .bak copy: ${printable(ids.join(", "))}`);
-    return 0;
-  }
-  try {
-    await writeClientConfig({ ...config, servers: restored });
-  } catch (error) {
-    say(pc.red(`✖ could not rewrite ${printable(config.path)}: ${printable(error instanceof Error ? error.message : String(error))}`));
-    return 1;
-  }
-  say(`${pc.green("✔")} restored ${plural(ids.length, "server")} in ${printable(config.path)} (the previous file is kept as a .bak copy): ${printable(ids.join(", "))}`);
-  say(`next: restart ${name}. latch.lock is kept, so linking again later keeps your approvals.`);
-  return 0;
+  if (restoredAny) say(`next: restart ${name}. latch.lock is kept, so linking again later keeps your approvals.`);
+  return code;
 }
 
 /** `entry` without the env variables latch init added; an env left empty is dropped. */

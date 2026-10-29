@@ -1,14 +1,15 @@
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   INSTALL_LAUNCH,
   PROXY_COMMAND,
   SUPPORTED_CLIENTS,
   clientConfigPath,
+  clientLocations,
   detectClients,
-  serversKey,
   unwrapProxy,
   wrapWithProxy,
   writeClientConfig,
@@ -20,6 +21,9 @@ import {
 // os.homedir() follows HOME only on POSIX hosts.
 const onWindows = process.platform === "win32";
 
+/** The key of a client's main server map ("mcpServers", "servers" or "context_servers"). */
+const mapKey = (client: ClientId): string => clientLocations(client)[0]!.serversPath[0]!;
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -28,12 +32,28 @@ describe("clientConfigPath", () => {
   it.skipIf(onWindows)("uses the documented locations on Linux", () => {
     vi.stubEnv("HOME", "/home/dev");
     vi.stubEnv("XDG_CONFIG_HOME", undefined);
-    expect(SUPPORTED_CLIENTS.map((client) => clientConfigPath(client, "linux"))).toEqual([
-      "/home/dev/.config/Claude/claude_desktop_config.json",
-      "/home/dev/.claude.json",
-      "/home/dev/.cursor/mcp.json",
-      "/home/dev/.config/Code/User/mcp.json",
-    ]);
+    expect(Object.fromEntries(SUPPORTED_CLIENTS.map((client) => [client, clientLocations(client, "linux")]))).toEqual({
+      "claude-desktop": [{ path: "/home/dev/.config/Claude/claude_desktop_config.json", serversPath: ["mcpServers"] }],
+      "claude-code": [{ path: "/home/dev/.claude.json", serversPath: ["mcpServers"] }],
+      cursor: [{ path: "/home/dev/.cursor/mcp.json", serversPath: ["mcpServers"] }],
+      vscode: [{ path: "/home/dev/.config/Code/User/mcp.json", serversPath: ["servers"] }],
+      "vscode-insiders": [{ path: "/home/dev/.config/Code - Insiders/User/mcp.json", serversPath: ["servers"] }],
+      vscodium: [{ path: "/home/dev/.config/VSCodium/User/mcp.json", serversPath: ["servers"] }],
+      cline: [
+        { path: "/home/dev/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json", serversPath: ["mcpServers"] },
+      ],
+      "cline-cli": [{ path: "/home/dev/.cline/data/settings/cline_mcp_settings.json", serversPath: ["mcpServers"] }],
+      "gemini-cli": [{ path: "/home/dev/.gemini/settings.json", serversPath: ["mcpServers"] }],
+      zed: [{ path: "/home/dev/.config/zed/settings.json", serversPath: ["context_servers"] }],
+      "lm-studio": [{ path: "/home/dev/.lmstudio/mcp.json", serversPath: ["mcpServers"] }],
+      "amazon-q": [
+        { path: "/home/dev/.aws/amazonq/mcp.json", serversPath: ["mcpServers"] },
+        { path: "/home/dev/.aws/amazonq/default.json", serversPath: ["mcpServers"] },
+      ],
+    });
+    expect(SUPPORTED_CLIENTS.map((client) => clientConfigPath(client, "linux"))).toEqual(
+      SUPPORTED_CLIENTS.map((client) => clientLocations(client, "linux")[0]!.path),
+    );
   });
 
   it.skipIf(onWindows)("honours an absolute XDG_CONFIG_HOME on Linux and ignores a relative one", () => {
@@ -42,6 +62,8 @@ describe("clientConfigPath", () => {
     expect(clientConfigPath("claude-desktop", "linux")).toBe("/data/config/Claude/claude_desktop_config.json");
     expect(clientConfigPath("vscode", "linux")).toBe("/data/config/Code/User/mcp.json");
     expect(clientConfigPath("cursor", "linux")).toBe("/home/dev/.cursor/mcp.json");
+    expect(clientConfigPath("zed", "linux")).toBe("/data/config/zed/settings.json");
+    expect(clientConfigPath("cline", "linux")).toBe("/data/config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json");
     vi.stubEnv("XDG_CONFIG_HOME", "relative/config");
     expect(clientConfigPath("claude-desktop", "linux")).toBe("/home/dev/.config/Claude/claude_desktop_config.json");
   });
@@ -49,12 +71,11 @@ describe("clientConfigPath", () => {
   it.skipIf(onWindows)("uses Application Support on macOS", () => {
     vi.stubEnv("HOME", "/Users/dev");
     vi.stubEnv("XDG_CONFIG_HOME", "/ignored");
-    expect(SUPPORTED_CLIENTS.map((client) => clientConfigPath(client, "darwin"))).toEqual([
-      "/Users/dev/Library/Application Support/Claude/claude_desktop_config.json",
-      "/Users/dev/.claude.json",
-      "/Users/dev/.cursor/mcp.json",
-      "/Users/dev/Library/Application Support/Code/User/mcp.json",
-    ]);
+    expect(clientConfigPath("claude-desktop", "darwin")).toBe("/Users/dev/Library/Application Support/Claude/claude_desktop_config.json");
+    expect(clientConfigPath("vscode", "darwin")).toBe("/Users/dev/Library/Application Support/Code/User/mcp.json");
+    expect(clientConfigPath("cursor", "darwin")).toBe("/Users/dev/.cursor/mcp.json");
+    // Zed keeps ~/.config on macOS too.
+    expect(clientConfigPath("zed", "darwin")).toBe("/Users/dev/.config/zed/settings.json");
   });
 
   it.skipIf(onWindows)("uses %APPDATA% and Windows separators on Windows", () => {
@@ -63,6 +84,18 @@ describe("clientConfigPath", () => {
     expect(clientConfigPath("vscode", "win32")).toBe("C:\\Users\\dev\\AppData\\Roaming\\Code\\User\\mcp.json");
     expect(clientConfigPath("cursor", "win32").endsWith("\\.cursor\\mcp.json")).toBe(true);
     expect(clientConfigPath("claude-code", "win32").endsWith("\\.claude.json")).toBe(true);
+    expect(clientConfigPath("vscode-insiders", "win32")).toBe("C:\\Users\\dev\\AppData\\Roaming\\Code - Insiders\\User\\mcp.json");
+    expect(clientConfigPath("vscodium", "win32")).toBe("C:\\Users\\dev\\AppData\\Roaming\\VSCodium\\User\\mcp.json");
+    expect(clientConfigPath("cline", "win32")).toBe(
+      "C:\\Users\\dev\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\settings\\cline_mcp_settings.json",
+    );
+    expect(clientConfigPath("zed", "win32")).toBe("C:\\Users\\dev\\AppData\\Roaming\\Zed\\settings.json");
+    expect(clientConfigPath("lm-studio", "win32").endsWith("\\.lmstudio\\mcp.json")).toBe(true);
+    expect(clientConfigPath("gemini-cli", "win32").endsWith("\\.gemini\\settings.json")).toBe(true);
+    expect(clientLocations("amazon-q", "win32").map((location) => location.path.split("\\").slice(-3).join("/"))).toEqual([
+      ".aws/amazonq/mcp.json",
+      ".aws/amazonq/default.json",
+    ]);
   });
 
   it.skipIf(onWindows)("falls back to AppData/Roaming under the home directory without %APPDATA%", () => {
@@ -77,7 +110,7 @@ describe("clientConfigPath", () => {
   });
 
   it("rejects an unknown client at runtime", () => {
-    expect(() => clientConfigPath("zed" as ClientId)).toThrow('unknown MCP client "zed"');
+    expect(() => clientConfigPath("windsurf" as ClientId)).toThrow('unknown MCP client "windsurf"');
   });
 });
 
@@ -279,7 +312,7 @@ describe.skipIf(onWindows)("detectClients", () => {
     home = await fakeHome();
     const weather = { command: "npx", args: ["tsx", "demo/weather-server.ts"] };
     for (const client of [...SUPPORTED_CLIENTS].reverse()) {
-      await writeConfig(client, { [serversKey(client)]: { weather }, other: 1 });
+      await writeConfig(client, { [mapKey(client)]: { weather }, other: 1 });
     }
     const { configs: found, problems } = await detectClients();
     expect(problems).toEqual([]);
@@ -287,13 +320,26 @@ describe.skipIf(onWindows)("detectClients", () => {
     for (const config of found) {
       expect(config.path).toBe(clientConfigPath(config.client));
       expect(config.servers).toEqual({ weather });
-      expect(config.raw).toEqual({ [serversKey(config.client)]: { weather }, other: 1 });
+      expect(config.raw).toEqual({ [mapKey(config.client)]: { weather }, other: 1 });
     }
   });
 
   it("reads VS Code servers from servers and the others from mcpServers", async () => {
     home = await fakeHome();
-    expect(SUPPORTED_CLIENTS.map(serversKey)).toEqual(["mcpServers", "mcpServers", "mcpServers", "servers"]);
+    expect(SUPPORTED_CLIENTS.map(mapKey)).toEqual([
+      "mcpServers",
+      "mcpServers",
+      "mcpServers",
+      "servers",
+      "servers",
+      "servers",
+      "mcpServers",
+      "mcpServers",
+      "mcpServers",
+      "context_servers",
+      "mcpServers",
+      "mcpServers",
+    ]);
     await writeConfig("vscode", { mcpServers: { a: { command: "a" } }, servers: { b: { type: "stdio", command: "b" } } });
     await writeConfig("cursor", { servers: { a: { command: "a" } }, mcpServers: { b: { command: "b" } } });
     const { configs: found } = await detectClients();
@@ -369,6 +415,80 @@ describe.skipIf(onWindows)("detectClients", () => {
     const [config] = (await detectClients()).configs;
     expect(Object.hasOwn(config!.servers, "__proto__")).toBe(true);
     expect(Object.getPrototypeOf(config!.servers)).toBe(Object.prototype);
+  });
+});
+
+/** Each client's documented example config: tests/fixtures/clients/<client>/<file name>. */
+const fixture = (client: ClientId, path: string): string =>
+  fileURLToPath(new URL(`../fixtures/clients/${client}/${basename(path)}`, import.meta.url));
+
+/** The stdio servers each fixture holds, per file: the ones latch wraps. */
+const FIXTURE_SERVERS: Record<ClientId, string[][]> = {
+  "claude-desktop": [["filesystem"]],
+  "claude-code": [["airtable"]],
+  cursor: [["server-name"]],
+  vscode: [["Perplexity", "fetch"]],
+  "vscode-insiders": [["Perplexity", "fetch"]],
+  vscodium: [["Perplexity", "fetch"]],
+  cline: [["my-server"]],
+  "cline-cli": [["my-server"]],
+  "gemini-cli": [["pythonTools"]],
+  zed: [["local-mcp-server"]],
+  "lm-studio": [["time"]],
+  "amazon-q": [["awslabs.aws-documentation-mcp-server"], ["git"]],
+};
+
+describe.skipIf(onWindows)("every supported client, on its documented example config", () => {
+  let home: string | undefined;
+
+  afterEach(async () => {
+    if (home !== undefined) await rm(home, { recursive: true, force: true });
+    home = undefined;
+  });
+
+  it("has a fixture for each of its config files", async () => {
+    for (const client of SUPPORTED_CLIENTS) {
+      for (const location of clientLocations(client)) {
+        await expect(stat(fixture(client, location.path)), `${client}: ${basename(location.path)}`).resolves.toBeDefined();
+      }
+    }
+    expect(Object.keys(FIXTURE_SERVERS).sort()).toEqual([...SUPPORTED_CLIENTS].sort());
+  });
+
+  it("is detected, wrapped and unwrapped, keeping every comment and every other entry", async () => {
+    home = await fakeHome();
+    const originals = new Map<string, string>();
+    for (const client of SUPPORTED_CLIENTS) {
+      for (const location of clientLocations(client)) {
+        const text = await readFile(fixture(client, location.path), "utf8");
+        await mkdir(dirname(location.path), { recursive: true });
+        await writeFile(location.path, text);
+        originals.set(location.path, text);
+      }
+    }
+
+    const { configs, problems } = await detectClients();
+    expect(problems).toEqual([]);
+    for (const client of SUPPORTED_CLIENTS) {
+      expect(configs.filter((config) => config.client === client).map((config) => Object.keys(config.servers)), client).toEqual(FIXTURE_SERVERS[client]);
+    }
+
+    for (const config of configs) await writeClientConfig({ ...config, servers: Object.fromEntries(Object.entries(config.servers).map(([id, entry]) => [id, wrapWithProxy(id, entry)])) });
+    const wrapped = (await detectClients()).configs;
+    for (const config of wrapped) {
+      for (const entry of Object.values(config.servers)) expect(entry.args?.[0], config.path).toBe("proxy");
+      await writeClientConfig({ ...config, servers: Object.fromEntries(Object.entries(config.servers).map(([id, entry]) => [id, unwrapProxy(entry)])) });
+    }
+
+    for (const config of configs) {
+      const original = originals.get(config.path)!;
+      const restored = await readFile(config.path, "utf8");
+      for (const comment of original.match(/\/\/.*|\/\*[\s\S]*?\*\//g) ?? []) expect(restored, config.path).toContain(comment);
+      // unwrapProxy gives back `args: []` as no args key; clients treat the two the same.
+      const dropEmptyArgs = (value: unknown) => JSON.parse(JSON.stringify(value, (key, v) => (key === "args" && Array.isArray(v) && v.length === 0 ? undefined : v)));
+      const reread = (await detectClients()).configs.find((candidate) => candidate.path === config.path)!;
+      expect(reread.raw, config.path).toEqual(dropEmptyArgs(config.raw));
+    }
   });
 });
 

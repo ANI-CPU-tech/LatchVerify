@@ -50,6 +50,7 @@ const now = new Date("2026-10-23T09:00:00.000Z");
 const config = (client: ClientId, servers: Record<string, ClientServerEntry>): ClientConfig => ({
   client,
   path: `/fake/${client}.json`,
+  serversPath: ["mcpServers"],
   servers,
   raw: { mcpServers: servers },
 });

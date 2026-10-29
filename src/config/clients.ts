@@ -9,10 +9,23 @@ import { parseJsonc, setJsonc } from "./jsonc.js";
 import { appDataDir, platformPath } from "./paths.js";
 
 /** MCP clients whose config files `latch init` knows how to rewrite. */
-export const SUPPORTED_CLIENTS = ["claude-desktop", "claude-code", "cursor", "vscode"] as const;
+export const SUPPORTED_CLIENTS = [
+  "claude-desktop",
+  "claude-code",
+  "cursor",
+  "vscode",
+  "vscode-insiders",
+  "vscodium",
+  "cline",
+  "cline-cli",
+  "gemini-cli",
+  "zed",
+  "lm-studio",
+  "amazon-q",
+] as const;
 export type ClientId = (typeof SUPPORTED_CLIENTS)[number];
 
-/** One `mcpServers` entry as clients store it on disk. */
+/** One server entry as clients store it on disk. */
 export interface ClientServerEntry {
   command: string;
   args?: string[];
@@ -20,10 +33,15 @@ export interface ClientServerEntry {
   [extra: string]: unknown;
 }
 
-/** A client config file located on this machine. */
-export interface ClientConfig {
-  client: ClientId;
+/** A file a client keeps MCP servers in, and the keys from its root to the server map. */
+export interface ClientLocation {
   path: string;
+  serversPath: string[];
+}
+
+/** A client config located on this machine. */
+export interface ClientConfig extends ClientLocation {
+  client: ClientId;
   servers: Record<string, ClientServerEntry>;
   /** The full parsed file. Written out only when the file has disappeared by the time it is rewritten. */
   raw: Record<string, unknown>;
@@ -43,44 +61,104 @@ export interface Detection {
 }
 
 /**
- * Where a client keeps its user-level MCP server config on `platform`. Returns an absolute path.
+ * The files where `client` keeps its user-level MCP servers on `platform`, most important first,
+ * as absolute paths. Each was checked against the client's own documentation or source on
+ * 2026-10-29; the source is noted next to it.
  *
- * | Client         | macOS / Windows / Linux                                                          |
- * |----------------|----------------------------------------------------------------------------------|
- * | claude-desktop | <app data>/Claude/claude_desktop_config.json                                     |
- * | claude-code    | ~/.claude.json                                                                   |
- * | cursor         | ~/.cursor/mcp.json                                                               |
- * | vscode         | <app data>/Code/User/mcp.json (the default profile's user MCP config)            |
+ * | Client          | File (Windows / Linux)                                             | Server map      |
+ * |-----------------|--------------------------------------------------------------------|-----------------|
+ * | claude-desktop  | <app data>/Claude/claude_desktop_config.json                       | mcpServers      |
+ * | claude-code     | ~/.claude.json                                                     | mcpServers      |
+ * | cursor          | ~/.cursor/mcp.json                                                 | mcpServers      |
+ * | vscode          | <app data>/Code/User/mcp.json                                      | servers         |
+ * | vscode-insiders | <app data>/Code - Insiders/User/mcp.json                           | servers         |
+ * | vscodium        | <app data>/VSCodium/User/mcp.json                                  | servers         |
+ * | cline           | <app data>/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json | mcpServers |
+ * | cline-cli       | ~/.cline/data/settings/cline_mcp_settings.json                     | mcpServers      |
+ * | gemini-cli      | ~/.gemini/settings.json                                            | mcpServers      |
+ * | zed             | %APPDATA%/Zed/settings.json, <config>/zed/settings.json            | context_servers |
+ * | lm-studio       | ~/.lmstudio/mcp.json                                               | mcpServers      |
+ * | amazon-q        | ~/.aws/amazonq/mcp.json, then ~/.aws/amazonq/default.json          | mcpServers      |
  *
- * <app data> is ~/Library/Application Support on macOS, %APPDATA% on Windows (falling back to
- * ~/AppData/Roaming), and $XDG_CONFIG_HOME or ~/.config elsewhere, which is where Electron apps
- * keep it. ~ is os.homedir(), so HOME (USERPROFILE on Windows) redirects every path.
+ * <app data> is %APPDATA% on Windows (falling back to ~/AppData/Roaming), $XDG_CONFIG_HOME or
+ * ~/.config on Linux, and ~/Library/Application Support on macOS (appDataDir). ~ is
+ * os.homedir(), so HOME (USERPROFILE on Windows) redirects every path. Environment overrides a
+ * client offers for its own config (CLINE_DIR, CLINE_MCP_SETTINGS_PATH, ...) are not followed.
+ *
+ * Left out after checking, 2026-10-29: Roo Code (its extension was shut down on 2026-05-15) and
+ * Windsurf, now Devin Desktop (its own docs give two different MCP config paths).
  */
-export function clientConfigPath(client: ClientId, platform: NodeJS.Platform = process.platform): string {
+export function clientLocations(client: ClientId, platform: NodeJS.Platform = process.platform): ClientLocation[] {
   const path = platformPath(platform);
   const home = homedir();
   const appData = (): string => appDataDir(platform);
+  const at = (file: string, ...serversPath: string[]): ClientLocation[] => [{ path: file, serversPath }];
   switch (client) {
+    // https://modelcontextprotocol.io/docs/develop/connect-local-servers
     case "claude-desktop":
-      return path.join(appData(), "Claude", "claude_desktop_config.json");
+      return at(path.join(appData(), "Claude", "claude_desktop_config.json"), "mcpServers");
+    // https://code.claude.com/docs/en/mcp (user scope: top level of ~/.claude.json)
     case "claude-code":
-      return path.join(home, ".claude.json");
+      return at(path.join(home, ".claude.json"), "mcpServers");
+    // https://cursor.com/docs/context/mcp
     case "cursor":
-      return path.join(home, ".cursor", "mcp.json");
+      return at(path.join(home, ".cursor", "mcp.json"), "mcpServers");
+    // https://code.visualstudio.com/docs/agents/reference/mcp-configuration (user profile mcp.json);
+    // the profile folder is <app data>/<product nameShort>/User (vscode src/vs/platform/environment/node/userDataPath.ts)
     case "vscode":
-      return path.join(appData(), "Code", "User", "mcp.json");
+      return at(path.join(appData(), "Code", "User", "mcp.json"), "servers");
+    // As vscode, with the Insiders product name "Code - Insiders".
+    case "vscode-insiders":
+      return at(path.join(appData(), "Code - Insiders", "User", "mcp.json"), "servers");
+    // As vscode, with VSCodium's product name (vscodium prepare_vscode.sh sets nameShort "VSCodium").
+    case "vscodium":
+      return at(path.join(appData(), "VSCodium", "User", "mcp.json"), "servers");
+    // The VS Code extension keeps it in its global storage, settings/ (cline apps/vscode/src/core/storage/disk.ts);
+    // https://docs.cline.bot/mcp/configuring-mcp-servers
+    case "cline":
+      return at(path.join(appData(), "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"), "mcpServers");
+    // https://docs.cline.bot/mcp/configuring-mcp-servers (CLI)
+    case "cline-cli":
+      return at(path.join(home, ".cline", "data", "settings", "cline_mcp_settings.json"), "mcpServers");
+    // https://geminicli.com/docs/tools/mcp-server/
+    case "gemini-cli":
+      return at(path.join(home, ".gemini", "settings.json"), "mcpServers");
+    // https://zed.dev/docs/ai/mcp (context_servers); https://zed.dev/docs/configuring-zed (file location)
+    case "zed":
+      if (platform === "win32") return at(path.join(appData(), "Zed", "settings.json"), "context_servers");
+      return at(path.join(platform === "darwin" ? path.join(home, ".config") : appData(), "zed", "settings.json"), "context_servers");
+    // https://lmstudio.ai/blog/mcp
+    case "lm-studio":
+      return at(path.join(home, ".lmstudio", "mcp.json"), "mcpServers");
+    // https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/mcp-ide.html: the IDE GUI writes default.json; the
+    // legacy mcp.json is still read by default (useLegacyMcpJson) and is what `latch add` writes, its format being plain.
+    case "amazon-q":
+      return [
+        { path: path.join(home, ".aws", "amazonq", "mcp.json"), serversPath: ["mcpServers"] },
+        { path: path.join(home, ".aws", "amazonq", "default.json"), serversPath: ["mcpServers"] },
+      ];
     default:
       throw new TypeError(`unknown MCP client ${JSON.stringify(client)}; expected one of ${SUPPORTED_CLIENTS.join(", ")}`);
   }
 }
 
-/** Top-level key holding the server map: VS Code's mcp.json uses "servers", the others "mcpServers". */
-export function serversKey(client: ClientId): "servers" | "mcpServers" {
-  return client === "vscode" ? "servers" : "mcpServers";
+/** The main config file of `client` on `platform`: the one `latch add` writes and messages name. */
+export function clientConfigPath(client: ClientId, platform: NodeJS.Platform = process.platform): string {
+  return clientLocations(client, platform)[0]!.path;
+}
+
+/** The value at `keys` inside `root`, or undefined when a key on the way is missing or not an object's. */
+export function valueAt(root: unknown, keys: readonly string[]): unknown {
+  let value = root;
+  for (const key of keys) {
+    if (!isPlainObject(value) || !Object.hasOwn(value, key)) return undefined;
+    value = value[key];
+  }
+  return value;
 }
 
 /**
- * Probe clientConfigPath() for every supported client and return, in SUPPORTED_CLIENTS order,
+ * Probe clientLocations() for every supported client and return, in SUPPORTED_CLIENTS order,
  * the ones whose config file exists and is one JSON object (JSONC: comments and trailing commas
  * allowed). A missing file means the client is not set up and is not reported. A file that
  * exists but cannot be read, does not parse, is not an object or keeps its servers in something
@@ -93,7 +171,9 @@ export function serversKey(client: ClientId): "servers" | "mcpServers" {
  * Code's per-project servers in ~/.claude.json are not.
  */
 export async function detectClients(): Promise<Detection> {
-  const results = await Promise.all(SUPPORTED_CLIENTS.map((client) => readClientConfig(client, clientConfigPath(client))));
+  const results = await Promise.all(
+    SUPPORTED_CLIENTS.flatMap((client) => clientLocations(client).map((location) => readClientConfig(client, location))),
+  );
   const detection: Detection = { configs: [], problems: [] };
   for (const result of results) {
     if (result === undefined) continue;
@@ -103,7 +183,7 @@ export async function detectClients(): Promise<Detection> {
   return detection;
 }
 
-async function readClientConfig(client: ClientId, path: string): Promise<ClientConfig | ConfigProblem | undefined> {
+async function readClientConfig(client: ClientId, { path, serversPath }: ClientLocation): Promise<ClientConfig | ConfigProblem | undefined> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
@@ -114,9 +194,9 @@ async function readClientConfig(client: ClientId, path: string): Promise<ClientC
   const parsed = parseJsonc(text);
   if (!parsed.ok) return { client, path, message: `is not valid JSON: ${parsed.error}` };
   if (!isPlainObject(parsed.value)) return { client, path, message: "is not a JSON object" };
-  const map = parsed.value[serversKey(client)];
-  if (map !== undefined && !isPlainObject(map)) return { client, path, message: `keeps "${serversKey(client)}" as something other than an object` };
-  return { client, path, servers: stdioServers(map), raw: parsed.value };
+  const map = valueAt(parsed.value, serversPath);
+  if (map !== undefined && !isPlainObject(map)) return { client, path, message: `keeps "${serversPath.join(".")}" as something other than an object` };
+  return { client, path, serversPath, servers: stdioServers(map), raw: parsed.value };
 }
 
 function stdioServers(value: unknown): Record<string, ClientServerEntry> {
@@ -262,17 +342,16 @@ export async function writeClientConfig(config: ClientConfig): Promise<void> {
   if (!parsed.ok || !isPlainObject(parsed.value)) {
     throw new Error(`${config.path} is no longer a JSON object; not rewriting it`);
   }
-  const key = serversKey(config.client);
-  const map = parsed.value[key];
+  const map = valueAt(parsed.value, config.serversPath);
   if (map !== undefined && !isPlainObject(map)) {
-    throw new Error(`${config.path} no longer keeps "${key}" as an object; not rewriting it`);
+    throw new Error(`${config.path} no longer keeps "${config.serversPath.join(".")}" as an object; not rewriting it`);
   }
 
   let text = before;
   for (const [serverId, entry] of Object.entries(config.servers)) {
     // Compare values, not text: a hand-formatted entry is not reformatted when nothing changed.
     if (map !== undefined && Object.hasOwn(map, serverId) && isDeepStrictEqual(map[serverId], entry)) continue;
-    text = setJsonc(text, [key, serverId], entry);
+    text = setJsonc(text, [...config.serversPath, serverId], entry);
   }
   if (current !== undefined && text === current.text) return;
 

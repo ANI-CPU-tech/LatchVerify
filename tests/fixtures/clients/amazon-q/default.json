@@ -1,0 +1,14 @@
+{
+  "name": "default",
+  "description": "The default agent",
+  "mcpServers": {
+    "git": {
+      "command": "git-mcp-server",
+      "args": [],
+      "env": { "GIT_CONFIG_GLOBAL": "/dev/null" },
+      "timeout": 120000
+    }
+  },
+  "tools": ["*"],
+  "useLegacyMcpJson": true
+}

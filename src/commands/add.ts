@@ -4,10 +4,10 @@ import type { Writable } from "node:stream";
 import pc from "picocolors";
 import {
   INSTALL_LAUNCH,
-  clientConfigPath,
+  clientLocations,
   detectClients,
-  serversKey,
   writeClientConfig,
+  valueAt,
   type ClientConfig,
   type ClientId,
   type ClientServerEntry,
@@ -109,10 +109,10 @@ export async function runAdd(options: AddOptions): Promise<number> {
   const problem = detection.problems.find((found) => found.client === client);
   if (problem !== undefined) return fail(`${problem.path} ${problem.message}; fix it before adding a server to it`);
   const detected = detection.configs.find((found) => found.client === client);
-  const config: ClientConfig = detected ?? { client, path: clientConfigPath(client), servers: {}, raw: {} };
+  const config: ClientConfig = detected ?? { client, ...clientLocations(client)[0]!, servers: {}, raw: {} };
   say(pc.bold(`latch add ${printable(name)}: ${printable(lockfilePath)}${options.dryRun ? pc.yellow(" (dry run: nothing is written)") : ""}`));
   // The raw map, not config.servers: an HTTP server of that name must not be replaced either.
-  const existing = config.raw[serversKey(client)];
+  const existing = valueAt(config.raw, config.serversPath);
   if (typeof existing === "object" && existing !== null && Object.hasOwn(existing, name)) {
     return fail(`${name} is already in ${config.path}; pick another name, or remove it there first`);
   }

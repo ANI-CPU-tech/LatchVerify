@@ -1,0 +1,12 @@
+{
+  "numStartups": 12,
+  "mcpServers": {
+    "airtable": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "airtable-mcp-server"],
+      "env": { "AIRTABLE_API_KEY": "YOUR_KEY" }
+    },
+    "stripe": { "type": "http", "url": "https://mcp.stripe.com" }
+  }
+}

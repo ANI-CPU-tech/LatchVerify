@@ -1,0 +1,14 @@
+{
+  "theme": "GitHub",
+  "mcpServers": {
+    "pythonTools": {
+      "command": "python",
+      "args": ["-m", "my_mcp_server", "--port", "8080"],
+      "cwd": "./mcp-servers/python",
+      "env": { "DATABASE_URL": "$DB_CONNECTION_STRING" },
+      "timeout": 15000,
+      "trust": false
+    },
+    "httpServer": { "httpUrl": "http://localhost:3000/mcp" }
+  }
+}

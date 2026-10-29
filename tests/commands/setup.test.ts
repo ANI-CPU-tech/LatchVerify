@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runSetup, runUnlink, type SetupOptions } from "../../src/commands/setup.js";
-import { INSTALL_LAUNCH, clientConfigPath, wrapWithProxy } from "../../src/config/clients.js";
+import { INSTALL_LAUNCH, clientConfigPath, clientLocations, wrapWithProxy } from "../../src/config/clients.js";
 import { LockFileSchema } from "../../src/schema/index.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -90,6 +90,33 @@ describe.skipIf(process.platform === "win32")("runSetup", () => {
     await claudeConfig({ mcpServers: {} });
     expect((await setup()).code).toBe(0);
     expect((await lockOnDisk()).servers).toEqual({});
+  });
+
+  it("links and unlinks every file of a client that keeps servers in two (Amazon Q)", async () => {
+    const [legacy, agent] = clientLocations("amazon-q").map((location) => location.path);
+    await mkdir(dirname(legacy!), { recursive: true });
+    await writeFile(legacy!, JSON.stringify({ mcpServers: { weather } }, null, 2));
+    const agentConfig = { name: "default", mcpServers: { forecast: weather }, tools: ["*"] };
+    await writeFile(agent!, JSON.stringify(agentConfig, null, 2));
+
+    const linked = await setup({ client: "amazon-q" });
+    expect(linked.code).toBe(0);
+    expect(linked.text).toContain(`latch setup: linking Amazon Q Developer to ${lockfilePath}`);
+    expect(linked.text).toContain(`wrapped 1 server in ${legacy}`);
+    expect(linked.text).toContain(`wrapped 1 server in ${agent}`);
+    expect(JSON.parse(await readFile(legacy!, "utf8")).mcpServers.weather.args).toContain("proxy");
+    const wrappedAgent = JSON.parse(await readFile(agent!, "utf8"));
+    expect(wrappedAgent.mcpServers.forecast.args).toContain("proxy");
+    expect(wrappedAgent.tools).toEqual(["*"]);
+
+    const output = new PassThrough();
+    let text = "";
+    output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+    expect(await runUnlink({ client: "amazon-q", dryRun: false, output })).toBe(0);
+    expect(text).toContain(`restored 1 server in ${legacy}`);
+    expect(text).toContain(`restored 1 server in ${agent}`);
+    expect(JSON.parse(await readFile(legacy!, "utf8"))).toEqual({ mcpServers: { weather } });
+    expect(JSON.parse(await readFile(agent!, "utf8"))).toEqual(agentConfig);
   });
 
   it("exits 1 and leaves Claude Code's config alone when it does not parse", async () => {

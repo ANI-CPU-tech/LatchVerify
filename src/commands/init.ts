@@ -389,7 +389,8 @@ function planRewrites(
   return configs.flatMap((config) => {
     const entries: Array<[string, ClientServerEntry]> = [];
     for (const server of ready) {
-      if (!server.clients.includes(config.client)) continue;
+      // Per file, not per client: a client can keep servers in more than one file.
+      if (!Object.hasOwn(config.servers, server.serverId)) continue;
       const current = config.servers[server.serverId]!;
       const target = proxiedEntry(server.serverId, current, lockfilePath, stateDir, launch);
       if (!isDeepStrictEqual(target, current)) entries.push([server.serverId, target]);
