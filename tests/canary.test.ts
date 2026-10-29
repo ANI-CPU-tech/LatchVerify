@@ -126,7 +126,7 @@ describe.skipIf(process.platform === "win32")("the canary key", { timeout: 60_00
     await runVerify({ lockfilePath, json: true, configs, output: sink() });
 
     const app = createRoutes({ lockfilePath, stateDir, reviewer: "canary@example.com" });
-    for (const path of ["/api/info", "/api/lockfile", "/api/pending", "/api/events?limit=1000", "/api/lockfile/git"]) {
+    for (const path of ["/api/info", "/api/lockfile", "/api/pending", "/api/events?limit=1000", "/api/lockfile/git", "/api/clients", "/api/settings"]) {
       output += await (await app.request(`http://127.0.0.1${path}`, { headers: { [CLIENT_HEADER]: "test" } })).text();
     }
 

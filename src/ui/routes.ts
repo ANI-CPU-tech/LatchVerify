@@ -1,7 +1,13 @@
+import { PassThrough } from "node:stream";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { SimulationRequestSchema, type LockFile, type PendingChange } from "../schema/index.js";
+import { runUnlink } from "../commands/setup.js";
+import { SUPPORTED_CLIENTS, type ClientId, type ProxyLaunch } from "../config/clients.js";
+import { syncClients } from "../daemon/sync.js";
+import { SettingsPatchSchema, SimulationRequestSchema, type LockFile, type PendingChange } from "../schema/index.js";
+import { readSettings, settingsPath, updateSettings } from "../store/settings.js";
+import { clientsReport } from "./clients.js";
 import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
 import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
@@ -20,7 +26,14 @@ export interface RouteDeps {
   now?: () => Date;
   /** Development mode (LATCH_DEV): also serve POST /api/simulate. Off by default. */
   dev?: boolean;
+  /** settings.json (GET/PUT /api/settings, client answers). Defaults to the one beside the per-user lockfile. */
+  settingsPath?: string;
+  /** How entries linked by POST /api/clients/:id/connect start latch. Defaults to INSTALL_LAUNCH. */
+  launch?: ProxyLaunch;
 }
+
+/** Largest PUT /api/settings body. */
+export const MAX_SETTINGS_BYTES = 16 * 1024;
 
 /** Largest POST /api/simulate body: two tool lists, far more than any real server serves. */
 export const MAX_SIMULATION_BYTES = 1024 * 1024;
@@ -89,6 +102,7 @@ export function createRoutes(deps: RouteDeps): Hono {
   if (reviewer.length === 0) throw new TypeError("createRoutes: reviewer must not be empty; approvals record who made them");
   const now = deps.now ?? (() => new Date());
   const dev = deps.dev ?? false;
+  const settingsFile = deps.settingsPath ?? settingsPath();
   const app = new Hono();
 
   // Request guard, ahead of every route:
@@ -185,6 +199,58 @@ export function createRoutes(deps: RouteDeps): Hono {
 
   // The approved state in latch.lock. Returns LockFile.
   app.get("/api/lockfile", async (c) => c.json(await readLockfile(deps.lockfilePath)));
+
+  // The MCP clients on this machine, per client: answer, files, and each server's program, link
+  // and pin state. Never arguments or env. Returns ClientsReport.
+  app.get("/api/clients", async (c) => c.json(await clientsReport(await readLockfile(deps.lockfilePath), await readSettings(settingsFile))));
+
+  /** The client id in the path, or a 404. */
+  const clientParam = (id: string): ClientId => {
+    if (!(SUPPORTED_CLIENTS as readonly string[]).includes(id)) throw new ApiError(404, `no MCP client "${id}"`);
+    return id as ClientId;
+  };
+
+  // Connect: the user's yes. Recorded in settings.json, then the client is linked now (syncClients:
+  // its servers start behind latch proxy and are pinned on their first run). Returns ClientsReport.
+  app.post("/api/clients/:id/connect", async (c) => {
+    const client = clientParam(c.req.param("id"));
+    const settings = await updateSettings(settingsFile, { clients: { [client]: true } });
+    const result = await syncClients({ lockfilePath: deps.lockfilePath, stateDir: deps.stateDir, settings, ...(deps.launch === undefined ? {} : { launch: deps.launch }) });
+    for (const failure of result.failed) console.error(`[latch ui] connect ${client}: ${failure.serverId}: ${failure.reason}`);
+    return c.json(await clientsReport(await readLockfile(deps.lockfilePath), settings));
+  });
+
+  // Disconnect: the user's no. Every entry of the client gets its original command back and the
+  // answer is recorded (runUnlink). latch.lock is kept. Returns ClientsReport.
+  app.post("/api/clients/:id/disconnect", async (c) => {
+    const client = clientParam(c.req.param("id"));
+    const output = new PassThrough();
+    let text = "";
+    output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+    const code = await runUnlink({ client, dryRun: false, output, settingsPath: settingsFile });
+    if (code !== 0) throw new ApiError(409, text.replace(/\x1b\[[0-9;]*m/g, "").trim() || `could not disconnect ${client}`);
+    return c.json(await clientsReport(await readLockfile(deps.lockfilePath), await readSettings(settingsFile)));
+  });
+
+  // The user's settings (settings.json). Returns Settings.
+  app.get("/api/settings", async (c) => c.json(await readSettings(settingsFile)));
+
+  // Change settings: any subset of the fields, clients merged per client. Returns Settings.
+  app.put(
+    "/api/settings",
+    bodyLimit({ maxSize: MAX_SETTINGS_BYTES, onError: (c) => c.json({ error: `the settings body is over ${MAX_SETTINGS_BYTES} bytes` }, 413) }),
+    async (c) => {
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        throw new ApiError(400, "the settings body must be JSON");
+      }
+      const patch = SettingsPatchSchema.safeParse(body);
+      if (!patch.success) throw new ApiError(400, `invalid settings: ${patch.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ")}`);
+      return c.json(await updateSettings(settingsFile, patch.data));
+    },
+  );
 
   // Whether latch.lock is committed: tracked, modified, last commit. Read-only. Returns LockfileGitStatus.
   app.get("/api/lockfile/git", async (c) => c.json(await lockfileGitStatus(deps.lockfilePath)));
