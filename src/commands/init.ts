@@ -2,7 +2,6 @@ import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { isDeepStrictEqual } from "node:util";
-import { isCancel, multiselect } from "@clack/prompts";
 import pc from "picocolors";
 import {
   INSTALL_LAUNCH,
@@ -24,7 +23,7 @@ import { captureTools } from "../proxy/capture.js";
 import type { LockFile } from "../schema/index.js";
 import { applyApproval, mergeServers, readLockfile, serializeLockfile, writeLockfile } from "../store/lockfile.js";
 import { withStateLock } from "../store/pending.js";
-import { defaultReviewer } from "../ui/server.js";
+import { defaultReviewer } from "../config/reviewer.js";
 import { configPlace, plural, printable, problemWarning } from "./text.js";
 
 export interface InitOptions {
@@ -270,6 +269,8 @@ export async function runInit(options: InitOptions): Promise<number> {
   let chosen = servers;
   if (interactive) {
     say();
+    // Loaded only for the prompt: the background sync shares this module and never asks anything.
+    const { isCancel, multiselect } = await import("@clack/prompts");
     const picked = await multiselect({
       message: "Which servers should latch protect?",
       options: servers.map((server) => ({

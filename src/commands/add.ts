@@ -15,7 +15,7 @@ import {
 } from "../config/clients.js";
 import { mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { withStateLock } from "../store/pending.js";
-import { defaultReviewer } from "../ui/server.js";
+import { defaultReviewer } from "../config/reviewer.js";
 import { commandLine, pinServer, proxiedEntry } from "./init.js";
 import { plural, printable } from "./text.js";
 

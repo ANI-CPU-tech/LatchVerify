@@ -39,7 +39,7 @@ const FALSE_WORDS = new Set(["false", "0", "no", "off"]);
  * | LATCH_LOG_LEVEL       | info           | debug, info, warn, error (any case)        |
  * | LATCH_DEV             | false          | true/false, 1/0, yes/no, on/off (any case) |
  *
- * LATCH_REVIEWER (who approvals are recorded as) is read by defaultReviewer() in ui/server.ts.
+ * LATCH_REVIEWER (who approvals are recorded as) is read by defaultReviewer() in config/reviewer.ts.
  *
  * Values are trimmed, and a blank value counts as unset, so `LATCH_LLM_API_KEY=` copied from
  * .env.example means "no key".
