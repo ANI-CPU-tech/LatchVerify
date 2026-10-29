@@ -3,6 +3,8 @@ import { constants } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { runAdvisory, type LlmOptions } from "../analyze/llm.js";
+import type { LogLevel } from "../config/env.js";
+import { createLogger } from "../log.js";
 import { readLockfile } from "../store/lockfile.js";
 import { PENDING_FILE, readPending } from "../store/pending.js";
 import { REJECTED_FILE, readRejected } from "../store/rejected.js";
@@ -39,6 +41,8 @@ export interface ProxyOptions {
   maxLineBytes?: number;
   /** How long the server gets to exit before the next, harder signal. Defaults to EXIT_GRACE_MS. */
   exitGraceMs?: number;
+  /** Least severe diagnostics written to stderr (LATCH_LOG_LEVEL). Defaults to info. */
+  logLevel?: LogLevel;
 }
 
 /** Default for ProxyOptions.holdTimeoutMs. */
@@ -90,7 +94,8 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 export async function startProxy(options: ProxyOptions): Promise<number> {
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
-  const log = (message: string) => void process.stderr.write(`[latch] ${message}\n`);
+  const logger = createLogger(options.logLevel);
+  const log = logger.info;
 
   const pendingPath = join(options.stateDir, PENDING_FILE);
   // Stamp before reading: a change that lands in between is picked up by the next refresh.
@@ -105,12 +110,13 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     log(`server "${options.serverId}" is not in ${options.lockfilePath}; its tool calls stay blocked until it is pinned`);
   }
 
+  logger.debug(`starting ${options.serverId}: ${[options.command, ...options.args].join(" ")}`);
   const child = spawnUpstream(options.command, options.args);
   await new Promise<void>((resolve, reject) => {
     child.once("spawn", resolve);
     child.once("error", (error) => reject(new Error(`could not start ${options.command}: ${error.message}`, { cause: error })));
   });
-  child.on("error", (error) => log(`server process error: ${error.message}`));
+  child.on("error", (error) => logger.error(`server process error: ${error.message}`));
   const exited = new Promise<[number | null, NodeJS.Signals | null]>((resolve) =>
     child.once("close", (code, signal) => resolve([code, signal])),
   );
@@ -129,7 +135,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     clearTimeout(escalation);
     escalation = setTimeout(() => {
       if (!running) return;
-      log(`the server is still running ${exitGraceMs} ms after ${signal}; sending SIGKILL`);
+      logger.warn(`the server is still running ${exitGraceMs} ms after ${signal}; sending SIGKILL`);
       child.kill("SIGKILL");
     }, exitGraceMs);
   };
@@ -138,9 +144,9 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
   };
   process.once("exit", killWithProxy);
 
-  const toServer = lineWriter(child.stdin, (error) => log(`could not write to the server: ${error.message}`));
+  const toServer = lineWriter(child.stdin, (error) => logger.error(`could not write to the server: ${error.message}`));
   const toClient = lineWriter(output, (error) => {
-    log(`could not write to the client (${error.message}); stopping the server`);
+    logger.warn(`could not write to the client (${error.message}); stopping the server`);
     signalServer("SIGTERM");
   });
 
@@ -165,8 +171,9 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
         lockStamp = nextLock;
         try {
           ctx.lockfile = await readLockfile(options.lockfilePath);
+          logger.debug(`reloaded ${options.lockfilePath}`);
         } catch (error) {
-          log(`kept the previous latch.lock: ${error instanceof Error ? error.message : String(error)}`);
+          logger.warn(`kept the previous latch.lock: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       const nextPending = await fileStamp(pendingPath).catch(() => pendingStamp);
@@ -174,8 +181,9 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
         pendingStamp = nextPending;
         try {
           ctx.pending = await readPending(options.stateDir);
+          logger.debug(`reloaded the pending queue (${ctx.pending.length} changes)`);
         } catch (error) {
-          log(`kept the previous pending queue: ${error instanceof Error ? error.message : String(error)}`);
+          logger.warn(`kept the previous pending queue: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       const nextRejected = await fileStamp(rejectedPath).catch(() => rejectedStamp);
@@ -183,8 +191,9 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
         rejectedStamp = nextRejected;
         try {
           ctx.rejected = await readRejected(options.stateDir);
+          logger.debug(`reloaded the rejections (${ctx.rejected.length})`);
         } catch (error) {
-          log(`kept the previous rejections: ${error instanceof Error ? error.message : String(error)}`);
+          logger.warn(`kept the previous rejections: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     },
@@ -198,7 +207,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
       clearTimeout(escalation);
       escalation = setTimeout(() => {
         if (!running) return;
-        log(`the server is still running ${exitGraceMs} ms after its input closed; sending SIGTERM`);
+        logger.warn(`the server is still running ${exitGraceMs} ms after its input closed; sending SIGTERM`);
         signalServer("SIGTERM");
       }, exitGraceMs);
       return;
@@ -207,9 +216,10 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     try {
       decision = await routeFrame(ctx, direction, frame);
     } catch (error) {
-      log(`internal error while routing a frame: ${error instanceof Error ? error.message : String(error)}`);
+      logger.error(`internal error while routing a frame: ${error instanceof Error ? error.message : String(error)}`);
       decision = failClosed(ctx, direction, frame);
     }
+    if (decision.action !== "forward") logger.debug(`${direction} ${describeFrame(frame)}: ${decision.action}`);
     const [onward, back] = direction === "client->server" ? [toServer, toClient] : [toClient, toServer];
     if (decision.action === "forward") onward.write(frame.raw);
     else if (decision.action === "rewrite") onward.write(serialize(decision.message));
@@ -226,6 +236,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     if (held !== null && (frame === END || keepsOrderWithCalls(frame))) {
       held.push(frame);
     } else if (frame !== END && !ctx.verified && isToolsCall(frame)) {
+      logger.debug(`holding ${describeFrame(frame)} until the server's tools are verified`);
       held = [frame];
       holdTimer = setTimeout(() => enqueue(() => release(true)), holdTimeoutMs);
     } else {
@@ -239,7 +250,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     clearTimeout(holdTimer);
     const frames = held;
     held = null;
-    if (timedOut) log(`tools still unverified after ${holdTimeoutMs} ms; releasing ${frames.length} held client frames`);
+    if (timedOut) logger.warn(`tools still unverified after ${holdTimeoutMs} ms; releasing ${frames.length} held client frames`);
     for (const [i, frame] of frames.entries()) {
       if (timedOut) {
         await handle("client->server", frame);
@@ -257,13 +268,13 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
 
   let queue = Promise.resolve();
   const enqueue = (task: () => Promise<void>) => {
-    queue = queue.then(task).catch((error: unknown) => log(`internal error: ${String(error)}`));
+    queue = queue.then(task).catch((error: unknown) => logger.error(`internal error: ${String(error)}`));
   };
   const { maxLineBytes } = options;
   const stopClient = readFrames(input, (frame) => enqueue(() => fromClient(frame)), {
     maxLineBytes,
     onOverflow: () => {
-      log(`the client sent a line longer than ${maxLineBytes ?? MAX_LINE_BYTES} bytes; stopping the server`);
+      logger.warn(`the client sent a line longer than ${maxLineBytes ?? MAX_LINE_BYTES} bytes; stopping the server`);
       signalServer("SIGTERM");
     },
   });
@@ -277,7 +288,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     {
       maxLineBytes,
       onOverflow: () => {
-        log(`the server wrote a line longer than ${maxLineBytes ?? MAX_LINE_BYTES} bytes; stopping it`);
+        logger.warn(`the server wrote a line longer than ${maxLineBytes ?? MAX_LINE_BYTES} bytes; stopping it`);
         signalServer("SIGTERM");
       },
     },
@@ -286,7 +297,10 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
   input.once("end", () => enqueue(() => fromClient(END)));
 
   const handlers = FORWARDED_SIGNALS.map((signal) => {
-    const handler = () => signalServer(signal);
+    const handler = () => {
+      log(`received ${signal}; passing it on to the server`);
+      signalServer(signal);
+    };
     process.on(signal, handler);
     return [signal, handler] as const;
   });
@@ -318,6 +332,14 @@ async function fileStamp(path: string): Promise<string> {
     if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
     throw error;
   }
+}
+
+/** "tools/call #3", "response #3", "unparsed line": a frame named for logs, without its contents. */
+function describeFrame(frame: Frame): string {
+  const { message } = frame;
+  if (message === null) return "unparsed line";
+  const id = "id" in message ? ` #${JSON.stringify(message.id)}` : "";
+  return `${typeof message.method === "string" ? message.method : "response"}${id}`;
 }
 
 /** Marks the end of the client's input in the client frame sequence. */

@@ -152,13 +152,13 @@ describe("startProxy", () => {
       maxLineBytes: 1024,
     });
     expect(code).toBe(128 + 15);
-    expect(stderr.join("")).toContain("[latch] the server wrote a line longer than 1024 bytes; stopping it");
+    expect(stderr.join("")).toContain("[latch] warning: the server wrote a line longer than 1024 bytes; stopping it");
   });
 
   it("sends SIGTERM to a server that keeps running after its input closed", async () => {
     const { code } = await run({ args: ["-e", "setInterval(() => {}, 1000)"] }, [], { exitGraceMs: 100 });
     expect(code).toBe(128 + 15);
-    expect(stderr.join("")).toContain("[latch] the server is still running 100 ms after its input closed; sending SIGTERM");
+    expect(stderr.join("")).toContain("[latch] warning: the server is still running 100 ms after its input closed; sending SIGTERM");
   });
 
   // Windows has no catchable SIGTERM: child.kill() always terminates the process there.
@@ -166,7 +166,7 @@ describe("startProxy", () => {
     const stubborn = 'process.on("SIGTERM", () => {}); process.stdout.write("{}\\n"); setInterval(() => {}, 1000)';
     const { code } = await run({ args: ["-e", stubborn] }, [(out) => waitFor(() => out().includes("{}"))], { exitGraceMs: 100 });
     expect(code).toBe(128 + 9);
-    expect(stderr.join("")).toContain("[latch] the server is still running 100 ms after SIGTERM; sending SIGKILL");
+    expect(stderr.join("")).toContain("[latch] warning: the server is still running 100 ms after SIGTERM; sending SIGKILL");
   });
 
   it("never lets a tier-3 tool's description reach the client", async () => {
@@ -176,6 +176,23 @@ describe("startProxy", () => {
     const forecast = poisoned.find((t) => t.name === "get_forecast")!;
     expect(listed.find((t) => t.name === "get_forecast")!.description).toMatch(/^\[LatchVerify\] This tool's definition was withheld/);
     expect(text).not.toContain(forecast.description);
+  });
+
+  it("follows the log level: debug names frames, warn leaves out routine lines", async () => {
+    await run(echo, [request(1, "tools/call", { name: "nope", arguments: {} }), (out) => waitFor(() => out().includes('"id":1'))], {
+      logLevel: "debug",
+      holdTimeoutMs: 50,
+    });
+    const debug = stderr.join("");
+    expect(debug).toContain("[latch] debug: holding tools/call #1 until the server's tools are verified");
+    expect(debug).toContain("[latch] debug: client->server tools/call #1: respond");
+    stderr.length = 0;
+    await run(echo, [request(1, "tools/call", { name: "nope", arguments: {} }), (out) => waitFor(() => out().includes('"id":1'))], {
+      logLevel: "warn",
+      holdTimeoutMs: 50,
+    });
+    expect(stderr.join("")).not.toContain("[latch] blocked");
+    expect(stderr.join("")).toContain("[latch] warning: tools still unverified after 50 ms");
   });
 
   it("forwards unknown fields byte-for-byte in both directions", async () => {

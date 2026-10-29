@@ -134,6 +134,7 @@ program
         command,
         ...globals(),
         llm: env.llmEnabled ? { apiKey: env.llmApiKey!, baseUrl: env.llmBaseUrl, model: env.llmModel } : undefined,
+        logLevel: env.logLevel,
       }),
     ),
   );
