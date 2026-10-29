@@ -1,7 +1,8 @@
 import type { CapabilitySet, ToolRecord } from "@schema/index.js";
 import type { ReviewItem } from "./api.js";
 
-// Hardcoded review queue for the scaffold UI. Mirrors the docs/DEMO.md storyline.
+// Sample review queue, shown only by the Vite dev server while the review API is unreachable
+// (pages/Review.tsx). A production build leaves it out. Mirrors the docs/DEMO.md storyline.
 
 const readOnlyWeather: CapabilitySet = {
   filesystem: { read: false, write: false, scope: "none", paths: [] },

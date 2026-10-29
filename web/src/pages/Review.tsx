@@ -1,17 +1,35 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChangeDetail, type ChangeActions } from "../components/ChangeDetail";
 import { PendingList } from "../components/PendingList";
 import { EmptyState, ErrorState, LoadingState, PageHeader, Panel } from "../components/ui";
 import { ApiUnreachableError, approveChange, rejectChange, type ReviewItem } from "../lib/api";
 import { useData } from "../lib/data";
 import { sentence } from "../lib/format";
-import { mockReviewItems } from "../lib/mock";
 import { navigate } from "../lib/useRoute";
 
 /**
+ * The sample queue (lib/mock.ts) while the API is unreachable, under the Vite dev server only.
+ * `vite build` sets MODE to "production" whatever NODE_ENV says (DEV follows NODE_ENV), so the
+ * condition is constant there and the import and the data are dropped from the bundle.
+ */
+function useSampleItems(unreachable: boolean): ReviewItem[] | null {
+  const [items, setItems] = useState<ReviewItem[] | null>(null);
+  useEffect(() => {
+    if (import.meta.env.MODE === "development" && unreachable) {
+      let current = true;
+      void import("../lib/mock").then((module) => current && setItems(module.mockReviewItems));
+      return () => {
+        current = false;
+      };
+    }
+  }, [unreachable]);
+  return unreachable ? items : null;
+}
+
+/**
  * The review queue. Approve and Reject go to the review API; the queue is then refetched, since
- * the proxy may have queued more changes meanwhile. With no API to talk to, the bundled sample
- * data is shown, labeled, with both actions disabled.
+ * the proxy may have queued more changes meanwhile. With no API to talk to, the Vite dev server
+ * shows sample data, labeled, with both actions disabled; a real install says the API is down.
  */
 export function Review({ selectedId }: { selectedId: string | null }) {
   const { pending, reload } = useData();
@@ -19,8 +37,10 @@ export function Review({ selectedId }: { selectedId: string | null }) {
   // Decided changes stay hidden while the refetch runs, so they cannot be decided twice.
   const [decided, setDecided] = useState<ReadonlySet<string>>(new Set());
 
-  const sample = pending.status === "error" && pending.error instanceof ApiUnreachableError;
-  const items: ReviewItem[] = (pending.status === "ready" ? pending.data : sample ? mockReviewItems : []).filter(
+  const unreachable = pending.status === "error" && pending.error instanceof ApiUnreachableError;
+  const sampleItems = useSampleItems(unreachable);
+  const sample = sampleItems !== null;
+  const items: ReviewItem[] = (pending.status === "ready" ? pending.data : (sampleItems ?? [])).filter(
     (item) => !decided.has(item.change.id),
   );
   // An unknown or stale id falls back to the first item, so the selection always exists.
@@ -72,7 +92,7 @@ export function Review({ selectedId }: { selectedId: string | null }) {
         </span>
       </p>
 
-      {sample && (
+      {sample && pending.status === "error" && (
         <div role="status" className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
           <p className="font-medium text-warning">Showing sample data: the review API is not reachable.</p>
           <p className="mt-1 text-muted-foreground">
@@ -83,7 +103,9 @@ export function Review({ selectedId }: { selectedId: string | null }) {
       )}
 
       {pending.status === "loading" && <LoadingState label="Loading the review queue..." />}
-      {pending.status === "error" && !sample && <ErrorState title="The review queue could not be loaded." error={pending.error} onRetry={reload} />}
+      {pending.status === "error" && !sample && (
+        <ErrorState title={unreachable ? "The review API is not running." : "The review queue could not be loaded."} error={pending.error} onRetry={reload} />
+      )}
 
       {pending.status === "ready" && items.length === 0 && (
         <Panel>
