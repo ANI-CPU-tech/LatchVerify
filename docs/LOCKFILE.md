@@ -171,7 +171,8 @@ Teams that want reviewed approvals keep a committed `latch.lock` in the project 
 
 | Path | Contents |
 |---|---|
-| `.latch/pending.json` | Review queue (`PendingChange[]`) with before/after records and findings |
-| `.latch/events.jsonl` | Append-only log of every proxy and CLI decision |
+| `.latch/pending.json` | Review queue (`PendingChange[]`) with before/after records, findings and the served description |
+| `.latch/rejected.json` | Definitions a reviewer rejected (server, tool, composite hash); calls to them stay blocked |
+| `.latch/events.jsonl` | Append-only log of every proxy and CLI decision; at 5 MB it moves to `events.1.jsonl` and a new one starts |
 
-Both are listed in `.gitignore`. `latch.lock` is deliberately **not** listed.
+`.latch/` is listed in `.gitignore`. `latch.lock` is deliberately **not** listed.
