@@ -33,10 +33,6 @@ export interface SetupOptions {
   lockfilePath: string;
   /** State directory written into each wrapped entry. Defaults to .latch next to the lockfile. */
   stateDir?: string;
-  /** Who first-use pins are recorded as. Defaults to init's defaultReviewer(). */
-  reviewer?: string;
-  /** Deadline for capturing each server's tools. */
-  timeoutMs?: number;
   /** Where progress is written. Defaults to process.stdout. */
   output?: Writable;
   /** How wrapped entries start latch. Defaults to this install, by absolute path. */
@@ -86,8 +82,6 @@ export async function runSetup(options: SetupOptions): Promise<number> {
       dryRun: options.dryRun,
       lockfilePath,
       ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir }),
-      ...(options.reviewer === undefined ? {} : { reviewer: options.reviewer }),
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(options.launch === undefined ? {} : { launch: options.launch }),
       output: out,
       interactive: false,

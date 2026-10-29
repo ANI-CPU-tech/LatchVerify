@@ -63,6 +63,13 @@ export interface InterceptorContext {
   sendToServer(message: JsonRpcRequest): void;
   /** Re-read latch.lock, the pending queue and the rejections if they changed on disk. */
   refresh(): Promise<void>;
+  /**
+   * For a server latch.lock marks trustOnFirstUse: pins `changes`, its first complete tool list
+   * (pinFirstRun), in the trusted latch.lock under the state lock, and returns latch.lock as
+   * written. Undefined when nothing was written: no hook, an untrusted latch.lock, or another
+   * proxy pinned the server first.
+   */
+  pinFirstRun?(changes: PendingChange[]): Promise<LockFile | undefined>;
   /** Write one diagnostic line to stderr. stdout is the protocol. */
   log(message: string): void;
 }
@@ -214,13 +221,23 @@ export async function onToolsList(ctx: InterceptorContext, response: JsonRpcResp
   if (response.error !== undefined) return FORWARD;
   await ctx.refresh();
   const now = new Date();
-  const analysis = analyzeToolList(ctx.serverId, response.result, ctx.lockfile, ctx.specVersion, now);
+  let analysis = analyzeToolList(ctx.serverId, response.result, ctx.lockfile, ctx.specVersion, now);
   if (analysis === null) {
     ctx.log(`${ctx.serverId}: tools/list result has no tools array; nothing analyzed`);
     return FORWARD;
   }
   const result = response.result as Record<string, unknown>;
   const complete = fromStart && (typeof result.nextCursor !== "string" || result.nextCursor === "");
+  // First run of a linked server: pin what it serves, then judge the list against those pins, so
+  // only the tools held back (critical findings) are queued and blocked.
+  const server = Object.hasOwn(ctx.lockfile.servers, ctx.serverId) ? ctx.lockfile.servers[ctx.serverId]! : undefined;
+  if (complete && server?.trustOnFirstUse === true && ctx.pinFirstRun !== undefined) {
+    const written = await ctx.pinFirstRun(analysis.changes.map(({ change }) => change));
+    if (written !== undefined) {
+      ctx.lockfile = written;
+      analysis = analyzeToolList(ctx.serverId, response.result, ctx.lockfile, ctx.specVersion, now)!;
+    }
+  }
   await recordAnalysis(ctx, analysis, now, complete);
 
   const withheld = new Set(analysis.changes.filter(({ change }) => change.tier === 3).map(({ change }) => change.toolName));

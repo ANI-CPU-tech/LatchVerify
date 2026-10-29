@@ -36,7 +36,7 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
     vi.stubEnv("HOME", home);
     vi.stubEnv("XDG_CONFIG_HOME", undefined);
     const lockfilePath = join(home, ".config", "latchverify", "latch.lock");
-    options = { lockfilePath, stateDir: join(dirname(lockfilePath), ".latch"), settings: DEFAULT_SETTINGS, reviewer: "sync@example.com", timeoutMs: 20_000 };
+    options = { lockfilePath, stateDir: join(dirname(lockfilePath), ".latch"), settings: DEFAULT_SETTINGS };
     await mkdir(dirname(lockfilePath), { recursive: true });
     await writeLockfile(lockfilePath, emptyLockfile());
   });
@@ -55,20 +55,20 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
   const servers = async (path: string, key = "mcpServers") => JSON.parse(await readFile(path, "utf8"))[key] as Record<string, ClientServerEntry>;
   const lockOnDisk = async () => LockFileSchema.parse(JSON.parse(await readFile(options.lockfilePath, "utf8")));
 
-  it("pins a new server and wraps it, then has nothing to do", async () => {
+  it("links a new server to be pinned on its first run and wraps it, then has nothing to do", async () => {
     const path = await writeConfig("cursor", { mcpServers: { weather: stub("w") } });
     const first = await syncClients(options);
-    expect(first.pinned).toEqual([{ serverId: "weather", tools: ["get_forecast", "get_alerts"], held: [] }]);
+    expect(first.linked).toEqual(["weather"]);
     expect(first.wrapped).toEqual([{ client: "cursor", path, serverIds: ["weather"] }]);
     expect(first.failed).toEqual([]);
     const entry = (await servers(path)).weather!;
     expect(entry.args!.slice(0, INSTALL_LAUNCH.args.length)).toEqual(INSTALL_LAUNCH.args);
     expect(entry).toEqual(wrapWithProxy("weather", stub("w"), INSTALL_LAUNCH, { lockfilePath: options.lockfilePath, stateDir: options.stateDir }));
-    expect((await lockOnDisk()).servers.weather!.tools.map((tool) => tool.approvedBy)).toEqual(["sync@example.com", "sync@example.com"]);
+    expect((await lockOnDisk()).servers.weather).toEqual({ transport: "stdio", command: stub("w").command, args: stub("w").args, tools: [], trustOnFirstUse: true });
 
     const before = await readFile(path, "utf8");
     const second = await syncClients(options);
-    expect(second).toEqual({ problems: [], skipped: [], pinned: [], failed: [], wrapped: [] });
+    expect(second).toEqual({ problems: [], skipped: [], linked: [], failed: [], wrapped: [] });
     expect(await readFile(path, "utf8")).toBe(before);
   });
 
@@ -76,17 +76,17 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
     const path = await writeConfig("cursor", { mcpServers: { weather: stub("w") } });
     const before = await readFile(path, "utf8");
     const result = await syncClients({ ...options, settings: { ...DEFAULT_SETTINGS, clients: { cursor: false } } });
-    expect(result).toEqual({ problems: [], skipped: [], pinned: [], failed: [], wrapped: [] });
+    expect(result).toEqual({ problems: [], skipped: [], linked: [], failed: [], wrapped: [] });
     expect(await readFile(path, "utf8")).toBe(before);
   });
 
-  it("re-wraps an entry the client turned back into the original, without pinning again", async () => {
+  it("re-wraps an entry the client turned back into the original, without linking again", async () => {
     const path = await writeConfig("cursor", { mcpServers: { weather: stub("w") } });
     await syncClients(options);
     const lockBefore = await readFile(options.lockfilePath, "utf8");
     await writeConfig("cursor", { mcpServers: { weather: stub("w") } });
     const result = await syncClients(options);
-    expect(result.pinned).toEqual([]);
+    expect(result.linked).toEqual([]);
     expect(result.wrapped).toEqual([{ client: "cursor", path, serverIds: ["weather"] }]);
     expect(unwrapProxy((await servers(path)).weather!)).toEqual(stub("w"));
     expect(await readFile(options.lockfilePath, "utf8")).toBe(lockBefore);
@@ -110,13 +110,15 @@ describe.skipIf(process.platform === "win32")("syncClients", { timeout: 30_000 }
     expect((await servers(path)).weather).toEqual(stub("changed command"));
   });
 
-  it("reports a config it cannot read and a server that does not start, and links the rest", async () => {
+  it("reports a config it cannot read and links the rest, without starting any server", async () => {
     await writeConfig("vscode", "{ broken");
-    const path = await writeConfig("cursor", { mcpServers: { dead: { command: "latch-no-such-binary-for-test" }, weather: stub("w") } });
+    // Not installed: the sync links it all the same, since it never starts servers.
+    const path = await writeConfig("cursor", { mcpServers: { absent: { command: "latch-no-such-binary-for-test", env: { KEY: "sk-secret" } }, weather: stub("w") } });
     const result = await syncClients(options);
     expect(result.problems.map((problem) => problem.client)).toEqual(["vscode"]);
-    expect(result.failed.map((failure) => failure.serverId)).toEqual(["dead"]);
-    expect(result.wrapped).toEqual([{ client: "cursor", path, serverIds: ["weather"] }]);
-    expect((await servers(path)).dead).toEqual({ command: "latch-no-such-binary-for-test" });
+    expect(result.failed).toEqual([]);
+    expect(result.wrapped).toEqual([{ client: "cursor", path, serverIds: ["absent", "weather"] }]);
+    expect((await servers(path)).absent!.env).toEqual({ KEY: "sk-secret" });
+    expect(await readFile(options.lockfilePath, "utf8")).not.toContain("sk-secret");
   });
 });

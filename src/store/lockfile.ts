@@ -219,3 +219,52 @@ export function mergeServers(current: LockFile, pinned: LockFile, serverIds: rea
   if (added.length === 0) return { lock: current, added, taken };
   return { lock: { ...current, generatedAt: pinned.generatedAt, servers }, added, taken };
 }
+
+/**
+ * `lock` with `serverId` linked: its launch command and no tools, marked trustOnFirstUse, so the
+ * proxy pins the tools the first time the server lists them (pinFirstRun). Linking starts nothing,
+ * so it never needs the keys in the client's config. Pure.
+ *
+ * @throws Error when `lock` already has the server: its pins are changed through review, never by
+ * linking again.
+ */
+export function linkServer(lock: LockFile, serverId: string, command: string, args: readonly string[], now: Date): LockFile {
+  if (Object.hasOwn(lock.servers, serverId)) throw new Error(`linkServer: server "${serverId}" is already in the lockfile`);
+  return {
+    ...lock,
+    generatedAt: now.toISOString(),
+    servers: { ...lock.servers, [serverId]: { transport: "stdio", command, args: [...args], tools: [], trustOnFirstUse: true } },
+  };
+}
+
+/**
+ * Trust on first use, for a server linked with linkServer: approves every change in `changes`
+ * (the server's first tool list) that has no critical finding, under `approvedBy`, and clears
+ * trustOnFirstUse. A tool with a critical finding (hidden instructions, invisible or bidi text, a
+ * reference to another server) is left out, for the proxy to queue for review. Pure; a server
+ * that is not marked trustOnFirstUse is returned unchanged with nothing pinned.
+ */
+export function pinFirstRun(
+  lock: LockFile,
+  serverId: string,
+  changes: readonly PendingChange[],
+  approvedBy: string,
+  now: Date,
+): { lock: LockFile; pinned: string[]; held: string[] } {
+  const server = Object.hasOwn(lock.servers, serverId) ? lock.servers[serverId]! : undefined;
+  if (server?.trustOnFirstUse !== true) return { lock, pinned: [], held: [] };
+  let next = lock;
+  const pinned: string[] = [];
+  const held: string[] = [];
+  for (const change of changes) {
+    if (change.serverId !== serverId) continue;
+    if (change.findings.some((finding) => finding.severity === "critical")) {
+      held.push(change.toolName);
+      continue;
+    }
+    next = applyApproval(next, change, approvedBy, now);
+    pinned.push(change.toolName);
+  }
+  const { trustOnFirstUse: _done, ...linked } = next.servers[serverId]!;
+  return { lock: { ...next, generatedAt: now.toISOString(), servers: { ...next.servers, [serverId]: linked } }, pinned, held };
+}

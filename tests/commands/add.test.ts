@@ -14,7 +14,6 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 // Absolute, so children started outside the repo still find tsx.
 const tsx = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
 const weather = [process.execPath, "--import", tsx, join(root, "demo/weather-server.ts")];
-const evil = [process.execPath, "--import", tsx, join(root, "demo/evil-server.ts")];
 
 describe("parseEnv", () => {
   it("sets KEY=VALUE and copies a bare KEY from the source environment", () => {
@@ -73,8 +72,8 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
       env: [],
       dryRun: false,
       lockfilePath,
-      reviewer: "dev@example.com",
-      timeoutMs: 20_000,
+      
+      
       output,
       sourceEnv: {},
       ...options,
@@ -87,12 +86,12 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
   const stateDir = () => join(home, "repo", ".latch");
   const exists = async (path: string) => (await readdir(dirname(path)).catch((): string[] => [])).includes(path.split("/").pop()!);
 
-  it("pins one server and adds it wrapped by absolute path, leaving the rest of the config alone", async () => {
+  it("links one server and adds it wrapped by absolute path, leaving the rest of the config alone", async () => {
     const other: ClientServerEntry = { command: "node", args: ["other.js"], env: { KEY: "keep" } };
     await writeConfig({ mcpServers: { other }, preferences: { x: 1 } });
     const { code, text } = await add();
     expect(code).toBe(0);
-    expect(text).toContain("✔ weather: pinned 2 tools: get_forecast, get_alerts");
+    expect(text).toContain("✔ weather: linked; its tools are pinned the first time claude-desktop starts it");
     expect(text).not.toContain(".bak");
     expect(text).toContain("next: restart claude-desktop");
 
@@ -108,10 +107,7 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     });
     expect(await readdir(dirname(configPath))).toEqual([configPath.split("/").pop()]);
 
-    const lock = await lockOnDisk();
-    expect(Object.keys(lock.servers)).toEqual(["weather"]);
-    expect(lock.servers.weather).toMatchObject({ transport: "stdio", command: weather[0], args: weather.slice(1) });
-    expect(lock.servers.weather!.tools.map((t) => t.approvedBy)).toEqual(["dev@example.com", "dev@example.com"]);
+    expect((await lockOnDisk()).servers).toEqual({ weather: { transport: "stdio", command: weather[0], args: weather.slice(1), tools: [], trustOnFirstUse: true } });
   });
 
   it("creates the client config when there is none", async () => {
@@ -161,14 +157,11 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     expect(config).toContain('"first"');
   });
 
-  it("writes nothing when the server's tools cannot be captured", async () => {
-    const before = await writeConfig({ mcpServers: {} });
-    const { code, text } = await add({ name: "broken", command: ["latch-no-such-binary-for-test"] });
-    expect(code).toBe(1);
-    expect(text).toContain("✖ broken: could not start latch-no-such-binary-for-test");
-    expect(text).toContain("nothing written");
-    expect(await readFile(configPath, "utf8")).toBe(before);
-    expect(await exists(lockfilePath)).toBe(false);
+  it("never starts the server: it adds one that is not installed yet", async () => {
+    await writeConfig({ mcpServers: {} });
+    const { code } = await add({ name: "later", command: ["latch-no-such-binary-for-test"] });
+    expect(code).toBe(0);
+    expect((await lockOnDisk()).servers.later).toMatchObject({ command: "latch-no-such-binary-for-test", trustOnFirstUse: true });
   });
 
   it("refuses a bad name or a missing --env variable before starting anything", async () => {
@@ -184,20 +177,11 @@ describe.skipIf(process.platform === "win32")("runAdd", () => {
     const before = await writeConfig({ mcpServers: {} });
     const { code, text } = await add({ dryRun: true });
     expect(code).toBe(0);
-    expect(text).toContain("✔ weather: would pin 2 tools");
+    expect(text).toContain("✔ weather: would link; its tools are pinned the first time claude-desktop starts it");
     expect(text).toContain(`would write ${lockfilePath} and add weather to ${configPath}:`);
     expect(text).toContain(`${INSTALL_LAUNCH.command} ${INSTALL_LAUNCH.args.join(" ")} --lockfile ${lockfilePath} --state-dir ${stateDir()} proxy --server weather -- `);
     expect(await readFile(configPath, "utf8")).toBe(before);
     expect(await exists(lockfilePath)).toBe(false);
-  });
-
-  it("holds back poisoned tools but still adds the server, so the proxy queues them for review", async () => {
-    const { code, text } = await add({ command: evil, env: ["DEMO_MUTATE=1"] });
-    expect(code).toBe(0);
-    expect(text).toContain("✔ weather: pinned 1 tool: read_config");
-    expect(text).toMatch(/! get_forecast held back for `latch review`: Critical pattern finding/);
-    expect((await lockOnDisk()).servers.weather!.tools.map((t) => t.name)).toEqual(["read_config"]);
-    expect((await configOnDisk()).mcpServers.weather.args).toContain("proxy");
   });
 
   it("stops before changing anything when latch.lock is malformed", async () => {

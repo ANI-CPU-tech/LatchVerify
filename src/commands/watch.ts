@@ -7,8 +7,7 @@ import { startWatcher } from "../daemon/watch.js";
 import type { LogLevel } from "../config/env.js";
 import { createLogger } from "../log.js";
 import { readSettings, settingsPath as defaultSettingsPath } from "../store/settings.js";
-import { defaultReviewer } from "../config/reviewer.js";
-import { configPlace, plural, printable } from "./text.js";
+import { configPlace, printable } from "./text.js";
 
 export interface WatchCommandOptions {
   lockfilePath: string;
@@ -20,7 +19,6 @@ export interface WatchCommandOptions {
   /** Desktop notifications (they also follow settings.json); false logs them instead. */
   notify: boolean;
   logLevel: LogLevel;
-  reviewer?: string;
   output?: Writable;
   /** Resolves when watching should stop. Defaults to the first SIGINT or SIGTERM. */
   until?: Promise<void>;
@@ -29,10 +27,7 @@ export interface WatchCommandOptions {
 /** A sync's outcome as lines for people. */
 export function describeSync(result: SyncResult): string[] {
   const lines: string[] = [];
-  for (const pinned of result.pinned) {
-    lines.push(`${pc.green("✔")} pinned ${printable(pinned.serverId)}: ${plural(pinned.tools.length, "tool")}`);
-    for (const held of pinned.held) lines.push(pc.yellow(`  ! ${printable(held.name)} held back for review: ${printable(held.reason)}`));
-  }
+  for (const id of result.linked) lines.push(`${pc.green("✔")} added ${printable(id)} to latch.lock; its tools are pinned the first time it runs`);
   for (const wrapped of result.wrapped) {
     lines.push(`${pc.green("✔")} linked ${printable(wrapped.serverIds.join(", "))} in ${configPlace(wrapped)}`);
   }
@@ -53,11 +48,9 @@ export async function runWatch(options: WatchCommandOptions): Promise<number> {
   const lockfilePath = resolve(options.lockfilePath);
   const stateDir = resolve(options.stateDir);
   const settingsPath = options.settingsPath ?? defaultSettingsPath();
-  const reviewer = (options.reviewer ?? defaultReviewer()).trim();
-  if (reviewer === "") throw new Error("latch watch: no reviewer name; set LATCH_REVIEWER or git config user.email");
 
   if (options.once) {
-    const result = await syncClients({ lockfilePath, stateDir, settings: await readSettings(settingsPath), reviewer });
+    const result = await syncClients({ lockfilePath, stateDir, settings: await readSettings(settingsPath) });
     const lines = describeSync(result);
     for (const line of lines) say(line);
     if (lines.length === 0) say("every MCP client is linked; nothing to change");
@@ -67,7 +60,7 @@ export async function runWatch(options: WatchCommandOptions): Promise<number> {
   const log = createLogger(options.logLevel);
   const notify = options.notify ? desktopNotifier() : undefined;
   if (options.notify && notify === undefined) log.warn("this desktop has no notifier (notify-send on Linux); notifications are logged here instead");
-  const watcher = await startWatcher({ lockfilePath, stateDir, settingsPath, reviewer, log, notify });
+  const watcher = await startWatcher({ lockfilePath, stateDir, settingsPath, log, notify });
   say(`latch watch: keeping MCP clients linked to ${printable(lockfilePath)}; press Ctrl+C to stop`);
   await (options.until ??
     new Promise<void>((done) => {

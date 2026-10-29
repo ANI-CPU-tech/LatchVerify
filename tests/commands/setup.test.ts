@@ -36,7 +36,7 @@ describe.skipIf(process.platform === "win32")("runSetup", { timeout: 30_000 }, (
     const output = new PassThrough();
     let text = "";
     output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
-    const code = await runSetup({ client: "claude-code", dryRun: false, lockfilePath, reviewer: "dev@example.com", timeoutMs: 20_000, output, ...options });
+    const code = await runSetup({ client: "claude-code", dryRun: false, lockfilePath, output, ...options });
     return { code, text: text.replace(/\x1b\[[0-9;]*m/g, "") };
   }
 
@@ -49,12 +49,12 @@ describe.skipIf(process.platform === "win32")("runSetup", { timeout: 30_000 }, (
 
   const lockOnDisk = async () => LockFileSchema.parse(JSON.parse(await readFile(lockfilePath, "utf8")));
 
-  it("links Claude Code: pins its servers into the per-user lockfile and wraps them, without asking", async () => {
+  it("links Claude Code: adds its servers to the per-user lockfile and wraps them, without asking", async () => {
     const config = await claudeConfig({ mcpServers: { weather }, numStartups: 3 });
     const { code, text } = await setup();
     expect(code).toBe(0);
     expect(text).toContain(`latch setup: linking Claude Code to ${lockfilePath}`);
-    expect(text).toContain("✔ weather: pinned 2 tools");
+    expect(text).toContain("✔ weather: linked; its tools are pinned the first time claude-code starts it");
     expect(text).toContain("next: restart Claude Code");
     expect(text).not.toContain("next: commit");
 
@@ -64,7 +64,7 @@ describe.skipIf(process.platform === "win32")("runSetup", { timeout: 30_000 }, (
       },
       numStartups: 3,
     });
-    expect((await lockOnDisk()).servers.weather!.tools.map((tool) => tool.name)).toEqual(["get_alerts", "get_forecast"]);
+    expect((await lockOnDisk()).servers.weather).toEqual({ transport: "stdio", command: weather.command, args: weather.args, tools: [], trustOnFirstUse: true });
   });
 
   it("changes nothing when run again", async () => {
@@ -222,7 +222,7 @@ describe.skipIf(process.platform === "win32")("runSetup", { timeout: 30_000 }, (
     const before = await readFile(config, "utf8");
     const { code, text } = await setup({ dryRun: true });
     expect(code).toBe(0);
-    expect(text).toContain("would pin 2 tools");
+    expect(text).toContain("would link");
     expect(await readFile(config, "utf8")).toBe(before);
     await expect(readFile(lockfilePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });

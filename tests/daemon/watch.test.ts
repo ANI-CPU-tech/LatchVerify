@@ -67,13 +67,13 @@ describe.skipIf(process.platform === "win32")("startWatcher", { timeout: 30_000 
       lockfilePath,
       stateDir: join(dirname(lockfilePath), ".latch"),
       settingsPath: join(dirname(lockfilePath), "settings.json"),
-      reviewer: "watch@example.com",
+      
       log: createLogger("error", () => {}),
       notify: async (notification) => void shown.push(notification),
       debounceMs: 50,
       pollMs: 60_000,
       blockWindowMs: 300,
-      timeoutMs: 20_000,
+      
     };
   });
 
@@ -91,7 +91,7 @@ describe.skipIf(process.platform === "win32")("startWatcher", { timeout: 30_000 
     watcher = await startWatcher(options);
     await writeFile(clientConfigPath("cursor"), JSON.stringify({ mcpServers: { weather: stub } }));
     await eventually(async () => expect((await cursorServers()).weather!.args).toContain("proxy"));
-    expect(LockFileSchema.parse(JSON.parse(await readFile(options.lockfilePath, "utf8"))).servers.weather!.tools).toHaveLength(2);
+    expect(LockFileSchema.parse(JSON.parse(await readFile(options.lockfilePath, "utf8"))).servers.weather).toMatchObject({ tools: [], trustOnFirstUse: true });
   });
 
   it("says at start how many changes wait for review", async () => {

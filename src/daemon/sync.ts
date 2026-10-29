@@ -1,8 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
-import { collectServers, pinServer, planRewrites, type InitServer, type SkippedServer } from "../commands/init.js";
+import { collectServers, planRewrites, type InitServer, type SkippedServer } from "../commands/init.js";
 import { INSTALL_LAUNCH, detectClients, writeClientConfig, type ClientId, type ConfigProblem, type ProxyLaunch } from "../config/clients.js";
 import type { LockFile, Settings } from "../schema/index.js";
-import { mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
+import { linkServer, mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { withStateLock } from "../store/pending.js";
 import { clientEnabled } from "../store/settings.js";
 
@@ -11,12 +11,8 @@ export interface SyncOptions {
   stateDir: string;
   /** Which clients to link (settings.clients); the rest are left alone. */
   settings: Settings;
-  /** Who first-use pins are recorded as. */
-  reviewer: string;
   /** How wrapped entries start latch. Defaults to INSTALL_LAUNCH. */
   launch?: ProxyLaunch;
-  /** Deadline for capturing one server's tools. */
-  timeoutMs?: number;
   now?: () => Date;
 }
 
@@ -26,9 +22,9 @@ export interface SyncResult {
   problems: ConfigProblem[];
   /** Servers collectServers could not take (bad id, conflicting commands). */
   skipped: SkippedServer[];
-  /** Servers pinned by this sync (trust on first use), with the tools held back for review. */
-  pinned: Array<{ serverId: string; tools: string[]; held: Array<{ name: string; reason: string }> }>;
-  /** Servers that could not be pinned (the server did not start or answer), or whose launch differs from latch.lock. */
+  /** Servers this sync added to latch.lock, to be pinned on their first run (linkServer). */
+  linked: string[];
+  /** Servers whose launch differs from latch.lock: left unwrapped. */
   failed: Array<{ serverId: string; reason: string }>;
   /** Config files rewritten, with the servers wrapped (or re-wrapped) in each. */
   wrapped: Array<{ client: ClientId; path: string; scope?: string; serverIds: string[] }>;
@@ -40,16 +36,17 @@ export interface SyncResult {
  *
  * 1. Detects the client configs and collects their servers (collectServers), unwrapping any that
  *    already run latch, so a wrapped server and its original count as one.
- * 2. Pins every server latch.lock does not have yet (pinServer: trust on first use, tools with
- *    hidden-intent findings held back), without holding any lock: capturing takes seconds.
- * 3. Under the state lock, merges those pins into latch.lock as it is now (mergeServers): a pin or
- *    approval made meanwhile is never overwritten.
+ * 2. Links every server latch.lock does not have yet (linkServer). Nothing is started: the
+ *    proxy pins the tools on the server's first run, inside the process the client starts with
+ *    its own env, so the sync never reads or uses the keys in a client's config.
+ * 3. Under the state lock, merges those servers into latch.lock as it is now (mergeServers): a
+ *    pin or approval made meanwhile is never overwritten.
  * 4. Rewrites the client entries of servers whose launch matches latch.lock (planRewrites). That
  *    wraps new servers, re-wraps an entry the client turned back into the original, and repairs
  *    one that starts an old latch (a moved install), while an entry already right is not touched.
  *
- * Pinning comes before wrapping, so a wrapped server is always pinned and never blocked as
- * unpinned. Clients turned off in the settings, and non-stdio servers, are never touched.
+ * Linking comes before wrapping, so a wrapped server is always in latch.lock. Clients turned off
+ * in the settings, and non-stdio servers, are never touched.
  */
 export async function syncClients(options: SyncOptions): Promise<SyncResult> {
   const now = options.now ?? (() => new Date());
@@ -58,29 +55,24 @@ export async function syncClients(options: SyncOptions): Promise<SyncResult> {
   const configs = detection.configs.filter((config) => clientEnabled(options.settings, config.client));
   const problems = detection.problems.filter((problem) => clientEnabled(options.settings, problem.client));
   const { servers, skipped } = collectServers(configs);
-  const result: SyncResult = { problems, skipped, pinned: [], failed: [], wrapped: [] };
+  const result: SyncResult = { problems, skipped, linked: [], failed: [], wrapped: [] };
 
   const lock = await readLockfile(options.lockfilePath);
-  let pinnedLock: LockFile = lock;
+  let linkedLock: LockFile = lock;
   const newIds: string[] = [];
   for (const server of servers) {
     if (Object.hasOwn(lock.servers, server.serverId)) continue;
-    try {
-      const outcome = await pinServer(server, pinnedLock, options.reviewer, now(), options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs });
-      pinnedLock = outcome.lock;
-      newIds.push(server.serverId);
-      result.pinned.push({ serverId: server.serverId, tools: outcome.pinned, held: outcome.held });
-    } catch (error) {
-      result.failed.push({ serverId: server.serverId, reason: error instanceof Error ? error.message : String(error) });
-    }
+    linkedLock = linkServer(linkedLock, server.serverId, server.command, server.args, now());
+    newIds.push(server.serverId);
   }
 
   const current =
     newIds.length === 0
       ? lock
       : await withStateLock(options.stateDir, async () => {
-          const merged = mergeServers(await readLockfile(options.lockfilePath), pinnedLock, newIds);
+          const merged = mergeServers(await readLockfile(options.lockfilePath), linkedLock, newIds);
           if (merged.added.length > 0) await writeLockfile(options.lockfilePath, merged.lock);
+          result.linked = merged.added;
           return merged.lock;
         });
 
@@ -91,7 +83,7 @@ export async function syncClients(options: SyncOptions): Promise<SyncResult> {
     if (pinned === undefined) continue;
     if (pinned.transport === "stdio" && pinned.command === server.command && isDeepStrictEqual(pinned.args, server.args)) {
       ready.push(server);
-    } else if (!result.failed.some((failure) => failure.serverId === server.serverId)) {
+    } else {
       result.failed.push({ serverId: server.serverId, reason: "latch.lock launches it with another command than the client does; left unwrapped" });
     }
   }

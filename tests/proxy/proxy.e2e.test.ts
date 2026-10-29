@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startProxy, type ProxyOptions } from "../../src/proxy/index.js";
 import { readEvents } from "../../src/store/events.js";
-import { applyApproval, readLockfile, serializeLockfile, writeLockfile } from "../../src/store/lockfile.js";
+import { applyApproval, emptyLockfile, linkServer, readLockfile, serializeLockfile, writeLockfile } from "../../src/store/lockfile.js";
 import { runLockAccept } from "../../src/commands/lock.js";
 import { dequeue, readPending, writePending } from "../../src/store/pending.js";
 
@@ -431,5 +431,55 @@ describe("decisions made by latch review while the proxy runs", () => {
     expect(messages.find((m) => m.id === 2)).toMatchObject({ result: { raw: expect.any(String) } });
     expect(messages.find((m) => m.id === 3)).toMatchObject({ result: { raw: expect.any(String) } });
     expect(stderr.join("").match(/kept the previous latch\.lock/g)).toHaveLength(1);
+  });
+});
+
+describe("startProxy, first run of a server linked to be trusted on first use", () => {
+  let linkedLock: string;
+  const poisonedTools = JSON.parse(readFileSync(join(root, "tests/fixtures/poisoned-tools.json"), "utf8")).tools as unknown[];
+
+  beforeEach(async () => {
+    vi.stubEnv("LATCH_REVIEWER", "first-run@example.com");
+    linkedLock = join(stateDir, "latch.lock");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const link = async (args: string[]) => writeLockfile(linkedLock, linkServer(emptyLockfile(), "weather", process.execPath, args, new Date("2026-10-29T09:00:00.000Z")));
+
+  it("pins the tools the server first lists, clears the mark and lets calls through", async () => {
+    await link(echo.args);
+    const { messages } = await run(echo, [request(1, "tools/list"), alerts(2), (out) => waitFor(() => out().includes('"id":2'))], { lockfilePath: linkedLock });
+    expect(messages.find((m) => m.id === 2)).toHaveProperty("result");
+    const lock = await readLockfile(linkedLock);
+    expect(lock.servers.weather!.trustOnFirstUse).toBeUndefined();
+    expect(lock.servers.weather!.tools.map((tool) => [tool.name, tool.approvedBy])).toEqual([
+      ["get_alerts", "first-run@example.com"],
+      ["get_forecast", "first-run@example.com"],
+    ]);
+    expect(await readPending(stateDir)).toEqual([]);
+    expect(stderr.join("")).toContain("weather: first run, so its tools were pinned (trust on first use): get_forecast, get_alerts");
+  });
+
+  it("holds back a tool with a critical finding: queued as tier 3 and blocked, the rest pinned", async () => {
+    const poisoned = { args: ["-e", echoServer(poisonedTools)] };
+    await link(poisoned.args);
+    const forecast = request(2, "tools/call", { name: "get_forecast", arguments: { latitude: 1, longitude: 2 } });
+    const { messages } = await run(poisoned, [request(1, "tools/list"), forecast, (out) => waitFor(() => out().includes('"id":2'))], { lockfilePath: linkedLock });
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { code: -32001, data: { reason: { kind: "hard_block" } } } });
+    expect((await readLockfile(linkedLock)).servers.weather!.tools.map((tool) => tool.name)).toEqual(["read_config"]);
+    expect((await readPending(stateDir)).map((change) => [change.toolName, change.tier])).toContainEqual(["get_forecast", 3]);
+  });
+
+  it("does not trust a mark added to latch.lock outside LatchVerify", async () => {
+    // LatchVerify wrote the server without the mark; a server marks itself afterwards.
+    await writeLockfile(linkedLock, { ...emptyLockfile(), servers: { weather: { transport: "stdio", command: process.execPath, args: echo.args, tools: [] } } });
+    const forged = JSON.parse(await readFile(linkedLock, "utf8"));
+    forged.servers.weather.trustOnFirstUse = true;
+    await writeFile(linkedLock, JSON.stringify(forged, null, 2));
+    const { messages } = await run(echo, [request(1, "tools/list"), alerts(2), (out) => waitFor(() => out().includes('"id":2'))], { lockfilePath: linkedLock });
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { code: -32001 } });
+    expect(JSON.parse(await readFile(linkedLock, "utf8"))).toEqual(forged);
   });
 });

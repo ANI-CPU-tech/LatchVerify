@@ -14,12 +14,10 @@ export interface WatchOptions {
   lockfilePath: string;
   stateDir: string;
   settingsPath: string;
-  reviewer: string;
   log: Logger;
   /** Where notifications go; undefined means the desktop has none (they are logged instead). */
   notify: Notifier | undefined;
   launch?: ProxyLaunch;
-  timeoutMs?: number;
   /** Quiet time after the last config change before syncing. */
   debounceMs?: number;
   /** Full sync interval, which also finds clients installed after the watcher started. */
@@ -131,9 +129,7 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
       lockfilePath: options.lockfilePath,
       stateDir: options.stateDir,
       settings,
-      reviewer: options.reviewer,
       ...(options.launch === undefined ? {} : { launch: options.launch }),
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     });
     report(result);
     options.onSync?.(result);
@@ -147,7 +143,7 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
     running = runSync()
       .catch((error: unknown) => {
         log.error(`sync failed: ${error instanceof Error ? error.message : String(error)}`);
-        return { problems: [], skipped: [], pinned: [], failed: [], wrapped: [] } satisfies SyncResult;
+        return { problems: [], skipped: [], linked: [], failed: [], wrapped: [] } satisfies SyncResult;
       })
       .finally(() => {
         running = undefined;
@@ -159,9 +155,7 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
     return running;
   };
   const report = (result: SyncResult) => {
-    for (const pinned of result.pinned) {
-      log.info(`pinned ${pinned.serverId}: ${pinned.tools.length} tool(s)${pinned.held.length > 0 ? `, ${pinned.held.length} held for review` : ""}`);
-    }
+    for (const id of result.linked) log.info(`linked ${id}; its tools are pinned on its first run`);
     for (const wrapped of result.wrapped) log.info(`linked ${wrapped.serverIds.join(", ")} in ${wrapped.path}${wrapped.scope === undefined ? "" : ` (${wrapped.scope})`}`);
     for (const failure of result.failed) log.warn(`${failure.serverId}: ${failure.reason}`);
     for (const skip of result.skipped) log.warn(`skipped ${skip.serverId}: ${skip.reason}`);

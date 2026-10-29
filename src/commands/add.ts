@@ -12,11 +12,10 @@ import {
   type ClientServerEntry,
   type ProxyLaunch,
 } from "../config/clients.js";
-import { mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
+import { linkServer, mergeServers, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { withStateLock } from "../store/pending.js";
-import { defaultReviewer } from "../config/reviewer.js";
-import { commandLine, pinServer, proxiedEntry } from "./init.js";
-import { plural, printable } from "./text.js";
+import { commandLine, proxiedEntry } from "./init.js";
+import { printable } from "./text.js";
 
 export interface AddOptions {
   /** Server id: the key in the client config and in latch.lock. */
@@ -27,15 +26,11 @@ export interface AddOptions {
   client: ClientId;
   /** `KEY=VALUE` sets a variable; a bare `KEY` copies it from `sourceEnv`. */
   env: string[];
-  /** Capture and report, but write nothing. */
+  /** Report, but write nothing. */
   dryRun: boolean;
   lockfilePath: string;
-  /** State directory written into the entry's env. Defaults to .latch next to the lockfile. */
+  /** State directory written into the entry's args. Defaults to .latch next to the lockfile. */
   stateDir?: string;
-  /** Who the pins are recorded as. Defaults to defaultReviewer(). */
-  reviewer?: string;
-  /** Deadline for capturing the server's tools. Defaults to DEFAULT_CAPTURE_TIMEOUT_MS. */
-  timeoutMs?: number;
   /** Where progress is written. Defaults to process.stdout. */
   output?: Writable;
   /** How the entry starts latch. Defaults to INSTALL_LAUNCH. */
@@ -72,14 +67,14 @@ export function parseEnv(values: readonly string[], source: NodeJS.ProcessEnv): 
  * 1. Reads latch.lock and the client's config. Refuses, writing nothing, when the name is already
  *    in either: an existing server is never overwritten, and changes to a pinned one go through
  *    `latch review`.
- * 2. Starts the server and pins its tools (pinServer, the same trust on first use as `latch
- *    init`: tools with critical findings are held back for review).
+ * 2. Links it in latch.lock (linkServer): its tools are pinned by the proxy the first time the
+ *    client starts it, trust on first use with critical findings held for review. Nothing is
+ *    started here, so the --env values are never used by latch itself.
  * 3. Writes latch.lock, then adds the server to the client config, wrapped with `latch proxy`
  *    by absolute path (proxiedEntry). Every other server and key of the config stays as it is.
  *    Env values are written to the config but never printed.
  *
- * Resolves with 0 on success (or a dry run that would succeed), 1 when refused or the server's
- * tools cannot be captured.
+ * Resolves with 0 on success (or a dry run that would succeed), 1 when refused.
  *
  * @throws LockfileError when latch.lock exists but is malformed.
  */
@@ -119,26 +114,9 @@ export async function runAdd(options: AddOptions): Promise<number> {
     return fail(`${name} is already in latch.lock; changes to a pinned server go through \`latch review\``);
   }
 
-  say(`  starting ${commandLine(command, args)} to read its tools`);
-  let outcome;
-  try {
-    outcome = await pinServer(
-      { serverId: name, command, args, env, clients: [client] },
-      lock,
-      options.reviewer ?? defaultReviewer(),
-      new Date(),
-      options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
-    );
-  } catch (error) {
-    return fail(`${name}: ${error instanceof Error ? error.message : String(error)}; nothing written`);
-  }
-
+  const linked = linkServer(lock, name, command, args, new Date());
   const verb = (done: string, planned: string) => (options.dryRun ? planned : done);
-  const names = outcome.pinned.length > 0 ? `: ${printable(outcome.pinned.join(", "))}` : "";
-  say(`${pc.green("✔")} ${printable(name)}: ${verb("pinned", "would pin")} ${plural(outcome.pinned.length, "tool")}${names}`);
-  for (const held of outcome.held) {
-    say(pc.yellow(`  ! ${printable(held.name)} ${verb("held back", "would be held back")} for \`latch review\`: ${printable(held.reason)}`));
-  }
+  say(`${pc.green("✔")} ${printable(name)}: ${verb("linked", "would link")}; its tools are pinned the first time ${client} starts it`);
   if (options.dryRun) {
     say(`would write ${printable(lockfilePath)} and add ${printable(name)} to ${printable(config.path)}:`);
     say(`  ${commandLine(entry.command, entry.args ?? [])}`);
@@ -147,9 +125,9 @@ export async function runAdd(options: AddOptions): Promise<number> {
 
   // The lockfile goes first: a config is only ever wrapped around pins that exist.
   await mkdir(dirname(lockfilePath), { recursive: true });
-  // Merged into latch.lock as it is now: an approval made while the server was queried is kept.
+  // Merged into latch.lock as it is now, under the state lock: a pin or approval made meanwhile is kept.
   const taken = await withStateLock(stateDir, async () => {
-    const merged = mergeServers(await readLockfile(lockfilePath), outcome.lock, [name]);
+    const merged = mergeServers(await readLockfile(lockfilePath), linked, [name]);
     if (merged.added.length > 0) await writeLockfile(lockfilePath, merged.lock);
     return merged.taken.length > 0;
   });

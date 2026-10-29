@@ -8,8 +8,9 @@ import { createLogger } from "../log.js";
 import type { LockFile } from "../schema/index.js";
 import { appendEvent } from "../store/events.js";
 import { LockIntegrity } from "../store/integrity.js";
-import { emptyLockfile, parseLockfile, readLockfileText } from "../store/lockfile.js";
-import { PENDING_FILE, readPending } from "../store/pending.js";
+import { emptyLockfile, parseLockfile, pinFirstRun, readLockfileText, writeLockfile } from "../store/lockfile.js";
+import { PENDING_FILE, readPending, withStateLock } from "../store/pending.js";
+import { defaultReviewer } from "../config/reviewer.js";
 import { REJECTED_FILE, readRejected } from "../store/rejected.js";
 import { buildBlockError } from "./blocker.js";
 import { routeFrame, type InterceptDecision, type InterceptorContext } from "./interceptor.js";
@@ -206,6 +207,29 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     // Loaded only when the advisory pass is on, so a proxy without it never holds the LLM client.
     advise: options.llm === undefined ? undefined : async (tool, cached) => (await import("../analyze/llm.js")).runAdvisory(tool, options.llm!, cached),
     sendToServer: (message) => void outbox.push(message),
+    pinFirstRun: (changes) =>
+      withStateLock(options.stateDir, async () => {
+        // Re-read under the lock, trusted only: a latch.lock edited outside LatchVerify must not
+        // be able to mark a server for trust on first use and get its tools approved.
+        const text = await readLockfileText(options.lockfilePath);
+        if (text === undefined) return undefined;
+        const status = await integrity.check(text);
+        if (!(status === "trusted" || (status === "unrecorded" && !recorded))) return undefined;
+        const current = parseLockfile(options.lockfilePath, text);
+        // Another proxy of the same server (a second client) pinned it meanwhile: use its pins.
+        if (current.servers[options.serverId]?.trustOnFirstUse !== true) return current;
+        const outcome = pinFirstRun(current, options.serverId, changes, defaultReviewer(), new Date());
+        await writeLockfile(options.lockfilePath, outcome.lock);
+        lockStamp = await lockStampNow();
+        log(
+          `${options.serverId}: first run, so its tools were pinned (trust on first use): ${outcome.pinned.join(", ") || "none"}` +
+            (outcome.held.length > 0 ? `; held for review: ${outcome.held.join(", ")}` : ""),
+        );
+        return outcome.lock;
+      }).catch((error: unknown) => {
+        logger.error(`could not pin ${options.serverId} on its first run: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+      }),
     refresh: async () => {
       const nextLock = await lockStampNow().catch(() => lockStamp);
       if (nextLock !== lockStamp) {

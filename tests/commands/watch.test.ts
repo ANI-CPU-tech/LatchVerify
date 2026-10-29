@@ -41,7 +41,7 @@ describe.skipIf(process.platform === "win32")("latch watch --once", { timeout: 3
     const output = new PassThrough();
     let text = "";
     output.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
-    const code = await runWatch({ lockfilePath, stateDir: join(dirname(lockfilePath), ".latch"), once: true, notify: false, logLevel: "error", reviewer: "dev@example.com", output });
+    const code = await runWatch({ lockfilePath, stateDir: join(dirname(lockfilePath), ".latch"), once: true, notify: false, logLevel: "error", output });
     return { code, text: text.replace(/\x1b\[[0-9;]*m/g, "") };
   }
 
@@ -51,7 +51,7 @@ describe.skipIf(process.platform === "win32")("latch watch --once", { timeout: 3
     await writeFile(path, JSON.stringify({ mcpServers: { weather: stub } }));
     const first = await once();
     expect(first.code).toBe(0);
-    expect(first.text).toContain("✔ pinned weather: 2 tools");
+    expect(first.text).toContain("✔ added weather to latch.lock; its tools are pinned the first time it runs");
     expect(first.text).toContain(`✔ linked weather in ${path}`);
     expect(JSON.parse(await readFile(path, "utf8")).mcpServers.weather.args).toContain("proxy");
     expect(await once()).toEqual({ code: 0, text: "every MCP client is linked; nothing to change\n" });
