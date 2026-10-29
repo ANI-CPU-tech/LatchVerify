@@ -192,20 +192,49 @@ describe("startProxy", () => {
     expect(messages.map((m) => m.id ?? m.method).sort()).toEqual([1, 2, 3, 4, "notifications/custom"]);
   });
 
-  it("holds a call made before any tool list, then blocks it as unverified on timeout, in order", async () => {
+  it("holds calls made before any tool list, then blocks them as unverified on timeout, in order", async () => {
     const { messages } = await run(
       echo,
       [
         request(1, "tools/call", { name: "get_alerts", arguments: {} }),
         request(2, "ping"),
-        (out) => waitFor(() => out().includes('"id":2')),
+        request(3, "tools/call", { name: "get_alerts", arguments: {} }),
+        (out) => waitFor(() => out().includes('"id":3')),
       ],
       { holdTimeoutMs: 200 },
     );
     const replies = messages.filter((m) => m.id !== undefined);
-    expect(replies.map((m) => m.id)).toEqual([1, 2]);
-    expect(replies[0]).toMatchObject({ error: { code: -32001, data: { reason: { kind: "unverified" } } } });
+    // The ping is not a call, so it is not held behind them.
+    expect(replies.map((m) => m.id)).toEqual([2, 1, 3]);
+    expect(replies[1]).toMatchObject({ error: { code: -32001, data: { reason: { kind: "unverified" } } } });
+    expect(replies[2]).toMatchObject({ error: { code: -32001, data: { reason: { kind: "unverified" } } } });
     expect(stderr.join("")).toContain("releasing 2 held client frames");
+  });
+
+  it("passes the client's answer to a server request while a call is held", async () => {
+    // Asks the client for its roots and lists its tools only once it has the answer.
+    const asking = `const tools = ${JSON.stringify(benignTools)};
+let answered = false;
+const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n");
+send({ jsonrpc: "2.0", id: "roots-1", method: "roots/list" });
+require("readline").createInterface({ input: process.stdin }).on("line", (line) => {
+  const m = JSON.parse(line);
+  if (m.id === "roots-1") { answered = true; return; }
+  if (m.method === "tools/list") return answered ? send({ jsonrpc: "2.0", id: m.id, result: { tools } }) : send({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "no roots yet" } });
+  if (m.method === "tools/call") send({ jsonrpc: "2.0", id: m.id, result: { content: [], isError: false } });
+});`;
+    const { messages } = await run(
+      { args: ["-e", asking] },
+      [
+        (out) => waitFor(() => out().includes("roots/list")),
+        request(1, "tools/call", { name: "get_alerts", arguments: {} }),
+        line({ jsonrpc: "2.0", id: "roots-1", result: { roots: [] } }),
+        request(2, "tools/list"),
+        (out) => waitFor(() => out().includes('"id":1')),
+      ],
+      { holdTimeoutMs: 10_000 },
+    );
+    expect(messages.find((m) => m.id === 1)).toEqual({ jsonrpc: "2.0", id: 1, result: { content: [], isError: false } });
   });
 
   it("verifies on notifications/initialized so an early call goes through", async () => {

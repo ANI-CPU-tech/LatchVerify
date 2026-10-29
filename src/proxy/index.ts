@@ -64,10 +64,13 @@ const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
  * keep their order per side and do not hold up routing.
  *
  * A tools/call that arrives while the server's tools are unverified (before the first tools/list
- * is analyzed, or after list_changed) is held, with every client frame after it, until a list
- * has been analyzed; server frames keep flowing meanwhile. Clients that pipeline requests thus
- * get their calls checked against the right definitions instead of refused. After
- * `holdTimeoutMs` the held frames are routed anyway, and calls still unverified are blocked.
+ * is analyzed, or after list_changed) is held, with every later tools/call, cancellation and the
+ * end of the client's input, until a list has been analyzed. Clients that pipeline requests thus
+ * get their calls checked against the right definitions instead of refused. Every other client
+ * frame passes meanwhile, above all the client's answers to the server's own requests
+ * (roots/list, sampling): holding those could stall a server that waits for them before it lists
+ * its tools. Server frames keep flowing too. After `holdTimeoutMs` the held frames are routed
+ * anyway, and calls still unverified are blocked.
  *
  * latch.lock and the queue are re-read whenever they change on disk, so an approval or rejection
  * made with `latch review` applies to the next tools/call without restarting the proxy.
@@ -205,7 +208,7 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
   const holdTimeoutMs = options.holdTimeoutMs ?? DEFAULT_HOLD_TIMEOUT_MS;
 
   const fromClient = async (frame: Frame | typeof END): Promise<void> => {
-    if (held !== null) {
+    if (held !== null && (frame === END || keepsOrderWithCalls(frame))) {
       held.push(frame);
     } else if (frame !== END && !ctx.verified && isToolsCall(frame)) {
       held = [frame];
@@ -307,6 +310,14 @@ const END = Symbol("end of client input");
 
 function isToolsCall(frame: Frame): boolean {
   return frame.message !== null && isRequest(frame.message) && frame.message.method === "tools/call";
+}
+
+/**
+ * Client frames that must stay behind a held tools/call: later calls, and cancellations, which may
+ * name a held call and would mean nothing to the server before it.
+ */
+function keepsOrderWithCalls(frame: Frame): boolean {
+  return isToolsCall(frame) || (frame.message !== null && frame.message.method === "notifications/cancelled");
 }
 
 /**
