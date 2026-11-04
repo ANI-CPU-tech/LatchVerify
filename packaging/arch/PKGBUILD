@@ -9,13 +9,21 @@ pkgname=latchverify-bin
 pkgver=0.0.0
 _debver=0.0.0
 pkgrel=1
-pkgdesc="Capability-diffing security proxy for MCP servers; links Claude Code on install"
+pkgdesc="Capability-diffing security proxy for MCP servers"
 arch=('x86_64')
 url="https://github.com/ANI-CPU-tech/LatchVerify"
 license=('MIT')
 # What the bundled Node.js links against.
 depends=('glibc' 'gcc-libs' 'hicolor-icon-theme')
-optdepends=('git: approvals are recorded under your git user.email')
+optdepends=('git: approvals are recorded under your git user.email'
+            'gtk3: the LatchVerify desktop app'
+            'nss: the LatchVerify desktop app'
+            'mesa: the LatchVerify desktop app'
+            'alsa-lib: the LatchVerify desktop app'
+            'libxss: the LatchVerify desktop app'
+            'libxtst: the LatchVerify desktop app'
+            'at-spi2-core: the LatchVerify desktop app'
+            'libnotify: desktop notifications from latch watch')
 provides=('latchverify')
 conflicts=('latchverify')
 # The bundled Node.js is an upstream release binary: keep it as published.
