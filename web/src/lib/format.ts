@@ -166,6 +166,7 @@ const EVENT_TITLES: Record<LatchEvent["kind"], string> = {
   approved: "Change approved",
   rejected: "Change rejected",
   lock_tampered: "latch.lock changed outside LatchVerify",
+  lock_unrecorded: "latch.lock has no integrity record",
 };
 
 export const EVENT_KINDS = Object.keys(EVENT_TITLES) as Array<LatchEvent["kind"]>;
@@ -201,6 +202,13 @@ export function describeEvent(event: LatchEvent): { title: string; subject: stri
         subject: event.serverId,
         detail: `${event.path}: the proxy kept the last version LatchVerify wrote. Run \`latch lock accept\` if the edit was yours, or \`latch lock restore\`.`,
         tone: "destructive",
+      };
+    case "lock_unrecorded":
+      return {
+        title,
+        subject: event.serverId,
+        detail: `${event.path}: normal for a new or freshly cloned lockfile, otherwise its record was removed. Check it with \`latch lock status\`, then run \`latch lock accept\`.`,
+        tone: "warning",
       };
   }
 }

@@ -7,7 +7,7 @@ import { LatchEventSchema, type LatchEvent, type PendingChange, type Settings } 
 import { EVENTS_FILE } from "../store/events.js";
 import { PENDING_FILE, readPending } from "../store/pending.js";
 import { readSettings } from "../store/settings.js";
-import { callsBlocked, changeQueued, clientFound, pendingSummary, type Notifier } from "./notify.js";
+import { callsBlocked, changeQueued, clientFound, lockAlert, pendingSummary, type Notifier } from "./notify.js";
 import { syncClients, type SyncResult } from "./sync.js";
 
 export interface WatchOptions {
@@ -95,6 +95,8 @@ async function claim(stateDir: string): Promise<string> {
  * - When a proxy blocks a call (events.jsonl gains call_blocked), shows callsBlocked; repeats for
  *   one tool within BLOCK_WINDOW ms make one notification with a count. Only the bytes appended
  *   since the last read are read.
+ * - When a proxy finds latch.lock changed outside LatchVerify or without a record, shows lockAlert,
+ *   once per file within BLOCK_WINDOW ms.
  *
  * Only folders are watched, never polled, so an idle watcher costs one inotify watch per folder.
  * At most one watcher runs per state directory (WATCH_PID_FILE); a second throws
@@ -273,7 +275,16 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
         continue;
       }
       if (event.kind === "call_blocked") blocked(event);
+      if (event.kind === "lock_tampered" || event.kind === "lock_unrecorded") lockChanged(event.kind, event.path);
     }
+  };
+  // Every proxy reports a lockfile problem as it starts, so one problem can mean many events.
+  const lockAlerts = new Map<string, NodeJS.Timeout>();
+  const lockChanged = (kind: "lock_tampered" | "lock_unrecorded", path: string) => {
+    const key = `${kind}\0${path}`;
+    if (lockAlerts.has(key)) return;
+    lockAlerts.set(key, setTimeout(() => lockAlerts.delete(key), blockWindowMs));
+    void notify(kind, lockAlert(kind));
   };
   const blocked = (event: Extract<LatchEvent, { kind: "call_blocked" }>) => {
     const key = `${event.serverId}\0${event.toolName}`;
@@ -314,6 +325,7 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
       clearInterval(poll);
       clearTimeout(timer);
       for (const entry of recent.values()) clearTimeout(entry.timer);
+      for (const timer of lockAlerts.values()) clearTimeout(timer);
       for (const watcher of watchers.values()) watcher.close();
       watchers.clear();
       await running;

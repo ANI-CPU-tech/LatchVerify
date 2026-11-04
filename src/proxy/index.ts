@@ -108,6 +108,10 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
   const integrity = new LockIntegrity(options.lockfilePath);
   // Once a record has vouched for latch.lock, a missing record later means it was removed.
   let recorded = false;
+  const logLockEvent = (kind: "lock_tampered" | "lock_unrecorded") =>
+    appendEvent(options.stateDir, { kind, at: new Date().toISOString(), serverId: options.serverId, path: options.lockfilePath }).catch((error: unknown) =>
+      logger.error(`could not write the event log: ${error instanceof Error ? error.message : String(error)}`),
+    );
   /**
    * latch.lock as it is on disk, if LatchVerify wrote it (or a person accepted it); `fallback`
    * when the content is one the integrity record does not vouch for. Logged and recorded once
@@ -128,18 +132,16 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     if (status === "trusted" || (status === "unrecorded" && !recorded)) {
       const lock = parseLockfile(options.lockfilePath, text);
       if (status === "trusted") recorded = true;
-      else logger.debug(`${options.lockfilePath} has no integrity record yet; LatchVerify records one on its next write`);
+      else {
+        logger.warn(`${options.lockfilePath} has no integrity record: normal for a new or freshly cloned lockfile, otherwise its record was removed. Check it with \`latch lock status\`, then run \`latch lock accept\``);
+        await logLockEvent("lock_unrecorded");
+      }
       return lock;
     }
     logger.warn(
       `${options.lockfilePath} was changed outside LatchVerify; keeping the last version it trusted. Run \`latch lock accept\` if the edit was yours, or \`latch lock restore\``,
     );
-    await appendEvent(options.stateDir, {
-      kind: "lock_tampered",
-      at: new Date().toISOString(),
-      serverId: options.serverId,
-      path: options.lockfilePath,
-    }).catch((error: unknown) => logger.error(`could not write the event log: ${error instanceof Error ? error.message : String(error)}`));
+    await logLockEvent("lock_tampered");
     return fallback();
   };
 
@@ -220,11 +222,15 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
     pinFirstRun: (changes) =>
       withStateLock(options.stateDir, async () => {
         // Re-read under the lock, trusted only: a latch.lock edited outside LatchVerify must not
-        // be able to mark a server for trust on first use and get its tools approved.
+        // be able to mark a server for trust on first use and get its tools approved, and neither
+        // can one whose record was removed. Linking always writes a record, so nothing legitimate
+        // reaches this with none.
         const text = await readLockfileText(options.lockfilePath);
         if (text === undefined) return undefined;
-        const status = await integrity.check(text);
-        if (!(status === "trusted" || (status === "unrecorded" && !recorded))) return undefined;
+        if ((await integrity.check(text)) !== "trusted") {
+          log(`${options.serverId}: not pinning its first run, because ${options.lockfilePath} has no record vouching for it; its tools wait for review`);
+          return undefined;
+        }
         const current = parseLockfile(options.lockfilePath, text);
         // Another proxy of the same server (a second client) pinned it meanwhile: use its pins.
         if (current.servers[options.serverId]?.trustOnFirstUse !== true) return current;

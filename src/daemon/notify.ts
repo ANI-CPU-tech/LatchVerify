@@ -106,6 +106,13 @@ export function callsBlocked(event: Extract<LatchEvent, { kind: "call_blocked" }
   return { title: clean(title, MAX_TITLE), body: clean(`The AI client's call was stopped: ${blockReason(event.reason)}.`, MAX_BODY), urgency: urgent ? "critical" : "normal" };
 }
 
+/** The notification for latch.lock changed outside LatchVerify, or found without an integrity record. */
+export function lockAlert(kind: "lock_tampered" | "lock_unrecorded"): DesktopNotification {
+  return kind === "lock_tampered"
+    ? { title: "latch.lock was changed outside LatchVerify", body: "Proxies keep the last version LatchVerify wrote. Run `latch lock status` to see what changed.", urgency: "critical" }
+    : { title: "latch.lock has no integrity record", body: "Normal for a new or freshly cloned lockfile; otherwise its record was removed. Check it with `latch lock status`.", urgency: "normal" };
+}
+
 /** The padlock icon: the built UI's (an install) or the source's (a checkout); else the installed icon's name. */
 function linuxIcon(): string {
   const candidates = [new URL("../web/favicon.svg", import.meta.url), new URL("../../web/public/favicon.svg", import.meta.url)].map((url) => fileURLToPath(url));

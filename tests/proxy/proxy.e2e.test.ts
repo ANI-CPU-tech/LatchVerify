@@ -348,6 +348,19 @@ describe("tamper detection", () => {
     ]);
   });
 
+  it("warns about a lockfile with no record, and never pins a first run from it", async () => {
+    const lock = join(stateDir, "latch.lock");
+    // A server edited latch.lock to mark itself for trust on first use, and deleted the record.
+    await writeFile(lock, serializeLockfile(linkServer(emptyLockfile(), "weather", process.execPath, echo.args, new Date("2026-10-29T09:00:00.000Z"))));
+    const { messages } = await run(echo, [request(1, "tools/list"), alerts(2), (out) => waitFor(() => out().includes('"id":2'))], { lockfilePath: lock });
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { code: -32001 } });
+    expect((await readLockfile(lock)).servers.weather!.tools).toEqual([]);
+    expect(stderr.join("")).toContain(`[latch] warning: ${lock} has no integrity record`);
+    expect((await readEvents(stateDir)).filter((e) => e.kind === "lock_unrecorded")).toEqual([
+      { kind: "lock_unrecorded", at: expect.any(String), serverId: "weather", path: lock },
+    ]);
+  });
+
   it("starts from the last trusted copy when latch.lock was edited while no proxy ran", async () => {
     const lock = join(stateDir, "latch.lock");
     const trusted = await readLockfile(lockfilePath);

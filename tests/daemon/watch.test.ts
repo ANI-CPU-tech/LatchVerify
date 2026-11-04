@@ -131,6 +131,17 @@ describe.skipIf(process.platform === "win32")("startWatcher", { timeout: 30_000 
     await eventually(() => expect(shown.map((notification) => notification.title)).toEqual(["Blocked weather/get_forecast", "Blocked weather/get_forecast (2 calls)"]));
   });
 
+  it("tells the user when a proxy finds latch.lock changed or without a record, once per burst", async () => {
+    await mkdir(options.stateDir, { recursive: true });
+    watcher = await startWatcher({ ...options, blockWindowMs: 60_000 });
+    const line = (kind: string) => `${JSON.stringify({ kind, at: new Date().toISOString(), serverId: "weather", path: options.lockfilePath })}\n`;
+    await appendFile(join(options.stateDir, "events.jsonl"), line("lock_tampered") + line("lock_tampered") + line("lock_unrecorded"));
+    await eventually(() => expect(shown.map((notification) => notification.urgency)).toEqual(["critical", "normal"]));
+    expect(shown[0]!.title).toContain("changed outside LatchVerify");
+    expect(shown[0]!.body).toContain("latch lock status");
+    expect(shown[1]!.title).toContain("no integrity record");
+  });
+
   it("stays quiet when notifications are off", async () => {
     await updateSettings(options.settingsPath, { notifications: false });
     await writePending(options.stateDir, [change("chg_1", 3)]);

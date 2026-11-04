@@ -111,6 +111,7 @@ describe("describeEvent", () => {
     { kind: "approved", at, serverId: "weather", toolName: "x", changeId: "c", approvedBy: "alice@example.com" },
     { kind: "rejected", at, serverId: "weather", toolName: "x", changeId: "c" },
     { kind: "lock_tampered", at, serverId: "weather", path: "/home/u/.config/latchverify/latch.lock" },
+    { kind: "lock_unrecorded", at, serverId: "weather", path: "/home/u/project/latch.lock" },
   ];
 
   it("covers every event kind", () => {
