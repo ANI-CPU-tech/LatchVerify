@@ -62,6 +62,7 @@ describe("updateSettings", () => {
     expect(SettingsPatchSchema.safeParse({ theme: "dark" }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ clients: { notepad: false } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ clients: { cursor: false } }).success).toBe(true);
+    expect(SettingsPatchSchema.parse({ notifications: false })).toEqual({ notifications: false });
   });
 });
 

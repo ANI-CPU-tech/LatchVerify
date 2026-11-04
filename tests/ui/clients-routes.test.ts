@@ -96,6 +96,20 @@ describe.skipIf(process.platform === "win32")("the clients and settings API", ()
     expect((await put("{}", {})).status).toBe(403);
     expect((await put(JSON.stringify({ lastUpdateCheck: "x".repeat(20_000) }))).status).toBe(413);
   });
+
+  it("changes only the settings a PUT names: the others keep their saved values", async () => {
+    const put = (body: unknown) => call("/api/settings", { method: "PUT", headers: { [CLIENT_HEADER]: "test", "content-type": "application/json" }, body: JSON.stringify(body) });
+    await put({ checkForUpdates: false, launchAtLogin: false, clients: { zed: true } });
+    const changed = await put({ notifications: false });
+    expect(await changed.json()).toEqual({ ...DEFAULT_SETTINGS, notifications: false, checkForUpdates: false, launchAtLogin: false, clients: { zed: true } });
+    expect(SettingsSchema.parse(await (await call("/api/settings")).json())).toEqual({
+      ...DEFAULT_SETTINGS,
+      notifications: false,
+      checkForUpdates: false,
+      launchAtLogin: false,
+      clients: { zed: true },
+    });
+  });
 });
 
 describe.skipIf(process.platform === "win32")("the dev preset API", () => {
