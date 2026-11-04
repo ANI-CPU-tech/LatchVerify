@@ -25,7 +25,9 @@ describe("withFileLock", () => {
       return name;
     };
     expect(await Promise.all([withFileLock(lock, task("a")), withFileLock(lock, task("b"))])).toEqual(["a", "b"]);
-    expect(order).toEqual(["a start", "a end", "b start", "b end"]);
+    // Either may win the lock (no FIFO promise), but the other must wait for it to finish.
+    const [first, second] = order[0] === "a start" ? ["a", "b"] : ["b", "a"];
+    expect(order).toEqual([`${first} start`, `${first} end`, `${second} start`, `${second} end`]);
     expect(await readdir(dir)).toEqual([]);
   });
 
