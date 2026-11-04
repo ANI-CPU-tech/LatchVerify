@@ -260,6 +260,19 @@ jobs:
         with:
           path: packages
           merge-multiple: true
+      # The update manifest the apps check, for releases only: pre-releases are never offered. Signed
+      # before anything is published: "latest" with no latest.json would break every app's update check.
+      - name: Sign the update manifest (latest.json)
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          LATCH_UPDATE_SIGNING_KEY: ${{ secrets.LATCH_UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$LATCH_UPDATE_SIGNING_KEY" ]; then
+            echo "::error::The LATCH_UPDATE_SIGNING_KEY secret is not set, so installed apps could not verify this release; see packaging/keygen.ts"
+            exit 1
+          fi
+          pnpm -s exec tsx packaging/make-latest-json.ts "$VERSION" packages > "$RUNNER_TEMP/latest.json"
+          mv "$RUNNER_TEMP/latest.json" packages/latest.json
       # A version with a pre-release part (1.2.0-rc.1) is published as a pre-release.
       - uses: softprops/action-gh-release@v2
         with:
@@ -271,20 +284,5 @@ jobs:
             packages/*.tar.gz
             packages/*.pkg.tar.zst
             packages/SHA256SUMS
-          fail_on_unmatched_files: true
-      # The update manifest the apps check, for releases only: pre-releases are never offered.
-      - name: Sign the update manifest (latest.json)
-        if: ${{ !contains(github.ref_name, '-') }}
-        env:
-          LATCH_UPDATE_SIGNING_KEY: ${{ secrets.LATCH_UPDATE_SIGNING_KEY }}
-        run: |
-          if [ -z "$LATCH_UPDATE_SIGNING_KEY" ]; then
-            echo "::error::The LATCH_UPDATE_SIGNING_KEY secret is not set, so installed apps could not verify this release; see packaging/keygen.ts"
-            exit 1
-          fi
-          pnpm -s exec tsx packaging/make-latest-json.ts "$VERSION" packages > "$RUNNER_TEMP/latest.json"
-      - uses: softprops/action-gh-release@v2
-        if: ${{ !contains(github.ref_name, '-') }}
-        with:
-          files: ${{ runner.temp }}/latest.json
+            ${{ !contains(github.ref_name, '-') && 'packages/latest.json' || '' }}
           fail_on_unmatched_files: true

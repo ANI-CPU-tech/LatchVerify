@@ -185,13 +185,14 @@ describe("make-latest-json", () => {
     const files = ["latchverify-1.2.3-windows-x64-setup.exe", "latchverify_1.2.3_amd64.deb", "latchverify-bin-1.2.3-1-x86_64.pkg.tar.zst", "latchverify-1.2.3-linux-x64.tar.gz", "SHA256SUMS"];
     for (const file of files) await writeFile(join(dir, file), `contents of ${file}`);
     expect(installersByKind(files).deb).toBe("latchverify_1.2.3_amd64.deb");
-    const latest = makeManifest("1.2.3", dir, privateKey, "## 1.2.3\n\nFixed things.\n", new Date("2026-10-29T09:00:00.000Z"));
+    const latest = makeManifest("1.2.3", dir, privateKey, "## 1.2.3\n\nFixed things.\n", new Date("2026-10-29T09:00:00.000Z"), publicKey);
     expect(latest.notes).toBe("Fixed things.");
     expect(Object.keys(latest.platforms).sort()).toEqual(["linux-x86_64-deb", "linux-x86_64-pacman", "linux-x86_64-tarball", "windows-x86_64-inno"]);
     for (const kind of ["inno", "deb", "pacman", "tarball"] as const) {
       expect(await checkForUpdate(kind, { current: "1.2.2", publicKey, fetch: fetchJson(latest) })).toMatchObject({ version: "1.2.3", kind });
     }
-    expect(() => makeManifest("1.2.4-rc.1", dir, privateKey, "", new Date())).toThrow("pre-release");
+    expect(() => makeManifest("1.2.4-rc.1", dir, privateKey, "", new Date(), publicKey)).toThrow("pre-release");
+    expect(() => makeManifest("1.2.3", dir, keys().privateKey, "", new Date(), publicKey)).toThrow("does not match the public key the apps ship");
     expect(() => installersByKind(files.slice(1))).toThrow("expected one inno installer, found 0");
   });
 });

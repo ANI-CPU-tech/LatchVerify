@@ -9,6 +9,8 @@
 import { createHash, createPrivateKey, sign } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { signatureValid } from "../src/update/index.js";
+import { UPDATE_PUBLIC_KEY } from "../src/update/key.js";
 import { PLATFORM_KEYS, signedMessage, type InstallKind, type Manifest } from "../src/update/manifest.js";
 import { changelogSection } from "./release-notes.js";
 import { parseVersion } from "./version.js";
@@ -30,7 +32,11 @@ export function installersByKind(files: readonly string[]): Record<InstallKind, 
   ]) as Record<InstallKind, string>;
 }
 
-export function makeManifest(version: string, dir: string, privateKeyPem: string, changelog: string, now: Date): Manifest {
+/**
+ * The manifest, each signature checked against `publicKey`: a release signed with a key the apps do
+ * not carry would be refused by every one of them, so it must fail here instead of after publishing.
+ */
+export function makeManifest(version: string, dir: string, privateKeyPem: string, changelog: string, now: Date, publicKey: string = UPDATE_PUBLIC_KEY): Manifest {
   parseVersion(version);
   if (version.includes("-")) throw new Error(`${version} is a pre-release; updates are offered for releases only`);
   const key = createPrivateKey(privateKeyPem);
@@ -40,11 +46,10 @@ export function makeManifest(version: string, dir: string, privateKeyPem: string
     const sha256 = createHash("sha256").update(readFileSync(join(dir, name))).digest("hex");
     const platform = PLATFORM_KEYS[kind];
     const url = `${RELEASES}/v${version}/${encodeURIComponent(name)}`;
-    platforms[platform] = {
-      url,
-      sha256,
-      signature: sign(null, Buffer.from(signedMessage(version, platform, sha256, url, notes), "utf8"), key).toString("base64"),
-    };
+    const message = signedMessage(version, platform, sha256, url, notes);
+    const signature = sign(null, Buffer.from(message, "utf8"), key).toString("base64");
+    if (!signatureValid(message, signature, publicKey)) throw new Error("LATCH_UPDATE_SIGNING_KEY does not match the public key the apps ship (src/update/key.ts)");
+    platforms[platform] = { url, sha256, signature };
   }
   return { version, notes, pub_date: now.toISOString(), platforms };
 }

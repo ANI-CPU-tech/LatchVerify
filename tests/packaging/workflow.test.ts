@@ -67,6 +67,13 @@ describe("the build-installers workflow", () => {
     expect(release.indexOf("make-latest-json.ts")).toBeGreaterThan(release.indexOf("packaging/release-notes.ts"));
   });
 
+  it("signs before it publishes, and uploads everything in one step, so a failed signature leaves no release", () => {
+    const release = job("release");
+    expect(release.match(/softprops\/action-gh-release/g)).toHaveLength(1);
+    expect(release.indexOf("make-latest-json.ts")).toBeLessThan(release.indexOf("softprops/action-gh-release"));
+    expect(release.slice(release.indexOf("softprops/action-gh-release"))).toContain("packages/latest.json");
+  });
+
   it("builds the desktop app into every installer and smoke-tests it", () => {
     expect(job("windows")).toContain("packaging/build-desktop.ts build/stage win32 x64");
     expect(job("linux")).toContain("packaging/build-desktop.ts build/stage linux x64");
