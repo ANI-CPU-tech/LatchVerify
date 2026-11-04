@@ -147,6 +147,13 @@ describe.skipIf(process.platform === "win32")("startWatcher", { timeout: 30_000 
     watcher = await startWatcher(options);
   });
 
+  it("frees the state directory when it cannot start, so a later start in the same process works", async () => {
+    await writeFile(options.settingsPath, "{ not json");
+    await expect(startWatcher(options)).rejects.toThrow("not valid JSON");
+    await rm(options.settingsPath);
+    watcher = await startWatcher(options);
+  });
+
   it("takes over from a watcher that died", async () => {
     await mkdir(options.stateDir, { recursive: true });
     await writeFile(join(options.stateDir, WATCH_PID_FILE), "999999999\n");

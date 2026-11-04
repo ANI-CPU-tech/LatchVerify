@@ -89,19 +89,35 @@ async function main(): Promise<void> {
   };
 
   let watcher: Watcher | undefined;
-  const startWatching = async () => {
-    watcher = await startWatcher({
-      lockfilePath,
-      stateDir,
-      settingsPath: settingsFile,
-      log,
-      notify,
-      onSync: () => void applyLoginStart(settingsFile),
-    });
+  /**
+   * Starts the watcher; false when it cannot run. That must not cost the user the review window:
+   * `latch watch` may already be running, or settings.json may need fixing, and the tray can retry.
+   */
+  const startWatching = async (): Promise<boolean> => {
+    try {
+      watcher = await startWatcher({
+        lockfilePath,
+        stateDir,
+        settingsPath: settingsFile,
+        log,
+        notify,
+        onSync: () => void applyLoginStart(settingsFile),
+      });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error(`the background watcher did not start: ${message}`);
+      await notify({ title: "LatchVerify is not watching your MCP clients", body: message, urgency: "normal" });
+      return false;
+    }
   };
 
   if (flags.smoke) {
-    await startWatching();
+    if (!(await startWatching())) {
+      await server.close();
+      app.exit(1);
+      return;
+    }
     process.stdout.write(`latchverify desktop ${VERSION}: review server on ${server.url}, watcher running\n`);
     await watcher!.close();
     await server.close();
@@ -109,7 +125,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  await startWatching();
+  const watching = await startWatching();
   await applyLoginStart(settingsFile);
   const updates = updateHandlers({ notify, showWindow, log });
   ipcMain.handle("latch:version", () => VERSION);
@@ -118,12 +134,13 @@ async function main(): Promise<void> {
 
   // Tray: the app lives here; closing the window only hides it.
   const tray = new Tray(nativeImage.createFromPath(TRAY_ICON));
-  let paused = false;
+  // Paused when the watcher could not start: the tray's Resume tries again.
+  let paused = !watching;
   let pending = 0;
   const refreshTray = () => {
     tray.setToolTip(trayTooltip({ pending, paused }));
     const items = trayMenu({ pending, paused, updateLabel: updates.label() }).map(
-      (item): MenuItemConstructorOptions => ("separator" in item ? { type: "separator" } : { label: item.label, enabled: item.enabled ?? true, click: () => void act(item.id) }),
+      (item): MenuItemConstructorOptions => ("separator" in item ? { type: "separator" } : { label: item.label, enabled: item.enabled ?? true, click: () => void act(item.id).catch((error: unknown) => log.error(`tray action ${item.id} failed: ${error instanceof Error ? error.message : String(error)}`)) }),
     );
     tray.setContextMenu(Menu.buildFromTemplate(items));
   };
@@ -134,9 +151,11 @@ async function main(): Promise<void> {
       case "review":
         return showWindow(REVIEW_ROUTE);
       case "pause":
-        if (paused) await startWatching();
-        else await watcher?.close();
-        paused = !paused;
+        if (paused) paused = !(await startWatching());
+        else {
+          await watcher?.close();
+          paused = true;
+        }
         return refreshTray();
       case "updates":
         if (updates.label().startsWith("Install")) await updates.install();

@@ -107,7 +107,15 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
   const blockWindowMs = options.blockWindowMs ?? DEFAULT_BLOCK_WINDOW_MS;
   await mkdir(options.stateDir, { recursive: true });
   const marker = await claim(options.stateDir);
-  let settings: Settings = await readSettings(options.settingsPath);
+  let settings: Settings;
+  try {
+    settings = await readSettings(options.settingsPath);
+  } catch (error) {
+    // Nothing is running yet: free the marker, or this process could never start a watcher again.
+    claimed.delete(marker);
+    await rm(marker, { force: true });
+    throw error;
+  }
 
   const notify = async (title: string, message: { title: string; body: string; urgency: "normal" | "critical" }) => {
     if (!settings.notifications) return;
