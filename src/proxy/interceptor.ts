@@ -8,6 +8,7 @@ import { findRejection } from "../store/rejected.js";
 import { analyzeToolList, type DetectedChange, type ListAnalysis } from "./analysis.js";
 import { buildBlockError, shouldBlock, type BlockReason, type BlockVerdict } from "./blocker.js";
 import {
+  isJsonRpcId,
   isNotification,
   isRequest,
   isResponse,
@@ -100,7 +101,8 @@ const TRACKED_METHODS: ReadonlySet<string> = new Set(["initialize", "tools/list"
  * Client to server: tools/call goes to onToolsCall. initialize and tools/list request ids are
  * recorded in ctx.inflight (only those, so requests the server never answers cannot grow the
  * map without bound). A JSON-RPC batch is refused: tools/call inside an array would slip past
- * enforcement, and MCP 2025-06-18 removed batching. notifications/initialized is forwarded and
+ * enforcement, and MCP 2025-06-18 removed batching. So is a tools/call that is not a well-formed
+ * request (refuseMalformedCall). notifications/initialized is forwarded and
  * followed by the proxy's own tools/list, so the server's tools are verified before the client
  * calls one, even when the client relies on a list it fetched in an earlier session.
  *
@@ -118,6 +120,10 @@ export async function routeFrame(ctx: InterceptorContext, direction: Direction, 
       ctx.log("refused a JSON-RPC batch from the client");
       return respond(null, INVALID_REQUEST, "LatchVerify does not forward JSON-RPC batches; send one message per line");
     }
+    if (direction === "client->server") {
+      const untagged = jsonObject(frame.raw);
+      if (untagged?.method === "tools/call") return refuseMalformedCall(ctx, untagged);
+    }
     return FORWARD;
   }
 
@@ -126,7 +132,7 @@ export async function routeFrame(ctx: InterceptorContext, direction: Direction, 
       requestToolList(ctx);
       return FORWARD;
     }
-    if (!isRequest(message)) return FORWARD;
+    if (!isRequest(message)) return message.method === "tools/call" ? refuseMalformedCall(ctx, message) : FORWARD;
     if (message.method === "tools/call") return onToolsCall(ctx, message);
     if (TRACKED_METHODS.has(message.method)) {
       const continues = message.method === "tools/list" && isPlainObject(message.params) && message.params.cursor !== undefined;
@@ -415,6 +421,28 @@ const INVALID_PARAMS = -32602;
 
 function respond(id: JsonRpcId, code: number, message: string): InterceptDecision {
   return { action: "respond", message: { jsonrpc: "2.0", id, error: { code, message } } };
+}
+
+/**
+ * A tools/call that is not a well-formed request: no `id`, an `id` of the wrong type, or no
+ * `jsonrpc: "2.0"`. No check can apply to it, and a lenient server might still run it, so it never
+ * reaches the server. With an `id` it is answered with an error; without one there is nothing to
+ * answer, as JSON-RPC says of notifications, so it is dropped.
+ */
+function refuseMalformedCall(ctx: InterceptorContext, message: Record<string, unknown>): InterceptDecision {
+  ctx.log("refused a tools/call that is not a valid JSON-RPC request");
+  if (!("id" in message)) return DROP;
+  return respond(isJsonRpcId(message.id) ? message.id : null, INVALID_REQUEST, "LatchVerify refused a tools/call that is not a valid JSON-RPC request");
+}
+
+/** The line parsed, when it is one JSON object. */
+function jsonObject(raw: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isPlainObject(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** True when the line is a JSON array: a batch, or an empty or malformed one. */

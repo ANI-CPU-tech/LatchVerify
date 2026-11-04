@@ -525,10 +525,38 @@ describe("onToolsCall", () => {
     }
   });
 
-  it("forwards tools/call notifications and responses, which call nothing", async () => {
+  it("forwards responses, which call nothing", async () => {
     const { fromClient } = await setup();
-    expect(await fromClient({ jsonrpc: "2.0", method: "tools/call", params: { name: "get_forecast" } })).toEqual(FORWARD);
     expect(await fromClient({ jsonrpc: "2.0", id: 1, result: {} })).toEqual(FORWARD);
+  });
+});
+
+describe("a tools/call that does not look like a request", () => {
+  const call = { method: "tools/call", params: { name: "read_config", arguments: {} } };
+
+  it("is never forwarded without an id: a notification cannot be answered, so it is dropped", async () => {
+    const { fromClient, logs } = await setup({ verified: true });
+    expect(await fromClient({ jsonrpc: "2.0", ...call })).toEqual({ action: "drop" });
+    expect(logs).toContain("refused a tools/call that is not a valid JSON-RPC request");
+  });
+
+  it("is answered with an error when its id is not a valid one", async () => {
+    const { fromClient } = await setup({ verified: true });
+    expect(await fromClient({ jsonrpc: "2.0", id: { a: 1 }, ...call })).toMatchObject({ action: "respond", message: { id: null, error: { code: -32600 } } });
+  });
+
+  it("is answered with an error when it has no jsonrpc tag", async () => {
+    const { fromClient } = await setup({ verified: true });
+    expect(await fromClient({ id: 5, ...call })).toMatchObject({ action: "respond", message: { id: 5, error: { code: -32600 } } });
+    expect(await fromClient(call)).toEqual({ action: "drop" });
+    expect(await fromClient({ jsonrpc: "1.0", id: 6, ...call })).toMatchObject({ action: "respond", message: { id: 6 } });
+  });
+
+  it("leaves everything else alone, byte for byte", async () => {
+    const { fromClient } = await setup({ verified: true });
+    for (const line of ["not json", "5", "{}", '{"id":1,"method":"ping"}', '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{}}', '{"jsonrpc":"2.0","id":{},"method":"ping"}']) {
+      expect(await fromClient(line)).toEqual({ action: "forward" });
+    }
   });
 });
 

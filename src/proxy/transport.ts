@@ -230,7 +230,7 @@ export function spawnUpstream(
 // At most one guard is true for any message.
 
 /** A string, a number or null, as JSON-RPC 2.0 allows for `id`. */
-function isJsonRpcId(value: unknown): value is JsonRpcId {
+export function isJsonRpcId(value: unknown): value is JsonRpcId {
   return value === null || typeof value === "string" || typeof value === "number";
 }
 
