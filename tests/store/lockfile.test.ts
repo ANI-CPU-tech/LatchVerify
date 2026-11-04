@@ -73,7 +73,7 @@ describe("readLockfile", () => {
   });
 
   it("returns an empty lockfile when the file does not exist", async () => {
-    expect(await readLockfile(join(dir, "missing.lock"))).toEqual({ version: "1", generatedAt: "1970-01-01T00:00:00.000Z", servers: {} });
+    expect(await readLockfile(join(dir, "missing.lock"))).toEqual({ version: LOCKFILE_VERSION, generatedAt: "1970-01-01T00:00:00.000Z", servers: {} });
   });
 
   it("ignores a leading byte-order mark", async () => {
@@ -110,9 +110,9 @@ describe("readLockfile", () => {
   });
 
   it("refuses a lockfile version it does not understand", async () => {
-    const lock = { ...(await loadExample()), version: "2" };
+    const lock = { ...(await loadExample()), version: "3" };
     expect((await rejection(readLockfile(await fixtureFile("future.lock", JSON.stringify(lock))))).message).toContain(
-      'unsupported lockfile version "2"',
+      'unsupported lockfile version "3"',
     );
   });
 
@@ -142,6 +142,31 @@ const twoServers = async (): Promise<LockFile> => {
   lock.servers = { weather: lock.servers.weather!, mail };
   return lock;
 };
+
+describe("format versions", () => {
+  it("writes version 2, because version 1 entries held a launch line", () => {
+    expect(LOCKFILE_VERSION).toBe("2");
+  });
+
+  it("reads a version 1 file, converting its launch lines, and writes it back as version 2", async () => {
+    const path = await fixtureFile(
+      "v1.lock",
+      JSON.stringify({ version: "1", generatedAt: "2026-10-23T09:00:00.000Z", servers: { weather: { transport: "stdio", command: "npx", args: ["--token", "sk-secret"], tools: [] } } }),
+    );
+    const lock = await readLockfile(path);
+    expect(lock.version).toBe("2");
+    expect(lock.servers.weather).toEqual({ transport: "stdio", program: "npx", launch: launchHash("npx", ["--token", "sk-secret"]), tools: [] });
+    await writeLockfile(path, lock);
+    const written = await readFile(path, "utf8");
+    expect(JSON.parse(written).version).toBe("2");
+    expect(written).not.toContain("sk-secret");
+  });
+
+  it("refuses a version it does not know, naming it", async () => {
+    const path = await fixtureFile("v3.lock", JSON.stringify({ version: "3", generatedAt: "2026-10-23T09:00:00.000Z", servers: {} }));
+    expect((await rejection(readLockfile(path))).message).toContain('unsupported lockfile version "3"');
+  });
+});
 
 describe("writeLockfile", () => {
   describe("over a file changed outside LatchVerify", () => {
@@ -194,7 +219,7 @@ describe("writeLockfile", () => {
     await writeLockfile(out, lock);
     const text = await readFile(out, "utf8");
     expect(text.endsWith("}\n")).toBe(true);
-    expect(text.split("\n")[1]).toBe('  "version": "1",');
+    expect(text.split("\n")[1]).toBe('  "version": "2",');
     expect(await readLockfile(out)).toEqual(lock);
   });
 
@@ -229,7 +254,7 @@ describe("writeLockfile", () => {
     const bad = await loadExample();
     bad.servers.weather!.tools[0]!.serverId = "elsewhere";
     expect((await rejection(writeLockfile(out, bad))).message).toContain("invalid lockfile");
-    expect((await rejection(writeLockfile(out, { ...emptyLockfile(), version: "2" }))).message).toContain("unsupported lockfile version");
+    expect((await rejection(writeLockfile(out, { ...emptyLockfile(), version: "3" }))).message).toContain("unsupported lockfile version");
     expect(await readFile(out, "utf8")).toBe(before);
     expect(await readdir(dir)).toEqual(["latch.lock"]);
   });

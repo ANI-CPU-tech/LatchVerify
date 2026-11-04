@@ -56,7 +56,8 @@ function withoutLaunchLines(data: unknown): unknown {
       return [id, { ...rest, program: programName(command), launch: launchHash(command, args as string[]) }];
     }),
   );
-  return { ...data, servers: converted };
+  // This is what version 2 changed, so what comes out of it is version 2.
+  return { ...data, ...((data as { version?: unknown }).version === "1" ? { version: LOCKFILE_VERSION } : {}), servers: converted };
 }
 
 /**

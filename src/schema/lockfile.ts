@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { Sha256HexSchema, ToolRecordSchema } from "./tool.js";
 
-/** Current latch.lock format version. Bump on breaking format changes. */
-export const LOCKFILE_VERSION = "1";
+/**
+ * Current latch.lock format version. Bump on breaking format changes. Version 2 replaced each
+ * server's `command` and `args` with `program` and `launch`; version 1 files are converted on read.
+ */
+export const LOCKFILE_VERSION = "2";
 
 export const TransportSchema = z.enum(["stdio", "http"]);
 export type Transport = z.infer<typeof TransportSchema>;

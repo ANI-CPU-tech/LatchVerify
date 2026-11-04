@@ -11,7 +11,7 @@ Schema: `src/schema/lockfile.ts` and `src/schema/tool.ts`. Full example:
 
 ```jsonc
 {
-  "version": "1",                          // lockfile format version
+  "version": "2",                          // lockfile format version; "1" is converted on read
   "generatedAt": "2026-10-20T14:02:11.000Z",
   "servers": {
     "weather": {                           // serverId: the key used in `latch proxy --server`
