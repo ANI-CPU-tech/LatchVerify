@@ -157,8 +157,21 @@ export async function runUnlink(options: UnlinkOptions): Promise<number> {
     return problems.length > 0 ? 1 : 0;
   }
 
-  // A client can keep servers in more than one file (Amazon Q): each is restored on its own.
   let code = problems.length > 0 ? 1 : 0;
+  // Unlinking is a no: the background sync leaves these clients alone from now on. Saved before any
+  // config changes, or a sync in between would wrap them again and never undo it. A failure must not
+  // stop the restoring: an uninstaller depends on it.
+  if (!options.dryRun) {
+    const declined = client === undefined ? [...new Set([...detection.configs, ...detection.problems].map((found) => found.client))] : [client];
+    try {
+      if (declined.length > 0) await updateSettings(options.settingsPath ?? settingsPath(), { clients: Object.fromEntries(declined.map((id) => [id, false])) });
+    } catch (error) {
+      say(pc.yellow(`! could not save your answer: ${printable(error instanceof Error ? error.message : String(error))}`));
+      code = 1;
+    }
+  }
+
+  // A client can keep servers in more than one file (Amazon Q): each is restored on its own.
   const restoredClients = new Set<ClientId>();
   for (const config of configs) {
     const restored: Record<string, ClientServerEntry> = {};
@@ -185,11 +198,6 @@ export async function runUnlink(options: UnlinkOptions): Promise<number> {
     }
     restoredClients.add(config.client);
     say(`${pc.green("✔")} restored ${plural(ids.length, "server")} in ${configPlace(config)}: ${printable(ids.join(", "))}`);
-  }
-  // Unlinking is a no: the background sync leaves these clients alone from now on.
-  if (!options.dryRun) {
-    const declined = client === undefined ? [...new Set([...detection.configs, ...detection.problems].map((found) => found.client))] : [client];
-    if (declined.length > 0) await updateSettings(options.settingsPath ?? settingsPath(), { clients: Object.fromEntries(declined.map((id) => [id, false])) });
   }
   if (restoredClients.size > 0) {
     say(`next: restart ${listOf([...restoredClients].map((id) => CLIENT_NAMES[id]))}. latch.lock is kept, so linking again later keeps your approvals.`);
