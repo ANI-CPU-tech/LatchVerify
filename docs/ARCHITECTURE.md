@@ -135,14 +135,17 @@ Delete the entry from `rejected.json` to take a rejection back.
 - **Pin on first run.** Linking records a server in `latch.lock` with its program name, a hash of
   its launch line and `trustOnFirstUse`, and starts nothing. The proxy, which the client starts
   with the client's own env, pins the tools of the server's first complete `tools/list`
-  (`pinFirstRun`), holding back any with a critical finding as a tier-3 change, and only if the
-  `latch.lock` it reads is one the integrity record vouches for.
+  (`pinFirstRun`), holding back every tier-3 tool: hidden instructions, obfuscation, cross-server
+  references, and exec or credential access, the same rule such a tool meets if it appears later.
+  A held tool is queued, blocked and withheld from the model until someone approves it. Pinning
+  happens only if the integrity record vouches for the `latch.lock` the proxy reads.
 - **Background sync.** `latch watch` (`src/daemon/`) watches the folders of the client configs,
   syncs one second after a change and every minute: new servers of connected clients are linked,
   entries a client turned back are re-wrapped, entries of a moved install are repaired. It reads
   only the bytes appended to `events.jsonl` and shows desktop notifications (notify-send on Linux,
   a toast on Windows) for changes waiting at start, each change a proxy queues, blocked calls
-  (repeats summed per minute) and clients found but not asked about. One watcher runs per state
+  (repeats summed per minute), servers it just linked, `latch.lock` changed outside LatchVerify or
+  found without a record, and clients found but not asked about. One watcher runs per state
   directory.
 
 ## The app and updates
@@ -161,7 +164,8 @@ Delete the entry from `rejected.json` to take a rejection back.
 - **Updates** (`src/update/`). Each release publishes `latest.json`: the version, notes and, per
   install kind (`windows-x86_64-inno`, `linux-x86_64-deb`, `linux-x86_64-pacman`,
   `linux-x86_64-tarball`), the installer's https URL, sha256 and an ed25519 signature over
-  `latchverify-update\n{version}\n{platform}\n{sha256}\n`. The public key is built in
+  `latchverify-update\n{version}\n{platform}\n{sha256}\n{url}\n{sha256 of the notes}\n`, so nothing the
+  app acts on or displays can change after signing. The public key is built in
   (`src/update/key.ts`); the private key exists only as the release workflow's secret. The app
   reads its install kind from the `install-kind` file its installer wrote, so a source checkout
   never updates. A manifest is capped at 1 MB and must parse; a bad signature is an error, a
@@ -169,7 +173,9 @@ Delete the entry from `rejected.json` to take a rejection back.
   (capped at 512 MB), its sha256 is checked, and it is run: the Inno installer silently (it starts
   the app again), `pkexec apt-get install` or `pkexec pacman -U`, or the new archive's `install.sh`
   into the same prefix. Running proxies keep their files until their client restarts them.
-  `LATCH_UPDATE_URL` replaces the manifest URL only in development mode.
+  `LATCH_UPDATE_URL` replaces the manifest URL only in development mode, and only from the real
+  environment: a `.env` file cannot set it. Inside Electron, entries the app writes start the
+  bundled Node.js and CLI, never the app's own binary (`installLaunchFor`).
 
 ## Keys in client configs
 
@@ -204,8 +210,16 @@ the same OS user as LatchVerify and can read and write the same files:
   LatchVerify writes is recorded in an HMAC-signed integrity record under a per-user key
   (`store/integrity.ts`), kept in the per-user LatchVerify directory, not in the state
   directory. A proxy refuses a `latch.lock` the record does not vouch for, keeps the version
-  it trusts, and logs `lock_tampered`. `latch lock accept` trusts an edit made by a person
-  (a `git pull`, a merge); `latch lock restore` undoes it.
+  it trusts, and logs `lock_tampered`. `writeLockfile` refuses to write over such a file, so a
+  normal approval or sync cannot sign the edit (the API answers 409). `latch lock accept` trusts
+  an edit made by a person (a `git pull`, a merge); `latch lock restore` undoes it. A lockfile with
+  no record is used, with a warning and a `lock_unrecorded` event, but never pins a first run. A
+  same-user program can delete or forge records, so this detects careless tampering and does not
+  stop a determined one.
+- **The current directory.** A proxy starts wherever its client chose, so a `.env` there is not
+  trusted to weaken anything: it cannot set `LATCH_INTEGRITY_DIR` or `LATCH_UPDATE_URL`, nor a
+  `LATCH_LLM_BASE_URL` for a key from the environment, and `latch setup` and `latch watch` ignore
+  its lockfile path. The installed app does not read `.env` at all.
 - **Its tool descriptions.** A tier-3 tool reaches the model as its name and a "withheld"
   notice, never its own text.
 - **The review queue.** Editing `pending.json` does not unblock a tier-2 or tier-3 change:

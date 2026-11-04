@@ -5,7 +5,7 @@
 ### Installers
 - **Windows installer, Debian/Ubuntu and Arch/CachyOS packages, and a portable Linux archive**, built by the **Build installers** workflow on GitHub's Windows and Linux machines. Each carries its own Node.js 22, so nothing else needs installing.
 - **The LatchVerify app comes with every installer**: it starts after installing (Windows), from your app menu or in the tray (Linux), and at login. Uninstalling stops it and removes its login start.
-- **Installing creates your per-user `latch.lock` and connects only the MCP clients you choose**: the Windows installer's checkbox, or `latch setup` afterwards on Linux (`install.sh` asks in your terminal). Uninstalling gives every client its original server commands back (`latch setup --remove --all`) and keeps `latch.lock`; before, only Claude Code was restored, and a client linked by hand kept pointing at the removed install.
+- **Installing creates your per-user `latch.lock` and connects only the MCP clients you choose**: the Windows installer's checkbox (off by default, and updates never link anything), or `latch setup` afterwards on Linux (`install.sh` asks in your terminal). Uninstalling gives every client its original server commands back (`latch setup --remove --all`) and keeps `latch.lock`; before, only Claude Code was restored, and a client linked by hand kept pointing at the removed install.
 
 ### Added
 - **`latch setup`** lists the MCP clients found and asks which to connect (`--client` or `--all` connect without asking), using the per-user lockfile: `%APPDATA%\LatchVerify` on Windows, `~/.config/latchverify` on Linux, `~/Library/Application Support/LatchVerify` on macOS. It is safe to run again, and it succeeds with a note when no client is set up yet.
@@ -36,6 +36,11 @@
 - **`GET /api/info`** reports the running version and whether development mode is on.
 
 ### Security
+- **A server's first run holds back exec and credential tools**, not only tools with hidden instructions, so a new server gets no more trust than a pinned one. Such a server needs one approval after it is linked.
+- **A normal write can no longer sign a tampered `latch.lock`**, and the previous version stops being trusted once a write finishes. A lockfile with no integrity record now warns, logs `lock_unrecorded` and never pins a first run; the app and `latch watch` show a notification for these and for `lock_tampered`.
+- **Updates sign the download URL and notes**, and the downloaded file's name no longer comes from the URL, which could write outside the temp folder. Releases are signed before anything is published, and fail if the key does not match the one apps ship.
+- **A project's `.env` can no longer weaken LatchVerify**: it cannot move the integrity records or the update URL, send your LLM key elsewhere, or point `latch setup` and `latch watch` at its own lockfile. The installed app does not read `.env`.
+- **Withheld tools cannot carry an attack in their name**, tool list entries with no usable name are dropped, and a `tools/call` that is not a well-formed request never reaches the server.
 - **Your keys never leave your client configs.** Env values are dropped as soon as a config is parsed and never reach LatchVerify's files, logs, API or dashboard; a canary test runs every command, the proxy and the API over configs holding a fake key and fails if it appears anywhere.
 - **Guarded servers no longer get LatchVerify's own variables.** The LLM API key and the paths of `latch.lock` and the review queue used to reach every wrapped server. No `LATCH_*` variable reaches a server now, and `.env` files only load `LATCH_*` lines.
 - **A server cannot approve its own change by editing `latch.lock`.** Every lockfile LatchVerify writes is recorded in an HMAC-signed integrity record under a per-user key. A proxy refuses a `latch.lock` the record does not vouch for, keeps the version it trusts and logs a `lock_tampered` event. After a `git pull`, run `latch lock accept`. This detects tampering; a program written against LatchVerify, running as the same user, can still defeat it.
@@ -43,6 +48,13 @@
 - **Rejections last.** A rejected definition stays blocked after the proxy restarts, whatever its tier, and is not queued for review again.
 
 ### Fixed
+- **Connect and the app's background sync start proxies with Node.js.** They used the app's own binary, so wrapped servers did not start.
+- **The app keeps running when its watcher cannot start**, and starts paused so the tray can retry.
+- **Changing one setting no longer resets the others.**
+- **A proxy can no longer crash starting the app.** "Start in the background" (formerly "Start at login") now also stops proxies starting it, and proxies do not try on Linux with no display.
+- **Disconnecting a client saves your answer first**, so a running sync cannot wrap it again.
+- **Blocked calls are reported once**, and the app stops polling while its window is hidden.
+- **`latch.lock` is format version 2.** Version 1 files are still read and converted.
 - **A pin or approval made while `latch init` or `latch add` was running is no longer lost**: their write is merged into `latch.lock` as it is then, under the shared state lock.
 - **Each `latch proxy` uses about 70 MiB instead of 89**, and `latch watch` about 75 instead of 88: commands load only what they use, and wrapped entries start node with a smaller young generation.
 - **Configs with comments or trailing commas** (common in VS Code's `mcp.json` and Zed's `settings.json`) are read and linked instead of skipped, and rewriting one keeps every comment: only the changed entries are edited.

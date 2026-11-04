@@ -55,7 +55,7 @@ ignored. Every variable has a working default:
 | `LATCH_REVIEWER` | `git config user.email`, else the OS user | approvals should be recorded under another name |
 | `LATCH_LOG_LEVEL` | `info` | `debug` to see every frame the proxy holds, rewrites or answers; `warn` for a quieter stderr |
 | `LATCH_LLM_ENABLED`, `LATCH_LLM_API_KEY` | `false`, empty | you want the optional LLM advisory pass (any OpenAI-compatible API; see `LATCH_LLM_BASE_URL` and `LATCH_LLM_MODEL`) |
-| `LATCH_INTEGRITY_DIR` | `integrity` next to the per-user lockfile | tests: where lockfile integrity records and their key live |
+| `LATCH_INTEGRITY_DIR` | `integrity` next to the per-user lockfile | tests: where lockfile integrity records and their key live. Environment only: a `.env` file cannot set it |
 | `LATCH_DEV` | `false` | development: the review UI adds the Simulation and Dev Tools pages, and the API serves `POST /api/simulate` and `/api/dev/presets` |
 | `DEMO_MUTATE` | unset | `1` makes the evil demo server start already poisoned |
 

@@ -97,13 +97,14 @@ that blocks on every reword gets disabled by its users.
   target). `lock.ts` `withFileLock` is the cross-process lock (owner token, heartbeat).
 - Tamper detection: `src/store/integrity.ts` `LockIntegrity`. `writeLockfile` records every
   lockfile it writes (HMAC under a per-user key in `integrityDir()`); the proxy refuses a
-  `latch.lock` the record does not vouch for. `latch lock status|accept|restore`
+  `latch.lock` the record does not vouch for, and `writeLockfile` refuses to write over one, so a normal write cannot sign an edit. `latch lock status|accept|restore`
   (`commands/lock.ts`) handles edits made outside LatchVerify. Tests point
   `LATCH_INTEGRITY_DIR` at a temp dir (`tests/setup.ts`).
 - Logging: `src/log.ts` `createLogger`, leveled by `LATCH_LOG_LEVEL`, stderr only.
 - CLI: `src/cli.ts` wires `src/commands/*`. `latch setup` (`commands/setup.ts`) is
   `latch init` for one client (or `--all`) with no questions, plus `--remove` to unwrap; installers
-  run `setup --all` and `setup --remove --all`.
+  run plain `setup` (it lists clients and links nothing without a terminal) and `setup --remove --all`.
+  The Windows installer's `linkclients` task (unticked, and never during an update) runs `setup --all`.
 - Client configs: `src/config/clients.ts`. `clientLocations(client)` lists each client's files with
   the key path to its server map, each with the doc or source it was checked against (add a client
   only after checking its docs, with a fixture in `tests/fixtures/clients/<client>/<file>`; a test
@@ -114,7 +115,7 @@ that blocks on every reword gets disabled by its users.
   it makes no copy. `findOldBackups` lists `.bak` copies earlier versions left, for the user to
   delete. Ids and names: `config/client-ids.ts`, `config/client-names.ts` (light, for startup).
 - Linking: `linkServer` records a server with `program`, `launch` (`launchHash`) and
-  `trustOnFirstUse`; the proxy's `pinFirstRun` pins its first complete tool list (trusted
+  `trustOnFirstUse`; the proxy's `pinFirstRun` pins its first complete tool list, holding back every tier-3 tool (trusted
   `latch.lock` only). `mergeServers` + `withStateLock` keep concurrent pins and approvals.
 - Background: `src/daemon/` (`sync.ts` syncClients, `watch.ts` startWatcher behind `latch watch`,
   `notify.ts` desktop notifications via notify-send or a PowerShell toast). Settings:
