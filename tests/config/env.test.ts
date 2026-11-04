@@ -226,4 +226,44 @@ describe("loadDotEnv", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  describe("a project's .env cannot weaken LatchVerify", () => {
+    const load = async (text: string) => {
+      const dir = await mkdtemp(join(tmpdir(), "latch-env-"));
+      try {
+        const path = join(dir, ".env");
+        await writeFile(path, text);
+        loadDotEnv(path);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    };
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("ignores the integrity directory and the update URL", async () => {
+      vi.stubEnv("LATCH_INTEGRITY_DIR", undefined);
+      vi.stubEnv("LATCH_UPDATE_URL", undefined);
+      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      await load("LATCH_INTEGRITY_DIR=/tmp/empty\nLATCH_UPDATE_URL=https://attacker.example/latest.json\n");
+      expect(process.env.LATCH_INTEGRITY_DIR).toBeUndefined();
+      expect(process.env.LATCH_UPDATE_URL).toBeUndefined();
+      vi.restoreAllMocks();
+    });
+
+    it("does not send the shell's LLM key to a base URL the .env names", async () => {
+      vi.stubEnv("LATCH_LLM_API_KEY", "sk-real");
+      vi.stubEnv("LATCH_LLM_BASE_URL", undefined);
+      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      await load("LATCH_LLM_BASE_URL=https://attacker.example/v1\n");
+      expect(process.env.LATCH_LLM_BASE_URL).toBeUndefined();
+      vi.restoreAllMocks();
+    });
+
+    it("takes a base URL from .env when the key comes from it too", async () => {
+      vi.stubEnv("LATCH_LLM_API_KEY", undefined);
+      vi.stubEnv("LATCH_LLM_BASE_URL", undefined);
+      await load("LATCH_LLM_API_KEY=sk-own\nLATCH_LLM_BASE_URL=https://openrouter.ai/api/v1\n");
+      expect(process.env.LATCH_LLM_BASE_URL).toBe("https://openrouter.ai/api/v1");
+    });
+  });
 });

@@ -106,14 +106,30 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): LatchEnv {
 }
 
 /**
+ * Variables a .env file may not set. Each one decides what LatchVerify trusts: the integrity
+ * records and where updates come from. They are set by the environment or not at all.
+ */
+const NOT_FROM_DOTENV: ReadonlySet<string> = new Set(["LATCH_INTEGRITY_DIR", "LATCH_UPDATE_URL"]);
+
+/**
  * Load the LATCH_* variables of `path` (./.env) into process.env when it exists. Variables already
  * set win over the file. Every other line is ignored: the proxy starts in whatever directory the
  * client chose, and a project's own secrets in its .env are none of LatchVerify's business.
+ *
+ * That directory may be a repository nobody has reviewed, so its .env is not trusted to weaken
+ * LatchVerify: NOT_FROM_DOTENV is ignored, and so is LATCH_LLM_BASE_URL when the LLM key comes
+ * from the environment, since the key would go to whatever server the file names.
  */
 export function loadDotEnv(path = ".env"): void {
   if (!existsSync(path)) return;
+  const keyFromEnvironment = (process.env.LATCH_LLM_API_KEY?.trim() ?? "") !== "";
   for (const [name, value] of Object.entries(parseEnv(readFileSync(path, "utf8")))) {
-    if (name.startsWith("LATCH_") && value !== undefined && process.env[name] === undefined) process.env[name] = value;
+    if (!name.startsWith("LATCH_") || value === undefined || process.env[name] !== undefined) continue;
+    if (NOT_FROM_DOTENV.has(name) || (name === "LATCH_LLM_BASE_URL" && keyFromEnvironment)) {
+      process.stderr.write(`[latch] warning: ignored ${name} from ${path}; set it in the environment if you mean it\n`);
+      continue;
+    }
+    process.env[name] = value;
   }
 }
 

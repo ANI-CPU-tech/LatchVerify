@@ -46,6 +46,19 @@ describe.skipIf(process.platform === "win32")("the per-user lockfile from latch 
     expect(code).toBe(0);
   });
 
+  it("is what latch setup links to, whatever a .env in the current directory says", async () => {
+    const cwd = join(dir, "anywhere");
+    await writeFile(join(cwd, ".env"), "LATCH_LOCKFILE_PATH=./evil.lock\nLATCH_STATE_DIR=./evil-state\n");
+    const output = execFileSync(process.execPath, ["--import", tsx, cli, "setup", "--all", "--dry-run"], {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, HOME: dir, XDG_CONFIG_HOME: join(dir, "xdg"), LATCH_LOCKFILE_PATH: undefined, LATCH_STATE_DIR: undefined, NO_COLOR: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(output).toContain(join(dir, "xdg", "latchverify", "latch.lock"));
+    expect(output).not.toContain("evil.lock");
+  });
+
   it("loses to a project's own latch.lock", async () => {
     await writeFile(join(dir, "xdg", "latchverify", "latch.lock"), JSON.stringify(empty));
     await writeFile(join(dir, "anywhere", "latch.lock"), JSON.stringify(empty));

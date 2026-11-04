@@ -27,6 +27,9 @@ async function run(command: (env: LatchEnv) => Promise<number>, failureCode = 1)
 }
 
 
+/** The environment before any ./.env is loaded (run() does that), for what a project must not decide. */
+const shellEnv: NodeJS.ProcessEnv = { ...process.env };
+
 const program = new Command()
   .name("latch")
   .description("Pin MCP tool capabilities in latch.lock and block unreviewed drift.")
@@ -52,13 +55,15 @@ program
   );
 
 /**
- * For latch setup: the per-user lockfile unless --lockfile or LATCH_LOCKFILE_PATH names another.
- * Never ./latch.lock, so where an installer happens to run it does not matter.
+ * For latch setup and watch: the per-user lockfile unless --lockfile or LATCH_LOCKFILE_PATH names
+ * another. Never ./latch.lock, so where an installer happens to run it does not matter. Only the
+ * real environment counts, not ./.env: these write the lockfile's path into the user's client
+ * configs, and a .env in a cloned repository must not link them to that repository's own pins.
  */
 const setupGlobals = () => {
   const flags = program.opts<{ lockfile?: string; stateDir?: string }>();
-  const fromEnv = process.env.LATCH_LOCKFILE_PATH?.trim();
-  return statePaths({ ...flags, lockfile: flags.lockfile ?? (fromEnv ? undefined : userLockfilePath()) });
+  const fromEnv = shellEnv.LATCH_LOCKFILE_PATH?.trim();
+  return statePaths({ ...flags, lockfile: flags.lockfile ?? (fromEnv ? undefined : userLockfilePath()) }, shellEnv);
 };
 
 program
