@@ -49,7 +49,8 @@ export function startAppIfStopped({ app = installedApp(), pidPath = appPidPath()
   try {
     if (app === undefined || appRunning(pidPath)) return false;
     // Several proxies may start at once; the app's single-instance lock keeps one copy.
-    run(app, ["--hidden"], { detached: true, stdio: "ignore", env: appEnvironment(process.env) }).unref();
+    // In the app's own folder: the client's working directory may be any project.
+    run(app, ["--hidden"], { detached: true, stdio: "ignore", env: appEnvironment(process.env), cwd: dirname(app) }).unref();
     return true;
   } catch {
     return false;

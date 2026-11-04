@@ -51,6 +51,16 @@ describe("starting the app from a proxy", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("starts it in a folder of its own, so a project's .env in the client's folder is not read", () => {
+    const seen: Array<{ cwd?: string }> = [];
+    const run = ((_command: string, _args: readonly string[], options: { cwd?: string }) => {
+      seen.push(options);
+      return { unref() {}, on() {} };
+    }) as never;
+    startAppIfStopped({ app: "/opt/latchverify/desktop/latchverify-desktop", pidPath: join(dir, "none"), run });
+    expect(seen[0]!.cwd).toBe("/opt/latchverify/desktop");
+  });
+
   it("passes the desktop session's variables on and drops everything else", () => {
     const env = appEnvironment({ PATH: "/bin", APPDATA: "C:\\a", DISPLAY: ":0", XDG_RUNTIME_DIR: "/run/user/1", GITHUB_TOKEN: "sk-CANARY", OPENAI_API_KEY: "sk-CANARY", LATCH_STATE_DIR: "/x" });
     expect(env).toEqual({ PATH: "/bin", APPDATA: "C:\\a", DISPLAY: ":0", XDG_RUNTIME_DIR: "/run/user/1" });

@@ -42,7 +42,8 @@ if (!app.requestSingleInstanceLock()) {
 async function main(): Promise<void> {
   // Windows ties notifications, the taskbar and the login start to the Start menu shortcut's id.
   if (process.platform === "win32") app.setAppUserModelId(APP_ID);
-  loadDotEnv();
+  // .env is for development: an installed app may start in any folder, and that folder's file is not its settings.
+  if (!app.isPackaged) loadDotEnv();
   const env = loadEnv();
   const lockfilePath = userLockfilePath();
   const stateDir = join(dirname(lockfilePath), ".latch");
