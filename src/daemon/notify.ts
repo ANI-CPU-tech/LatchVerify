@@ -134,7 +134,7 @@ function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
   return undefined;
 }
 
-/** The notify-send arguments for `notification`: app name, icon, desktop entry and urgency. */
+/** The notify-send arguments for `notification`: app name, icon, desktop entry and urgency. Notification daemons read the body as markup, so it is escaped. */
 export function notifySendArgs(notification: DesktopNotification, icon: string): string[] {
   return [
     "--app-name=LatchVerify",
@@ -143,7 +143,7 @@ export function notifySendArgs(notification: DesktopNotification, icon: string):
     `--urgency=${notification.urgency}`,
     "--",
     notification.title,
-    notification.body,
+    notification.body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"),
   ];
 }
 

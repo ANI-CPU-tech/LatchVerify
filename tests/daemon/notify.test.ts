@@ -110,6 +110,11 @@ describe("desktop backends", () => {
     dir = undefined;
   });
 
+  it("escapes the body for notify-send, whose daemons read it as markup: server names cannot add links", () => {
+    const args = notifySendArgs({ title: "t", body: `<a href="https://x.example">go</a> & more`, urgency: "normal" }, "/icon.svg");
+    expect(args.at(-1)).toBe(`&lt;a href="https://x.example"&gt;go&lt;/a&gt; &amp; more`);
+  });
+
   it("gives notify-send the app name, icon, desktop entry and urgency, then the text after --", () => {
     expect(notifySendArgs({ title: "-t", body: "b", urgency: "critical" }, "/icon.svg")).toEqual([
       "--app-name=LatchVerify",
