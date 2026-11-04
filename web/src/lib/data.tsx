@@ -13,6 +13,7 @@ import {
   type LockfileGitStatus,
   type ReviewItem,
 } from "./api";
+import { clientsPollKey } from "./format";
 
 /**
  * One API resource. While a reload runs, the last data (or error) stays on screen and
@@ -87,7 +88,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const lockfile = useResource(fetchLockfile, reloadKey, pollKey);
   const events = useResource((signal) => fetchEvents(undefined, signal), reloadKey, pollKey);
   const git = useResource(fetchLockfileGit, reloadKey, pollKey);
-  const clients = useResource(fetchClients, reloadKey, pollKey);
+  const clients = useResource(fetchClients, reloadKey, clientsPollKey(pollKey));
   const settings = useResource(fetchSettings, reloadKey, pollKey);
   const info = useResource(fetchInfo, reloadKey, 0);
   const reload = useCallback(() => setReloadKey((n) => n + 1), []);
@@ -102,7 +103,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // Poll so a change the proxy queues shows up without a manual Refresh.
   useEffect(() => {
     if (api !== "connected") return;
-    const timer = setInterval(() => setPollKey((n) => n + 1), POLL_MS);
+    // Not while hidden: the app keeps its window alive in the tray, where nobody reads it.
+    const timer = setInterval(() => {
+      if (!document.hidden) setPollKey((n) => n + 1);
+    }, POLL_MS);
     return () => clearInterval(timer);
   }, [api]);
 

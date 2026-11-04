@@ -58,6 +58,12 @@ export function visibleText(text: string): string {
   });
 }
 
+/**
+ * The poll key for GET /api/clients, which changes on every tenth poll: that call re-reads and
+ * parses every client's config, ~/.claude.json included, which can be large.
+ */
+export const clientsPollKey = (pollKey: number): number => Math.floor(pollKey / 10);
+
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**

@@ -5,6 +5,7 @@ import { VERIFY_EXIT } from "../../src/commands/verify.js";
 import { VERIFY_EXIT_CODES } from "../../web/src/lib/ci.js";
 import {
   EVENT_KINDS,
+  clientsPollKey,
   visibleText,
   approvedToolCount,
   capabilityChips,
@@ -289,5 +290,12 @@ describe("visibleText", () => {
 
   it("keeps line breaks, tabs and ordinary Unicode as they are", () => {
     expect(visibleText("line one\nline two\ttabbed Wetter für München")).toBe("line one\nline two\ttabbed Wetter für München");
+  });
+});
+
+describe("clientsPollKey", () => {
+  it("refreshes the client list every tenth poll: it re-reads every client's config", () => {
+    expect([0, 1, 9].map(clientsPollKey)).toEqual([0, 0, 0]);
+    expect([10, 19, 20].map(clientsPollKey)).toEqual([1, 1, 2]);
   });
 });
