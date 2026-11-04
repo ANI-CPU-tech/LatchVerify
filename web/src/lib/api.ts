@@ -1,5 +1,10 @@
 import { z } from "zod";
 import {
+  ClientsReportSchema,
+  SettingsSchema,
+  type ClientsReport,
+  type Settings,
+  type SettingsPatch,
   LatchEventSchema,
   LockFileSchema,
   PendingChangeSchema,
@@ -19,9 +24,9 @@ export interface DiffPart {
 }
 
 /**
- * What the review screen renders. The review API returns PendingChange records, which store
- * hashes rather than description text, so the description fields are null for live data and
- * only filled in for the bundled sample data.
+ * What the review screen renders. latch.lock stores hashes rather than description text, so a
+ * live change has only the description the server serves now (`change.description`): no
+ * previous text and no diff. The bundled sample data fills in all three.
  */
 export interface ReviewItem {
   change: PendingChange;
@@ -69,6 +74,8 @@ const LockfileGitStatusSchema = z.discriminatedUnion("available", [
   }),
 ]);
 
+const ApiInfoSchema = z.object({ version: z.string(), dev: z.boolean() });
+
 const isJson = (response: Response): boolean => (response.headers.get("content-type") ?? "").includes("application/json");
 
 const isAbort = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
@@ -108,9 +115,9 @@ async function call(path: string, init: RequestInit = {}): Promise<Response> {
   return response;
 }
 
-/** A live pending change as the review screen renders it. Description text is not available. */
+/** A live pending change as the review screen renders it: the served description, if recorded. */
 export function toReviewItem(change: PendingChange): ReviewItem {
-  return { change, descriptionBefore: null, descriptionAfter: null, descriptionDiff: null };
+  return { change, descriptionBefore: null, descriptionAfter: change.description ?? null, descriptionDiff: null };
 }
 
 /**
@@ -142,6 +149,69 @@ export const MAX_EVENTS = 1_000;
 /** The newest `limit` events from .latch/events.jsonl, oldest first. */
 export async function fetchEvents(limit: number = MAX_EVENTS, signal?: AbortSignal): Promise<LatchEvent[]> {
   return getJson(`/api/events?limit=${limit}`, EventLogSchema, "event log", signal);
+}
+
+/** What GET /api/info reports: the LatchVerify version, and whether development mode is on. */
+export type ApiInfo = z.infer<typeof ApiInfoSchema>;
+
+/** The serving LatchVerify's version and mode (LATCH_DEV). */
+export async function fetchInfo(signal?: AbortSignal): Promise<ApiInfo> {
+  return getJson("/api/info", ApiInfoSchema, "info", signal);
+}
+
+/** The MCP clients on this machine, per client (GET /api/clients). Names and states only. */
+export async function fetchClients(signal?: AbortSignal): Promise<ClientsReport> {
+  return getJson("/api/clients", ClientsReportSchema, "client list", signal);
+}
+
+/**
+ * Connects a client (the user's yes: its servers are linked now and pinned on their first run) or
+ * disconnects it (their original commands come back). Resolves with the new client list.
+ */
+export async function setClientConnected(id: string, connected: boolean): Promise<ClientsReport> {
+  return getJson(`/api/clients/${encodeURIComponent(id)}/${connected ? "connect" : "disconnect"}`, ClientsReportSchema, "client list", undefined, {
+    method: "POST",
+    headers: { [CLIENT_HEADER]: CLIENT_NAME },
+  });
+}
+
+/** The user's settings (GET /api/settings). */
+export async function fetchSettings(signal?: AbortSignal): Promise<Settings> {
+  return getJson("/api/settings", SettingsSchema, "settings", signal);
+}
+
+/** Changes some settings (PUT /api/settings) and resolves with all of them as saved. */
+export async function saveSettings(patch: SettingsPatch): Promise<Settings> {
+  return getJson("/api/settings", SettingsSchema, "settings", undefined, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", [CLIENT_HEADER]: CLIENT_NAME },
+    body: JSON.stringify(patch),
+  });
+}
+
+const PresetsSchema = z.object({
+  available: z.boolean(),
+  presets: z.array(
+    z.object({ id: z.string(), name: z.string(), description: z.string(), clients: z.array(z.string()), inLockfile: z.boolean() }),
+  ),
+});
+/** The demo presets of the Dev Tools page (development mode only; src/dev/presets.ts). */
+export type Presets = z.infer<typeof PresetsSchema>;
+
+/** The demo presets and where each is installed (GET /api/dev/presets). */
+export async function fetchPresets(signal?: AbortSignal): Promise<Presets> {
+  return getJson("/api/dev/presets", PresetsSchema, "preset list", signal);
+}
+
+/** Adds a demo preset to `client` (latch add), or removes it from that client. Resolves the API's message. */
+export async function changePreset(id: string, client: string, action: "add" | "remove"): Promise<string> {
+  const response = await call(`/api/dev/presets/${encodeURIComponent(id)}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", [CLIENT_HEADER]: CLIENT_NAME },
+    body: JSON.stringify({ client }),
+  });
+  const body = (await response.json()) as { output?: unknown; clients?: unknown };
+  return typeof body.output === "string" ? body.output : `removed from ${Array.isArray(body.clients) && body.clients.length > 0 ? body.clients.join(", ") : "no client"}`;
 }
 
 /** The approved state in latch.lock. */

@@ -1,14 +1,11 @@
 {
-  "version": "1",
+  "version": "2",
   "generatedAt": "2026-10-20T14:02:11.000Z",
   "servers": {
     "weather": {
       "transport": "stdio",
-      "command": "npx",
-      "args": [
-        "tsx",
-        "demo/weather-server.ts"
-      ],
+      "program": "npx",
+      "launch": "509bd5c594e24f0ed41a10e9d198c5fd7c9104eb0b6547a6c1aec3c89267a0b1",
       "tools": [
         {
           "name": "get_alerts",

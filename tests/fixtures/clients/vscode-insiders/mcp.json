@@ -1,0 +1,18 @@
+{
+  // Inputs are prompted for on first start and stored securely by VS Code.
+  "inputs": [
+    { "type": "promptString", "id": "perplexity-key", "description": "Perplexity API Key", "password": true },
+  ],
+  "servers": {
+    // A local server, started over stdio.
+    "Perplexity": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "server-perplexity-ask"],
+      "env": { "PERPLEXITY_API_KEY": "${input:perplexity-key}" },
+    },
+    "fetch": { "type": "stdio", "command": "uvx", "args": ["mcp-server-fetch"] },
+    /* A remote server: never wrapped. */
+    "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/" },
+  },
+}

@@ -36,6 +36,17 @@ describe("replaceFile", () => {
     expect(calls).toEqual(["a->b", "a->b", "a->b", "a->b"]);
   });
 
+  it("does not retry on Windows when the target is a directory, which never stops being busy", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "latch-replace-"));
+    try {
+      const { calls, renameFile } = flaky("EPERM", "EPERM");
+      await expect(replaceFile("a", dir, { platform: "win32", renameFile })).rejects.toThrow("EPERM");
+      expect(calls).toHaveLength(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not retry elsewhere, or for other errors", async () => {
     const posix = flaky("EPERM");
     await expect(replaceFile("a", "b", { platform: "linux", renameFile: posix.renameFile })).rejects.toMatchObject({ code: "EPERM" });

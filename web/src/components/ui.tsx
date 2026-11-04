@@ -278,3 +278,27 @@ export function Tabs({ tabs, label }: { tabs: TabSpec[]; label: string }) {
     </div>
   );
 }
+
+/**
+ * An on/off switch: a button with role "switch" and aria-checked, so screen readers announce it
+ * as one and Space or Enter toggles it. Colors come from the theme tokens only.
+ */
+export function Switch({ checked, onChange, disabled = false, label, id }: { checked: boolean; onChange: (next: boolean) => void; disabled?: boolean; label: string; id?: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      id={id}
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors duration-200 disabled:opacity-50 ${checked ? "border-primary bg-primary" : "border-border bg-muted"}`}
+    >
+      <span
+        aria-hidden="true"
+        className={`inline-block h-4 w-4 rounded-full bg-background shadow-card transition-transform duration-200 motion-reduce:transition-none ${checked ? "translate-x-6" : "translate-x-1"}`}
+      />
+    </button>
+  );
+}

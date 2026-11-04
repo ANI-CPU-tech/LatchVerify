@@ -2,14 +2,16 @@
 ;
 ;   ISCC /DAppVersion=1.2.3 /DFileVersion=1.2.3.0 /DStageDir=<stage> /DOutputDir=<out> packaging\windows\latchverify.iss
 ;
-; <stage> holds app\ (packaging/stage.ts) and node\ (fetch-node.ps1). Add /DSignTool=1 together with
+; <stage> holds app\ (packaging/stage.ts), node\ (fetch-node.ps1) and desktop\ (packaging/build-desktop.ts). Add /DSignTool=1 together with
 ; /Slatchsign=<command> to Authenticode-sign the installer and uninstaller.
 ;
-; Per-user install: no administrator rights, nothing written outside the user's profile. After
-; installing it links Claude Code (`latch setup`): Claude Code's MCP servers start behind the latch
-; proxy and their tools are pinned in %APPDATA%\LatchVerify\latch.lock, created on the spot. Before
-; uninstalling it unlinks (`latch setup --remove`); latch.lock is kept, so a reinstall keeps the
-; approvals.
+; Per-user install: no administrator rights, nothing written outside the user's profile. Installing
+; connects no MCP client unless the user ticks that task or passes /TASKS=linkclients, as on Linux; an
+; update the app runs (/RELAUNCH=1) never does, so a client the user disconnected stays disconnected.
+; A linked client's MCP servers start behind the latch proxy, with their tools pinned in
+; %APPDATA%\LatchVerify\latch.lock. Before uninstalling it unlinks them all (`latch setup --remove --all`);
+; latch.lock is kept, so a reinstall keeps the approvals. The LatchVerify app (desktop\) starts after
+; installing, sits in the tray and starts at login; uninstalling stops it and removes its login start.
 
 #ifndef AppVersion
   #error Pass /DAppVersion=x.y.z (package.json's version)
@@ -31,9 +33,9 @@ AppName=LatchVerify
 AppVersion={#AppVersion}
 AppVerName=LatchVerify {#AppVersion}
 AppPublisher=LatchVerify contributors
-AppPublisherURL=https://github.com/vinayakkam/LatchVerify
-AppSupportURL=https://github.com/vinayakkam/LatchVerify/issues
-AppUpdatesURL=https://github.com/vinayakkam/LatchVerify/releases
+AppPublisherURL=https://github.com/ANI-CPU-tech/LatchVerify
+AppSupportURL=https://github.com/ANI-CPU-tech/LatchVerify/issues
+AppUpdatesURL=https://github.com/ANI-CPU-tech/LatchVerify/releases
 VersionInfoVersion={#FileVersion}
 VersionInfoProductVersion={#FileVersion}
 VersionInfoDescription=LatchVerify installer
@@ -46,6 +48,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ChangesEnvironment=yes
 ; Claude Code keeps the bundled node.exe busy while its servers run; offer to close them on upgrade.
 CloseApplications=yes
+; A user's earlier tick must not link clients again on the next install.
+UsePreviousTasks=no
 LicenseFile={#RepoDir}\LICENSE
 SetupIconFile=latchverify.ico
 UninstallDisplayIcon={app}\latchverify.ico
@@ -64,25 +68,36 @@ SignedUninstaller=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: linkclaude; Description: "Link Claude Code now: its MCP servers start behind latch and their tools are pinned in your latch.lock (recommended)"
+Name: linkclients; Description: "Link every MCP client found now (Claude Code, Cursor, VS Code and others): their servers start behind latch and their tools are pinned in your latch.lock. You can also choose later with latch setup, or in the LatchVerify app."; Flags: unchecked
 Name: addtopath; Description: "Add latch to PATH for new terminals"
 
 [InstallDelete]
 ; Files from an older version that the new one no longer ships.
 Type: filesandordirs; Name: "{app}\app"
+Type: filesandordirs; Name: "{app}\desktop"
 
 [Files]
 Source: "{#StageDir}\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageDir}\node\*"; DestDir: "{app}\node"; Flags: ignoreversion recursesubdirs
+Source: "{#StageDir}\desktop\*"; DestDir: "{app}\desktop"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "latch.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "latchverify.ico"; DestDir: "{app}"; Flags: ignoreversion
+; How `latch update` and the app install updates (src/update): with this installer.
+Source: "install-kind"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\LatchVerify Review"; Filename: "{app}\latch.cmd"; Parameters: "review --ui"; WorkingDir: "{userdocs}"; IconFilename: "{app}\latchverify.ico"; Comment: "Review MCP tool changes that LatchVerify blocked"
+Name: "{group}\LatchVerify"; Filename: "{app}\desktop\latchverify-desktop.exe"; IconFilename: "{app}\latchverify.ico"; Comment: "Keep your MCP clients behind LatchVerify and review tool changes"; AppUserModelID: "io.github.vinayakkam.LatchVerify"
 Name: "{group}\Uninstall LatchVerify"; Filename: "{uninstallexe}"
 
 [Registry]
+; The app's login start (src/desktop/main.ts writes it under this name); removed with the app.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "io.github.vinayakkam.LatchVerify"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
+
+[Run]
+Filename: "{app}\desktop\latchverify-desktop.exe"; Description: "Start LatchVerify"; Flags: nowait postinstall skipifsilent
+; After a silent update the app installed (src/update passes /RELAUNCH=1), start it again in the tray.
+Filename: "{app}\desktop\latchverify-desktop.exe"; Parameters: "--hidden"; Flags: nowait; Check: RelaunchRequested
 
 [UninstallDelete]
 Type: files; Name: "{app}\setup.log"
@@ -123,6 +138,12 @@ begin
   RegWriteExpandStringValue(HKCU, EnvKey, 'Path', Paths);
 end;
 
+{ True when the app's updater ran this installer, which then starts the app again. }
+function RelaunchRequested: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;
+
 { Runs the installed latch.cmd with Args, its output in LogFile. True when it ran and exited 0. }
 function RunLatch(Args, LogFile: string): Boolean;
 var
@@ -138,23 +159,27 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   LogFile: string;
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('linkclaude') then
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('linkclients') and not RelaunchRequested then
   begin
-    WizardForm.StatusLabel.Caption := 'Linking Claude Code to LatchVerify...';
+    WizardForm.StatusLabel.Caption := 'Linking your MCP clients to LatchVerify...';
     LogFile := ExpandConstant('{app}\setup.log');
-    if not RunLatch('setup', LogFile) and not WizardSilent then
-      MsgBox('LatchVerify is installed, but linking Claude Code did not finish.' + #13#10#13#10 +
+    if not RunLatch('setup --all', LogFile) and not WizardSilent then
+      MsgBox('LatchVerify is installed, but linking your MCP clients did not finish.' + #13#10#13#10 +
         'Details are in ' + LogFile + '.' + #13#10 +
-        'Run "latch setup" in a new terminal to try again.', mbInformation, MB_OK);
+        'Run "latch setup --all" in a new terminal to try again.', mbInformation, MB_OK);
   end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
 begin
   if CurUninstallStep = usUninstall then
   begin
-    { Before the files go: give Claude Code its original server commands back. latch.lock stays. }
-    RunLatch('setup --remove', ExpandConstant('{%TEMP}\latchverify-unlink.log'));
+    { The app first, so it does not link the clients again while they are unlinked. }
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM latchverify-desktop.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    { Before the files go: give every MCP client its original server commands back. latch.lock stays. }
+    RunLatch('setup --remove --all', ExpandConstant('{%TEMP}\latchverify-unlink.log'));
     RemoveFromPath(ExpandConstant('{app}'));
   end;
 end;

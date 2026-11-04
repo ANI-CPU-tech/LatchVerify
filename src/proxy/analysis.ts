@@ -5,7 +5,15 @@ import { hashTool, sha256Hex } from "../analyze/hash.js";
 import { detectPatterns } from "../analyze/patterns.js";
 import { classifyTier } from "../analyze/tiers.js";
 import { detectUnicode } from "../analyze/unicode.js";
-import { McpToolSchema, type Finding, type LockFile, type McpTool, type PendingChange, type ToolRecord } from "../schema/index.js";
+import {
+  MAX_SERVED_DESCRIPTION,
+  McpToolSchema,
+  type Finding,
+  type LockFile,
+  type McpTool,
+  type PendingChange,
+  type ToolRecord,
+} from "../schema/index.js";
 import { findRecord } from "../store/lockfile.js";
 
 /** approvedBy on a pending change's `after` record. applyApproval replaces it with the reviewer. */
@@ -130,6 +138,7 @@ function analyzeTool(context: ToolContext, name: string, raw: unknown): Detected
         after,
         capabilityDelta,
         findings,
+        ...(tool.description === undefined ? {} : { description: servedDescription(tool.description) }),
       },
       reason: decision.reason,
       tool,
@@ -137,6 +146,14 @@ function analyzeTool(context: ToolContext, name: string, raw: unknown): Detected
   } catch (error) {
     return unanalyzable(context, name, error instanceof Error ? error.message : String(error));
   }
+}
+
+/** `text` cut to MAX_SERVED_DESCRIPTION, with a note saying how much was left out. */
+export function servedDescription(text: string): string {
+  if (text.length <= MAX_SERVED_DESCRIPTION) return text;
+  // Never split a surrogate pair.
+  const end = /[\uD800-\uDBFF]/.test(text[MAX_SERVED_DESCRIPTION - 1]!) ? MAX_SERVED_DESCRIPTION - 1 : MAX_SERVED_DESCRIPTION;
+  return `${text.slice(0, end)}… [truncated: ${text.length - end} more characters]`;
 }
 
 /**

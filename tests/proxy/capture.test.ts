@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CAPTURE_PROTOCOL_VERSION, CaptureError, MAX_CAPTURE_PAGES, captureTools } from "../../src/proxy/capture.js";
+import { VERSION } from "../../src/version.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -62,7 +63,7 @@ describe("captureTools", () => {
         name: "seen",
         inputSchema: { type: "object" },
         order: ["initialize", "notifications/initialized"],
-        init: { protocolVersion: CAPTURE_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "latchverify", version: "0.0.0" } },
+        init: { protocolVersion: CAPTURE_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "latchverify", version: VERSION } },
       },
     ]);
   });
@@ -106,8 +107,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
   });
 
   it("passes extra environment to the server", async () => {
-    const result = await capture(stub(`reply({ tools: [{ name: process.env.LATCH_CAPTURE_TEST, inputSchema: { type: "object" } }] })`), {
-      env: { LATCH_CAPTURE_TEST: "from-env" },
+    const result = await capture(stub(`reply({ tools: [{ name: process.env.MCP_CAPTURE_TEST, inputSchema: { type: "object" } }] })`), {
+      env: { MCP_CAPTURE_TEST: "from-env" },
     });
     expect(result.tools).toEqual([{ name: "from-env", inputSchema: { type: "object" } }]);
   });
@@ -147,9 +148,19 @@ describe("captureTools failures", () => {
     expect(await failure(["-e", "process.exit(3)"])).toBe(`${process.execPath} exited (code 3) before listing its tools`);
   });
 
-  it("reports a stdout line that is not JSON-RPC, safely quoted", async () => {
-    const message = await failure(["-e", 'process.stdout.write("Server starting\\u001b[31m on stdio\\n"); setInterval(() => {}, 1000)']);
-    expect(message).toBe(`${process.execPath} wrote a line that is not JSON-RPC: "Server starting\\u001b[31m on stdio"`);
+  it("skips stdout lines that are not JSON-RPC and reports the first one on stderr, safely quoted", async () => {
+    const result = await capture(
+      stub(
+        `console.log("still here"); if (m.method === "tools/list") reply({ tools: [${JSON.stringify(tool("after_banner"))}] });`,
+        undefined,
+        'process.stdout.write("Server starting\\u001b[31m on stdio\\n");',
+      ),
+    );
+    expect(result.tools).toEqual([tool("after_banner")]);
+    const notes = stderr.join("").split("\n").filter((line) => line.startsWith("[latch]"));
+    expect(notes).toEqual([
+      `[latch] ${process.execPath} wrote a line that is not JSON-RPC to stdout; skipping it and any more: "Server starting\\u001b[31m on stdio"`,
+    ]);
   });
 
   it("reports an error answer to initialize or tools/list", async () => {

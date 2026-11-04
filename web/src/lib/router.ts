@@ -1,5 +1,5 @@
 /**
- * Hash routes: #/, #/servers, #/review/<change id>, #/tools/<server id>, #/simulation, ... Hash routing works
+ * Hash routes: #/, #/servers, #/review/<change id>, #/tools/<server id>, #/simulation, #/dev-tools, ... Hash routing works
  * the same under the Vite dev server and the built UI that `latch review --ui` serves.
  */
 export type Route =
@@ -10,6 +10,7 @@ export type Route =
   | { page: "audit" }
   | { page: "ci" }
   | { page: "simulation" }
+  | { page: "devtools" }
   | { page: "settings" }
   | { page: "not-found"; path: string };
 
@@ -23,6 +24,7 @@ const SEGMENTS: Record<string, Page> = {
   audit: "audit",
   "git-ci": "ci",
   simulation: "simulation",
+  "dev-tools": "devtools",
   settings: "settings",
 };
 

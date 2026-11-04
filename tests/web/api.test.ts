@@ -7,6 +7,7 @@ import { CLIENT_HEADER as SERVER_CLIENT_HEADER, MAX_EVENT_LIMIT, createRoutes } 
 import { appendEvent } from "../../src/store/events.js";
 import { writePending } from "../../src/store/pending.js";
 import { LockFileSchema, type PendingChange } from "../../src/schema/index.js";
+import { VERSION } from "../../src/version.js";
 
 // web/ resolves "@schema/*" through a Vite alias that this (node) test config does not define.
 vi.mock("@schema/index.js", () => import("../../src/schema/index.js"));
@@ -18,6 +19,7 @@ const {
   MAX_EVENTS,
   approveChange,
   fetchEvents,
+  fetchInfo,
   fetchLockfile,
   fetchLockfileGit,
   fetchPending,
@@ -158,7 +160,7 @@ describe("toReviewItem", () => {
   });
 });
 
-describe("fetchEvents, fetchLockfile, fetchLockfileGit", () => {
+describe("fetchEvents, fetchLockfile, fetchLockfileGit, fetchInfo", () => {
   it("ask for the most events the API allows by default", async () => {
     expect(MAX_EVENTS).toBe(MAX_EVENT_LIMIT);
     const fetchMock = stubFetch(async () => jsonResponse([]));
@@ -173,6 +175,8 @@ describe("fetchEvents, fetchLockfile, fetchLockfileGit", () => {
     expect(((await failure(fetchLockfile())) as Error).message).toContain("invalid lockfile");
     stubFetch(async () => jsonResponse({ available: true }));
     expect(((await failure(fetchLockfileGit())) as Error).message).toContain("invalid git status");
+    stubFetch(async () => jsonResponse({ version: VERSION, dev: "yes" }));
+    expect(((await failure(fetchInfo())) as Error).message).toContain("invalid info");
   });
 
   it("read what the real review API serves", async () => {
@@ -189,6 +193,7 @@ describe("fetchEvents, fetchLockfile, fetchLockfileGit", () => {
       expect(await fetchEvents()).toEqual([{ kind: "tools_listed", at: "2026-10-23T09:00:00.000Z", serverId: "weather", toolCount: 2 }]);
       expect((await fetchPending()).map((item) => item.change)).toEqual([change]);
       expect(await fetchLockfileGit()).toMatchObject({ available: expect.any(Boolean) });
+      expect(await fetchInfo()).toEqual({ version: VERSION, dev: false });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -202,7 +207,7 @@ describe("simulateRugPull", () => {
   it("posts with the client header and returns the validated result from the real API", async () => {
     const dir = await mkdtemp(join(tmpdir(), "latch-api-sim-"));
     try {
-      const app = createRoutes({ lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), reviewer: "alice@example.com" });
+      const app = createRoutes({ lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), reviewer: "alice@example.com", dev: true });
       const mock = stubFetch(async (input, init) => app.request(`http://127.0.0.1${String(input)}`, init));
       const result = await simulateRugPull(request);
       expect(mock.mock.calls[0]![1]).toMatchObject({ method: "POST", headers: { [CLIENT_HEADER]: "review-ui" } });

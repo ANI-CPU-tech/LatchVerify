@@ -2,3 +2,4 @@
 # LatchVerify is a single package, not a workspace/monorepo.
 allowBuilds:
   esbuild: true
+  electron: true

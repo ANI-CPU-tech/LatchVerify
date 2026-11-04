@@ -1,3 +1,4 @@
+import { launchHash } from "../analyze/hash.js";
 import { analyzeToolList } from "../proxy/analysis.js";
 import { buildBlockError, shouldBlock } from "../proxy/blocker.js";
 import type { LockFile, PendingChange, SimulatedCall, SimulationRequest, SimulationResult } from "../schema/index.js";
@@ -26,7 +27,7 @@ export class SimulationInputError extends Error {}
 export function simulateRugPull(request: SimulationRequest, now: Date): SimulationResult {
   const { serverId } = request;
   let lock: LockFile = emptyLockfile();
-  lock.servers[serverId] = { transport: "stdio", command: SIMULATION_REVIEWER, args: [], tools: [] };
+  lock.servers[serverId] = { transport: "stdio", program: SIMULATION_REVIEWER, launch: launchHash(SIMULATION_REVIEWER, []), tools: [] };
 
   const first = analyzeToolList(serverId, request.pinned, lock, SIMULATED_SPEC_VERSION, now);
   if (first === null) throw new SimulationInputError("pinned must be a tools/list result with a tools array");

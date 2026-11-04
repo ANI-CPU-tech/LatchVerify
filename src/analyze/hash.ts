@@ -124,3 +124,18 @@ export function hashTool(tool: McpTool): ToolHashes {
   const metadata = sha256Hex(canonicalJson({ title: tool.title, annotations: tool.annotations }));
   return { name, description, inputSchema, metadata, composite: sha256Hex(`${name}:${description}:${inputSchema}:${metadata}`) };
 }
+
+/**
+ * The hash latch.lock keeps of how a server is started: sha256 of the canonical JSON of
+ * [command, ...args]. latch.lock goes to git, and a server's arguments may hold a key
+ * (`--token ...`), so the launch line itself is never stored; this hash still ties the pins to
+ * exactly one launch.
+ */
+export function launchHash(command: string, args: readonly string[]): Sha256Hex {
+  return sha256Hex(canonicalJson([command, ...args]));
+}
+
+/** The program a launch runs, for people: the command's file name ("npx", "node.exe"), never its directory or arguments. */
+export function programName(command: string): string {
+  return command.split(/[\\/]/).pop() || command;
+}

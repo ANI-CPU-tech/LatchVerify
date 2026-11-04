@@ -2,7 +2,8 @@
  * Stage the app every LatchVerify package ships, after `pnpm build`:
  *
  *   <out>/app/package.json, LICENSE, README.md
- *   <out>/app/dist/              the CLI (dist/cli.js) and the review UI (dist/web)
+ *   <out>/app/dist/              the CLI (dist/cli.js), the desktop app's code (dist/desktop) and
+ *                                the review UI (dist/web)
  *   <out>/app/node_modules/      production dependencies, from pnpm-lock.yaml, flat
  *
  * Dependencies are installed by pnpm from the committed lockfile (frozen, scripts off) with the
@@ -21,7 +22,7 @@ import { parseVersion } from "./version.js";
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 /** Files the build must have produced; staging stops when one is missing. */
-export const REQUIRED_BUILD_OUTPUT = ["dist/cli.js", "dist/web/index.html"] as const;
+export const REQUIRED_BUILD_OUTPUT = ["dist/cli.js", "dist/desktop/main.js", "dist/web/index.html"] as const;
 
 export function stage(out: string): { app: string; version: string } {
   for (const file of REQUIRED_BUILD_OUTPUT) {
