@@ -185,6 +185,7 @@ export async function writeLockfile(path: string, lock: LockFile, { overwriteUnt
         await rm(temp, { force: true });
         throw new LockfileError(path, `cannot write lockfile (${error instanceof Error ? error.message : String(error)})`, { cause: error });
       }
+      await integrity.settle(text);
     });
   } catch (error) {
     if (error instanceof LockfileError) throw error;

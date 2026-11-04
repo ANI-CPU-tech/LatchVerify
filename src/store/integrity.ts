@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, open, readFile } from "node:fs/promises";
+import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { appDataDir, platformPath } from "../config/paths.js";
@@ -83,6 +83,18 @@ export class LockIntegrity {
     await writeFileAtomic(this.file("json"), `${JSON.stringify(record, null, 2)}\n`);
   }
 
+  /**
+   * Call once `text` is in place: the record stops vouching for the content it replaced, so an
+   * attacker cannot put the previous version back and have it pass.
+   */
+  async settle(text: string): Promise<void> {
+    const key = await this.key(false);
+    if (key === undefined) return;
+    const sha256 = [sha(text)];
+    const record: IntegrityRecord = { version: RECORD_VERSION, path: this.path, sha256, mac: mac(key, this.path, sha256) };
+    await writeFileAtomic(this.file("json"), `${JSON.stringify(record, null, 2)}\n`);
+  }
+
   /** What the records say about `text` as this lockfile's content. */
   async check(text: string): Promise<IntegrityStatus> {
     const key = await this.key(false);
@@ -133,28 +145,41 @@ export class LockIntegrity {
     return timingSafeEqual(expected, Buffer.from(parsed.data.mac, "hex")) ? parsed.data : null;
   }
 
-  /** The per-user key; created (readable by this user only) when `create` is set and it is missing. */
+  /**
+   * The per-user key; created (readable by this user only) when `create` is set and it is missing
+   * or damaged. A damaged key is never signed with: without `create` it reads as no key.
+   */
   private async key(create: boolean): Promise<Buffer | undefined> {
     const path = join(this.dir, KEY_FILE);
-    const existing = await readText(path);
-    if (existing !== undefined) return Buffer.from(existing.trim(), "hex");
+    const existing = await readKey(path);
+    if (existing !== undefined) return existing;
     if (!create) return undefined;
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
+    if ((await readText(path)) !== undefined) await rm(path, { force: true });
+    // Written in full under a private name, then linked into place: link fails when the name is
+    // taken, and another process never reads a half-written key.
     const key = randomBytes(32);
+    const temp = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
     try {
-      const handle = await open(path, "wx", 0o600);
-      try {
-        await handle.writeFile(`${key.toString("hex")}\n`, "utf8");
-      } finally {
-        await handle.close();
-      }
+      await writeFile(temp, `${key.toString("hex")}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      await link(temp, path);
       return key;
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       // Another process created it first: use theirs.
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") return Buffer.from((await readFile(path, "utf8")).trim(), "hex");
-      throw error;
+      const theirs = await readKey(path);
+      if (theirs === undefined) throw new Error(`${path} is not a valid integrity key`, { cause: error });
+      return theirs;
+    } finally {
+      await rm(temp, { force: true });
     }
   }
+}
+
+/** The key in `path`, undefined when the file is missing or does not hold one. */
+async function readKey(path: string): Promise<Buffer | undefined> {
+  const text = (await readText(path))?.trim();
+  return text !== undefined && /^[a-f0-9]{64}$/.test(text) ? Buffer.from(text, "hex") : undefined;
 }
 
 function sha(text: string): string {

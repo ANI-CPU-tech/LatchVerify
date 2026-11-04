@@ -114,9 +114,17 @@ export async function startProxy(options: ProxyOptions): Promise<number> {
    * per change on disk.
    */
   const loadLockfile = async (fallback: () => Promise<LockFile>): Promise<LockFile> => {
-    const text = await readLockfileText(options.lockfilePath);
+    let text = await readLockfileText(options.lockfilePath);
     if (text === undefined) return emptyLockfile();
-    const status = await integrity.check(text);
+    let status = await integrity.check(text);
+    if (status === "untrusted") {
+      // A write may have finished between reading the file and reading its record: look again.
+      const again = await readLockfileText(options.lockfilePath);
+      if (again !== undefined && again !== text) {
+        text = again;
+        status = await integrity.check(text);
+      }
+    }
     if (status === "trusted" || (status === "unrecorded" && !recorded)) {
       const lock = parseLockfile(options.lockfilePath, text);
       if (status === "trusted") recorded = true;

@@ -50,7 +50,10 @@ export async function runLockAccept(options: LockCommandOptions): Promise<number
     return 0;
   }
   await showDifference(integrity, text, options.lockfilePath, say);
-  await integrity.trustContent(text);
+  await integrity.exclusive(async () => {
+    await integrity.trustContent(text);
+    await integrity.settle(text);
+  });
   say(pc.green(`accepted ${printable(options.lockfilePath)}: proxies use it from their next tool call`));
   return 0;
 }

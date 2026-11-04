@@ -42,6 +42,34 @@ describe("LockIntegrity", () => {
     expect(await integrity.lastGood()).toBe("v3");
   });
 
+  it("stops trusting the replaced content once the write is done, so a version cannot be rolled back", async () => {
+    const integrity = new LockIntegrity(lockPath(), records);
+    await integrity.trustContent("v1");
+    await integrity.trustContent("v2");
+    await integrity.settle("v2");
+    expect(await integrity.check("v2")).toBe("trusted");
+    expect(await integrity.check("v1")).toBe("untrusted");
+    expect(await integrity.lastGood()).toBe("v2");
+  });
+
+  it("creates one key however many processes start at once, never a half-written one", async () => {
+    const paths = Array.from({ length: 16 }, (_, i) => join(dir, `lock-${i}`));
+    await Promise.all(paths.map((path) => new LockIntegrity(path, records).trustContent("same")));
+    for (const path of paths) expect(await new LockIntegrity(path, records).check("same")).toBe("trusted");
+    expect((await readFile(join(records, "integrity.key"), "utf8")).trim()).toMatch(/^[a-f0-9]{64}$/);
+    expect((await readdir(records)).filter((name) => name.includes(".tmp"))).toEqual([]);
+  });
+
+  it("never signs with a damaged key: it reads as untrusted, and the next write replaces the key", async () => {
+    const integrity = new LockIntegrity(lockPath(), records);
+    await integrity.trustContent("v1");
+    await writeFile(join(records, "integrity.key"), "");
+    expect(await integrity.check("v1")).toBe("untrusted");
+    await integrity.trustContent("v2");
+    expect((await readFile(join(records, "integrity.key"), "utf8")).trim()).toMatch(/^[a-f0-9]{64}$/);
+    expect(await integrity.check("v2")).toBe("trusted");
+  });
+
   it("rejects a record whose hashes were edited, since its MAC no longer matches", async () => {
     const integrity = new LockIntegrity(lockPath(), records);
     await integrity.trustContent("v1");

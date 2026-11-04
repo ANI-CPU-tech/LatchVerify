@@ -165,6 +165,15 @@ describe("writeLockfile", () => {
       expect(await new LockIntegrity(out).check(await readFile(out, "utf8"))).toBe("trusted");
     });
 
+    it("treats the version before the last write as an outside edit", async () => {
+      const out = join(dir, "rollback.lock");
+      await writeLockfile(out, emptyLockfile());
+      const first = await readFile(out, "utf8");
+      await writeLockfile(out, { ...emptyLockfile(), generatedAt: "2026-10-23T10:00:00.000Z" });
+      await writeFile(out, first);
+      expect(await new LockIntegrity(out).check(first)).toBe("untrusted");
+    });
+
     it("still writes a file that was never recorded", async () => {
       const out = join(dir, "unrecorded.lock");
       await writeFile(out, JSON.stringify(emptyLockfile()));
