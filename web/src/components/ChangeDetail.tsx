@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ReviewItem } from "../lib/api";
 import { describeError } from "../lib/data";
-import { dateTime, explainChange, relativeTime, type Tone } from "../lib/format";
+import { dateTime, explainChange, relativeTime, visibleText, type Tone } from "../lib/format";
 import { CapabilityDiff } from "./CapabilityDiff";
 import { FindingList } from "./FindingList";
 import { AlertIcon, CheckIcon } from "./icons";
@@ -57,7 +57,7 @@ function ServedDescription({ text }: { text: string }) {
   return (
     <div className="space-y-1">
       <h3 className="text-xs font-medium text-muted-foreground">Description the server now serves</h3>
-      <p className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">{text}</p>
+      <p className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">{visibleText(text)}</p>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { VERIFY_EXIT } from "../../src/commands/verify.js";
 import { VERIFY_EXIT_CODES } from "../../web/src/lib/ci.js";
 import {
   EVENT_KINDS,
+  visibleText,
   approvedToolCount,
   capabilityChips,
   capabilityLabel,
@@ -276,5 +277,17 @@ describe("clients on the dashboard", () => {
     expect(unclaimedServers(summaries, report)).toEqual([]);
     expect(unclaimedServers(summaries, { clients: [] }).map((s) => s.id)).toEqual(["weather"]);
     expect(unclaimedServers(summaries, null).map((s) => s.id)).toEqual(["weather"]);
+  });
+});
+
+describe("visibleText", () => {
+  it("shows the characters a poisoned description hides, so a reviewer reads what the model reads", () => {
+    expect(visibleText("safe\u200Btext")).toBe("safe[U+200B]text");
+    expect(visibleText("abc\u202Efed")).toBe("abc[U+202E]fed");
+    expect(visibleText("a\u001b[31mb")).toBe("a[U+001B][31mb");
+  });
+
+  it("keeps line breaks, tabs and ordinary Unicode as they are", () => {
+    expect(visibleText("line one\nline two\ttabbed Wetter für München")).toBe("line one\nline two\ttabbed Wetter für München");
   });
 });

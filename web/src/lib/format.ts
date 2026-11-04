@@ -47,6 +47,17 @@ const list = (items: string[]): string =>
 /** `text` ending in a full stop, so another sentence can follow it; ., ? and ! endings are kept. */
 export const sentence = (text: string): string => (/[.?!]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
 
+/**
+ * `text` with its invisible characters shown as [U+XXXX]: zero-width and bidi tricks in a tool's
+ * description would otherwise work on the reviewer too. Line breaks and tabs stay as they are.
+ */
+export function visibleText(text: string): string {
+  return text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (char) => {
+    if (char === "\n" || char === "\t") return char;
+    return `[U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}]`;
+  });
+}
+
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
