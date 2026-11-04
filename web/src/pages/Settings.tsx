@@ -146,7 +146,7 @@ function Background() {
   const rows: Array<{ key: "notifications" | "checkForUpdates" | "launchAtLogin"; label: string; detail: string }> = [
     { key: "notifications", label: "Desktop notifications", detail: "When a tool change waits for review, when a call is blocked, and when a new MCP client is found." },
     { key: "checkForUpdates", label: "Check for updates", detail: "Once a day. Nothing is downloaded or installed without your click." },
-    { key: "launchAtLogin", label: "Start at login", detail: "Keep LatchVerify watching your MCP clients in the background." },
+    { key: "launchAtLogin", label: "Start in the background", detail: "At login, and when an MCP client starts a server, so LatchVerify keeps watching your MCP clients." },
   ];
   return (
     <Panel title="Background">

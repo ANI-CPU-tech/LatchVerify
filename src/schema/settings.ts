@@ -26,7 +26,7 @@ export const SettingsSchema = z.object({
   notifications: SETTING_FIELDS.notifications.default(true),
   /** Check for a new LatchVerify release once a day. */
   checkForUpdates: SETTING_FIELDS.checkForUpdates.default(true),
-  /** Start LatchVerify when the user logs in. */
+  /** Start LatchVerify in the background: when the user logs in, and when an MCP client starts a server. */
   launchAtLogin: SETTING_FIELDS.launchAtLogin.default(true),
   /** When updates were last checked for. */
   lastUpdateCheck: SETTING_FIELDS.lastUpdateCheck.optional(),
