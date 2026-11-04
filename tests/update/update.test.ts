@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import pc from "picocolors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installersByKind, makeManifest } from "../../packaging/make-latest-json.js";
 import { offerLines } from "../../src/commands/update.js";
@@ -160,8 +161,8 @@ describe("downloading and installing", () => {
 
   it("prints a release's text safely: no terminal escapes from the manifest", () => {
     const lines = offerLines({ ...offer(sha), notes: "Line one\n\u001b[2Jwiped\n", url: "https://example.com/a\u001b]0;x" }, "0.1.0");
-    expect(lines.join("\n")).not.toContain("\u001b");
-    expect(lines.join("\n")).toContain("Line one");
+    // Exact lines, not "no ESC anywhere": picocolors bolds the header when CI is set, and that escape is ours.
+    expect(lines).toEqual([pc.bold("LatchVerify 9.9.9 is available (you have 0.1.0)"), "Line one", "[U+001B][2Jwiped"]);
   });
 
   it("installs each kind its own way", () => {
