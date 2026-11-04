@@ -8,8 +8,9 @@ Download the file for your system from the [latest release](https://github.com/A
 ## What installing does
 
 LatchVerify **connects an MCP client only when you say so**: the Windows installer's
-**Link your MCP clients now** checkbox, or `latch setup` afterwards, which lists the clients it
-found and asks which to connect. Nothing asks where a `latch.lock` is.
+**Link every MCP client found** checkbox (off by default), the LatchVerify app's MCP Servers page, or
+`latch setup`, which lists the clients it found and asks which to connect. Updates never connect
+anything. Nothing asks where a `latch.lock` is.
 
 1. Every stdio MCP server of a connected client is put behind the latch proxy. Only each entry's
    `command` and `args` change, in place: its `env`, where API keys live, comments and everything
@@ -71,14 +72,15 @@ Upgrading from an earlier version? It kept copies of your client configs as
 2. Double-click it. It installs for your user only and does not need administrator rights.
 3. Windows may show **"Windows protected your PC"** (SmartScreen) while the installer is
    unsigned. Click **More info → Run anyway**. (Maintainers: see `docs/CODE_SIGNING.md` to sign releases.)
-4. Leave **Link your MCP clients now** checked, and finish. Then restart your MCP clients.
+4. Tick **Link every MCP client found** if you want that now, and finish. Otherwise choose clients
+   later on the app's MCP Servers page, or with `latch setup`. Restart any client you connect.
 
 The installer also adds `latch` to your PATH for new terminals (an option you can untick), and a
-Start menu entry, **LatchVerify Review**. If linking does not finish, the installer tells you,
-and the details are in `%LOCALAPPDATA%\Programs\LatchVerify\setup.log`.
+Start menu entry, **LatchVerify**. If linking does not finish, the installer tells you, and the
+details are in `%LOCALAPPDATA%\Programs\LatchVerify\setup.log`.
 
 Silent install, for scripts: `latchverify-<version>-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES`.
-Add `/TASKS="addtopath"` to install without linking your MCP clients.
+This links nothing; add `/TASKS="linkclients,addtopath"` to link every MCP client found.
 
 Uninstall from **Settings → Apps → Installed apps → LatchVerify**. Uninstalling gives every MCP
 client its original server commands back and removes `latch` from your PATH.

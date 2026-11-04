@@ -13,7 +13,9 @@ desktop/       the LatchVerify app (Electron, from build-desktop.ts): latchverif
 install-kind   inno, deb, pacman or tarball: how the app and `latch update` install updates
 ```
 
-Installing runs `latch setup --all`, and uninstalling runs `latch setup --remove --all` (see
+Installing runs `latch setup`, which only lists the clients and how to connect them (the Windows
+installer links every client found only when its unticked task is chosen), and uninstalling runs
+`latch setup --remove --all` (see
 `src/commands/setup.ts`). Because latch runs from the bundled node, the client entries
 it writes point at the install directory's `node` and `app/dist/cli.js` by absolute path. They
 keep working whatever is on PATH.
@@ -29,7 +31,7 @@ keep working whatever is on PATH.
 | `release-notes.ts` | The GitHub release body: the version's `CHANGELOG.md` section plus a downloads table. |
 | `linux/fetch-node.sh`, `windows/fetch-node.ps1` | Download a verified Node.js 22 into `<stage>/node`. `NODE_VERSION=v22.x.y` pins a release. |
 | `linux/build-deb.sh` | The `.deb`: `/usr/lib/latchverify`, `/usr/bin` links, desktop entry and icon. Uses `debian/control.in`, `postinst` and `prerm`. |
-| `linux/link-user` | What the package scripts call. Runs `latch setup --all` (or `--remove --all`) as the user behind `sudo`/`pkexec`, never as root. Never fails the package. |
+| `linux/link-user` | What the package scripts call. Runs `latch setup` (or `--remove --all`) as the user behind `sudo`/`pkexec`, never as root. Never fails the package. |
 | `arch/PKGBUILD`, `arch/latchverify.install` | Repackage the `.deb` for pacman, with the same link and unlink hooks. |
 | `linux/build-tarball.sh`, `install.sh`, `uninstall.sh` | The portable archive and its per-user installer (no root, `~/.local`). |
 | `windows/latchverify.iss` | Inno Setup script for the per-user setup EXE: `latch.cmd`, the app, the icon, the Start menu entry and an optional PATH entry. `/RELAUNCH=1` starts the app after a silent update. |

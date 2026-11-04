@@ -5,12 +5,13 @@
 ; <stage> holds app\ (packaging/stage.ts), node\ (fetch-node.ps1) and desktop\ (packaging/build-desktop.ts). Add /DSignTool=1 together with
 ; /Slatchsign=<command> to Authenticode-sign the installer and uninstaller.
 ;
-; Per-user install: no administrator rights, nothing written outside the user's profile. After
-; installing it links every MCP client found (`latch setup --all`): their MCP servers start behind
-; the latch proxy and their tools are pinned in %APPDATA%\LatchVerify\latch.lock, created on the
-; spot. Before uninstalling it unlinks them all (`latch setup --remove --all`); latch.lock is kept,
-; so a reinstall keeps the approvals. The LatchVerify app (desktop\) starts after installing, sits in
-; the tray and starts at login; uninstalling stops it and removes its login start.
+; Per-user install: no administrator rights, nothing written outside the user's profile. Installing
+; connects no MCP client unless the user ticks that task or passes /TASKS=linkclients, as on Linux; an
+; update the app runs (/RELAUNCH=1) never does, so a client the user disconnected stays disconnected.
+; A linked client's MCP servers start behind the latch proxy, with their tools pinned in
+; %APPDATA%\LatchVerify\latch.lock. Before uninstalling it unlinks them all (`latch setup --remove --all`);
+; latch.lock is kept, so a reinstall keeps the approvals. The LatchVerify app (desktop\) starts after
+; installing, sits in the tray and starts at login; uninstalling stops it and removes its login start.
 
 #ifndef AppVersion
   #error Pass /DAppVersion=x.y.z (package.json's version)
@@ -47,6 +48,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ChangesEnvironment=yes
 ; Claude Code keeps the bundled node.exe busy while its servers run; offer to close them on upgrade.
 CloseApplications=yes
+; A user's earlier tick must not link clients again on the next install.
+UsePreviousTasks=no
 LicenseFile={#RepoDir}\LICENSE
 SetupIconFile=latchverify.ico
 UninstallDisplayIcon={app}\latchverify.ico
@@ -65,7 +68,7 @@ SignedUninstaller=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: linkclients; Description: "Link your MCP clients now (Claude Code, Cursor, VS Code and others found): their servers start behind latch and their tools are pinned in your latch.lock (recommended)"
+Name: linkclients; Description: "Link every MCP client found now (Claude Code, Cursor, VS Code and others): their servers start behind latch and their tools are pinned in your latch.lock. You can also choose later with latch setup, or in the LatchVerify app."; Flags: unchecked
 Name: addtopath; Description: "Add latch to PATH for new terminals"
 
 [InstallDelete]
@@ -156,7 +159,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   LogFile: string;
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('linkclients') then
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('linkclients') and not RelaunchRequested then
   begin
     WizardForm.StatusLabel.Caption := 'Linking your MCP clients to LatchVerify...';
     LogFile := ExpandConstant('{app}\setup.log');

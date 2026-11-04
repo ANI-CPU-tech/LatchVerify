@@ -27,8 +27,8 @@ describe("the Inno Setup script", () => {
     expect(iss).toContain("OutputBaseFilename=latchverify-{#AppVersion}-windows-x64-setup");
   });
 
-  it("links every MCP client after installing and unlinks them all before the files are removed", () => {
-    expect(iss).toMatch(/CurStep = ssPostInstall\) and WizardIsTaskSelected\('linkclients'\)/);
+  it("links every MCP client when asked to, and unlinks them all before the files are removed", () => {
+    expect(iss).toMatch(/CurStep = ssPostInstall\) and WizardIsTaskSelected\('linkclients'\) and not RelaunchRequested/);
     expect(iss).toMatch(/RunLatch\('setup --all', LogFile\)/);
     expect(iss).toMatch(/CurUninstallStep = usUninstall[\s\S]*RunLatch\('setup --remove --all'/);
   });
@@ -91,5 +91,10 @@ describe("the Linux install hooks", () => {
       expect(text.indexOf("pkill"), script).toBeLessThan(text.indexOf(unlink));
       expect(text, script).toContain("autostart/latchverify.desktop");
     }
+  });
+
+  it("links clients only when the user asks: unticked by default, not remembered, never by an update", () => {
+    expect(iss).toMatch(/^Name: linkclients;.*Flags: unchecked\s*$/m);
+    expect(iss).toMatch(/^UsePreviousTasks=no\s*$/m);
   });
 });

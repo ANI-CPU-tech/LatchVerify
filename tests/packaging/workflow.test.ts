@@ -88,4 +88,8 @@ describe("the build-installers workflow", () => {
     expect(windows).toContain('"/DSignTool=1"');
     expect(windows).toContain("::warning::No code-signing certificate configured");
   });
+
+  it("asks for the link in the Windows smoke test, since the installer does not link by default", () => {
+    expect(workflow).toMatch(/\/VERYSILENT[^\n]*\/TASKS=linkclients,addtopath/);
+  });
 });

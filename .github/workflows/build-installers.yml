@@ -1,12 +1,13 @@
 # Builds the LatchVerify installers on real Windows and Linux machines, installs each one on that
-# machine and checks it linked the MCP clients (the smoke tests set up Claude Code), then
-# uninstalls it and checks the client was restored.
+# machine, links Claude Code as a user would and checks that worked, then uninstalls it and checks
+# the client was restored.
 # Run it from the Actions tab ("Run workflow"), or push a tag like v0.2.0 to also publish a GitHub
 # Release. The tag must match the version in package.json.
 #
 # Every package carries its own Node.js 22 (checksum-checked from nodejs.org), so users install
-# nothing else. Installing runs `latch setup --all`: every MCP client's servers start behind the
-# latch proxy and their tools are pinned in a per-user latch.lock it creates. See INSTALL.md.
+# nothing else. Installing connects no MCP client by itself: `latch setup`, the app or the Windows
+# installer's task does that, and then the client's servers start behind the latch proxy with their
+# tools pinned in a per-user latch.lock. See INSTALL.md.
 #
 # Optional repository secrets:
 #   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD  → Authenticode-signed Windows installer
@@ -99,7 +100,7 @@ jobs:
 
           $setup = Get-Item "build\out\latchverify-$env:VERSION-windows-x64-setup.exe"
           $log = Join-Path $env:RUNNER_TEMP "install.log"
-          $run = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$app", "/LOG=$log" -Wait -PassThru
+          $run = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$app", "/LOG=$log", "/TASKS=linkclients,addtopath" -Wait -PassThru
           if ($run.ExitCode -ne 0) { Get-Content $log; throw "The installer exited with $($run.ExitCode)" }
           Get-Content "$app\setup.log"
           & "$app\latch.cmd" --version
