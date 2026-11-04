@@ -43,6 +43,11 @@ describe("the build-installers workflow", () => {
     expect(job("linux")).toContain("uninstall.sh");
   });
 
+  it("probes the portable archive as the user who installed it", () => {
+    // The proxy finds its integrity records under HOME: another HOME reads as an unvouched lockfile.
+    expect(job("linux")).toContain('as_user $check probe --config "$home/.claude.json"');
+  });
+
   it("uploads the files the scripts build, under the names the release notes give", () => {
     expect(job("windows")).toContain("path: build/out/latchverify-*-windows-x64-setup.exe");
     for (const glob of ["build/out/*.deb", "build/out/*.tar.gz", "build/out/*.pkg.tar.zst"]) expect(job("linux")).toContain(glob);

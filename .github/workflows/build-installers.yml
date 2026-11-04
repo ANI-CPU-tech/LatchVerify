@@ -199,7 +199,8 @@ jobs:
           $check unlinked --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
           as_user "$home/.local/bin/latch" setup --client claude-code
           $check linked --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
-          $check probe --config "$home/.claude.json" --server stub --tool echo
+          # As the same user: the proxy finds latch.lock's integrity record under HOME.
+          as_user $check probe --config "$home/.claude.json" --server stub --tool echo
           $check pinned --config "$home/.claude.json" --lockfile "$home/.config/latchverify/latch.lock" --server stub
           as_user "$RUNNER_TEMP/latchverify-${VERSION}-linux-x64/uninstall.sh"
           test ! -e "$home/.local/lib/latchverify" && test ! -e "$home/.local/bin/latch" && test ! -e "$home/.local/bin/latchverify-desktop"
