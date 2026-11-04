@@ -100,7 +100,8 @@ describe("appendEvent", () => {
       (_, i): LatchEvent => ({ kind: "call_blocked", at, serverId: "weather", toolName: `tool_${i}_${"x".repeat(i * 20)}`, reason: "unpinned" }),
     );
     await Promise.all(events.map((event) => appendEvent(dir, event)));
-    const lines = await logLines(dir);
+    // Writers repairing at once can leave a blank line, which readEvents skips; no event may be lost or split.
+    const lines = (await logLines(dir)).filter((line) => line !== "");
     expect(lines).toHaveLength(events.length);
     expect(new Set(lines)).toEqual(new Set(events.map((event) => JSON.stringify(event))));
   });
