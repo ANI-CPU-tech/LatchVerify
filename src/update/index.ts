@@ -20,6 +20,19 @@ export const INSTALL_KIND_FILE = "install-kind";
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 const TIMEOUT_MS = 15_000;
+/** Longest a whole download may take, so a stalled one cannot leave the update busy forever. */
+const DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * The downloaded file's name per install kind, each with the extension its installer needs. Fixed,
+ * never taken from the URL: a name decoded from it could climb out of the download folder.
+ */
+const DOWNLOAD_NAMES: Record<InstallKind, string> = {
+  inno: "latchverify-setup.exe",
+  deb: "latchverify.deb",
+  pacman: "latchverify.pkg.tar.zst",
+  tarball: "latchverify.tar.gz",
+};
 
 /** The update a release offers this install. */
 export interface Offer {
@@ -85,7 +98,7 @@ export async function checkForUpdate(kind: InstallKind, options: { url?: string;
   const key = PLATFORM_KEYS[kind];
   const asset = manifest.platforms[key];
   if (asset === undefined) return undefined;
-  if (!signatureValid(signedMessage(manifest.version, key, asset.sha256), asset.signature, options.publicKey)) {
+  if (!signatureValid(signedMessage(manifest.version, key, asset.sha256, asset.url, manifest.notes), asset.signature, options.publicKey)) {
     throw new Error(`the update manifest's signature for ${key} is not the release key's; not offering ${manifest.version}`);
   }
   return { version: manifest.version, notes: manifest.notes, kind, ...asset };
@@ -96,10 +109,10 @@ export async function checkForUpdate(kind: InstallKind, options: { url?: string;
  * runs it. Resolves the file's path.
  */
 export async function download(offer: Offer, fetcher: typeof fetch = fetch): Promise<string> {
-  const response = await fetcher(offer.url, { redirect: "follow" });
+  const response = await fetcher(offer.url, { redirect: "follow", signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
   if (!response.ok || response.body === null) throw new Error(`could not download ${offer.url}: HTTP ${response.status}`);
   const dir = await mkdtemp(join(tmpdir(), "latchverify-update-"));
-  const file = join(dir, decodeURIComponent(new URL(offer.url).pathname.split("/").pop() || "update"));
+  const file = join(dir, DOWNLOAD_NAMES[offer.kind]);
   const hash = createHash("sha256");
   let size = 0;
   const body = Readable.fromWeb(response.body as import("node:stream/web").ReadableStream<Uint8Array>);
@@ -137,15 +150,20 @@ export function installCommand(kind: InstallKind, file: string, root: string): {
   }
 }
 
-/** Runs the install. Resolves its exit code; the Inno installer is left running, detached (it replaces this process). */
+/**
+ * Runs the install. Resolves its exit code, and removes the downloaded file's folder (download
+ * made it for this file alone). The Inno installer is left running, detached (it replaces this
+ * process), so its file stays in the temp folder.
+ */
 export function runInstall(kind: InstallKind, file: string, root: string): Promise<number> {
   const { command, args, env } = installCommand(kind, file, root);
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "inherit", env: env ?? process.env, detached: kind === "inno", windowsHide: false });
-    child.once("error", reject);
+    const cleanUp = () => rm(dirname(file), { recursive: true, force: true }).catch(() => undefined);
+    child.once("error", (error) => void cleanUp().then(() => reject(error)));
     if (kind === "inno") {
       child.unref();
       resolve(0);
-    } else child.once("exit", (code) => resolve(code ?? 1));
+    } else child.once("exit", (code) => void cleanUp().then(() => resolve(code ?? 1)));
   });
 }

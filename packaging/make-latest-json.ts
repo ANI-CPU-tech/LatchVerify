@@ -1,7 +1,8 @@
 /**
  * Writes latest.json, the update manifest the apps check (src/update): the version, its
  * CHANGELOG section as notes, and for each installer its download URL, sha256 and an ed25519
- * signature of signedMessage(version, platform, sha256) made with LATCH_UPDATE_SIGNING_KEY.
+ * signature of signedMessage(version, platform, sha256, url, notes) made with
+ * LATCH_UPDATE_SIGNING_KEY.
  *
  * Usage: LATCH_UPDATE_SIGNING_KEY=<pem> tsx packaging/make-latest-json.ts <version> <packages dir> > latest.json
  */
@@ -33,17 +34,19 @@ export function makeManifest(version: string, dir: string, privateKeyPem: string
   parseVersion(version);
   if (version.includes("-")) throw new Error(`${version} is a pre-release; updates are offered for releases only`);
   const key = createPrivateKey(privateKeyPem);
+  const notes = changelogSection(changelog, version) ?? `LatchVerify ${version}.`;
   const platforms: Manifest["platforms"] = {};
   for (const [kind, name] of Object.entries(installersByKind(readdirSync(dir))) as Array<[InstallKind, string]>) {
     const sha256 = createHash("sha256").update(readFileSync(join(dir, name))).digest("hex");
     const platform = PLATFORM_KEYS[kind];
+    const url = `${RELEASES}/v${version}/${encodeURIComponent(name)}`;
     platforms[platform] = {
-      url: `${RELEASES}/v${version}/${encodeURIComponent(name)}`,
+      url,
       sha256,
-      signature: sign(null, Buffer.from(signedMessage(version, platform, sha256), "utf8"), key).toString("base64"),
+      signature: sign(null, Buffer.from(signedMessage(version, platform, sha256, url, notes), "utf8"), key).toString("base64"),
     };
   }
-  return { version, notes: changelogSection(changelog, version) ?? `LatchVerify ${version}.`, pub_date: now.toISOString(), platforms };
+  return { version, notes, pub_date: now.toISOString(), platforms };
 }
 
 if (process.argv[1]?.endsWith("make-latest-json.ts")) {

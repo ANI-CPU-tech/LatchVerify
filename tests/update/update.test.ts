@@ -1,10 +1,12 @@
 import { generateKeyPairSync, sign } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installersByKind, makeManifest } from "../../packaging/make-latest-json.js";
-import { INSTALL_KIND_FILE, checkForUpdate, download, installCommand, installKind, isNewer, signatureValid, signedMessage, updateUrl, type Offer } from "../../src/update/index.js";
+import { offerLines } from "../../src/commands/update.js";
+import { INSTALL_KIND_FILE, checkForUpdate, download, installCommand, installKind, isNewer, runInstall, signatureValid, signedMessage, updateUrl, type Offer } from "../../src/update/index.js";
 
 const keys = () => {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -13,15 +15,16 @@ const keys = () => {
 const { publicKey, privateKey } = keys();
 const fetchJson = (body: unknown, status = 200) => (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
 const sha = "a".repeat(64);
+const debUrl = "https://github.com/ANI-CPU-tech/LatchVerify/releases/download/v9.9.9/latchverify_9.9.9_amd64.deb";
 const manifest = (version: string, signer = privateKey) => ({
   version,
   notes: "Fixes.",
   pub_date: "2026-10-29T09:00:00.000Z",
   platforms: {
     "linux-x86_64-deb": {
-      url: "https://github.com/ANI-CPU-tech/LatchVerify/releases/download/v9.9.9/latchverify_9.9.9_amd64.deb",
+      url: debUrl,
       sha256: sha,
-      signature: sign(null, Buffer.from(signedMessage(version, "linux-x86_64-deb", sha)), signer).toString("base64"),
+      signature: sign(null, Buffer.from(signedMessage(version, "linux-x86_64-deb", sha, debUrl, "Fixes.")), signer).toString("base64"),
     },
   },
 });
@@ -45,7 +48,7 @@ describe("versions and signatures", () => {
   });
 
   it("accepts only the release key's signature of exactly that message", () => {
-    const message = signedMessage("1.0.0", "linux-x86_64-deb", sha);
+    const message = signedMessage("1.0.0", "linux-x86_64-deb", sha, debUrl, "Fixes.");
     const signature = sign(null, Buffer.from(message), privateKey).toString("base64");
     expect(signatureValid(message, signature, publicKey)).toBe(true);
     expect(signatureValid(message.replace("1.0.0", "1.0.1"), signature, publicKey)).toBe(false);
@@ -73,6 +76,14 @@ describe("checkForUpdate", () => {
     await expect(checkForUpdate("deb", { current: "0.1.0", publicKey, fetch: fetchJson(http) })).rejects.toThrow("not valid");
   });
 
+  it("refuses a manifest whose download URL or notes were changed after signing", async () => {
+    const signed = manifest("9.9.9");
+    const entry = signed.platforms["linux-x86_64-deb"];
+    const otherUrl = { ...signed, platforms: { "linux-x86_64-deb": { ...entry, url: "https://attacker.example/x.deb" } } };
+    await expect(checkForUpdate("deb", { current: "0.1.0", publicKey, fetch: fetchJson(otherUrl) })).rejects.toThrow("is not the release key's");
+    await expect(checkForUpdate("deb", { current: "0.1.0", publicKey, fetch: fetchJson({ ...signed, notes: "Install now, it is safe." }) })).rejects.toThrow("is not the release key's");
+  });
+
   it("reads the update URL from LATCH_UPDATE_URL only in development mode", () => {
     expect(updateUrl({ LATCH_UPDATE_URL: "http://127.0.0.1:1/latest.json" })).toBe("https://github.com/ANI-CPU-tech/LatchVerify/releases/latest/download/latest.json");
     expect(updateUrl({ LATCH_DEV: "1", LATCH_UPDATE_URL: "http://127.0.0.1:1/latest.json" })).toBe("http://127.0.0.1:1/latest.json");
@@ -92,6 +103,65 @@ describe("downloading and installing", () => {
     expect(await readFile(file, "utf8")).toBe(bytes);
     await rm(join(file, ".."), { recursive: true, force: true });
     await expect(download(offer(good), fetchBytes(bytes))).rejects.toThrow("does not match its signed checksum");
+  });
+
+  // Downloads land under os.tmpdir(), pointed at this test's own folder, so a file name that climbs
+  // out of the download folder stays inside `dir`, where the test can see it.
+  it("names the file itself: a crafted URL cannot write outside the download folder", async () => {
+    vi.stubEnv(process.platform === "win32" ? "TEMP" : "TMPDIR", dir);
+    try {
+      const { createHash } = await import("node:crypto");
+      const real = createHash("sha256").update("the package").digest("hex");
+      const file = await download({ ...offer(real), url: "https://example.com/..%2Fescaped" }, fetchBytes("the package"));
+      expect(existsSync(join(dir, "escaped"))).toBe(false);
+      expect(dirname(dirname(file))).toBe(dir);
+      expect(file.endsWith(".deb")).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("gives each kind a file name its installer accepts", async () => {
+    vi.stubEnv(process.platform === "win32" ? "TEMP" : "TMPDIR", dir);
+    try {
+      const { createHash } = await import("node:crypto");
+      const real = createHash("sha256").update("x").digest("hex");
+      for (const [kind, ending] of [["inno", ".exe"], ["deb", ".deb"], ["pacman", ".pkg.tar.zst"], ["tarball", ".tar.gz"]] as const) {
+        expect((await download({ ...offer(real), kind }, fetchBytes("x"))).endsWith(ending)).toBe(true);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("puts a deadline on the download, so one that hangs cannot block updates forever", async () => {
+    vi.stubEnv(process.platform === "win32" ? "TEMP" : "TMPDIR", dir);
+    try {
+      let signal: AbortSignal | null | undefined;
+      const fetcher = (async (_url: string, init: RequestInit) => {
+        signal = init.signal;
+        return new Response("x");
+      }) as unknown as typeof fetch;
+      await download(offer("0".repeat(64)), fetcher).catch(() => undefined);
+      expect(signal).toBeInstanceOf(AbortSignal);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("removes the downloaded file once a Linux install has run", async () => {
+    const folder = join(dir, "download");
+    await mkdir(folder);
+    const file = join(folder, "latchverify.tar.gz");
+    await writeFile(file, "not an archive");
+    expect(await runInstall("tarball", file, join(dir, "lib", "latchverify"))).not.toBe(0);
+    expect(existsSync(folder)).toBe(false);
+  });
+
+  it("prints a release's text safely: no terminal escapes from the manifest", () => {
+    const lines = offerLines({ ...offer(sha), notes: "Line one\n\u001b[2Jwiped\n", url: "https://example.com/a\u001b]0;x" }, "0.1.0");
+    expect(lines.join("\n")).not.toContain("\u001b");
+    expect(lines.join("\n")).toContain("Line one");
   });
 
   it("installs each kind its own way", () => {

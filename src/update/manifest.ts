@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 /** Install kinds a release ships an update for; each installer writes its kind in INSTALL_KIND_FILE. */
@@ -24,16 +25,21 @@ export const ManifestSchema = z.object({
     z.object({
       url: z.url({ protocol: /^https$/ }),
       sha256: Sha256,
-      /** base64 ed25519 signature of signedMessage(version, key, sha256). */
+      /** base64 ed25519 signature of signedMessage(version, key, sha256, url, notes). */
       signature: z.string().min(1).max(200),
     }),
   ),
 });
 export type Manifest = z.infer<typeof ManifestSchema>;
 
-/** What a release signs for one file: the version, the platform and the file's sha256, so no signature fits another file or release. */
-export function signedMessage(version: string, platformKey: string, sha256: string): string {
-  return `latchverify-update\n${version}\n${platformKey}\n${sha256}\n`;
+/**
+ * What a release signs for one file: the version, the platform, the file's sha256, where it is
+ * downloaded from and a hash of the notes shown to the user. So no signature fits another file or
+ * release, and nothing the app acts on or displays can be changed in latest.json after signing.
+ */
+export function signedMessage(version: string, platformKey: string, sha256: string, url: string, notes: string): string {
+  const notesHash = createHash("sha256").update(notes, "utf8").digest("hex");
+  return `latchverify-update\n${version}\n${platformKey}\n${sha256}\n${url}\n${notesHash}\n`;
 }
 
 /** x.y.z as numbers; undefined for anything else (pre-releases are never offered). */

@@ -1,7 +1,14 @@
 import type { Writable } from "node:stream";
 import pc from "picocolors";
 import { VERSION } from "../version.js";
-import { checkForUpdate, download, installKind, runInstall } from "../update/index.js";
+import { checkForUpdate, download, installKind, runInstall, type Offer } from "../update/index.js";
+import { printable } from "./text.js";
+
+/** What a release offers, for the terminal. Line by line through printable(), so its text carries no terminal escapes. */
+export function offerLines(offer: Offer, current: string): string[] {
+  const notes = offer.notes.trim();
+  return [pc.bold(`LatchVerify ${printable(offer.version)} is available (you have ${current})`), ...(notes === "" ? [] : notes.split(/\r?\n/).map(printable))];
+}
 
 /**
  * `latch update`: install the newest release, signed by the release key, for this install's kind
@@ -21,13 +28,12 @@ export async function runUpdate(options: { check: boolean; output?: Writable }):
     say(`${pc.green("✔")} LatchVerify ${VERSION} is the latest release`);
     return 0;
   }
-  say(pc.bold(`LatchVerify ${offer.version} is available (you have ${VERSION})`));
-  if (offer.notes.trim() !== "") say(offer.notes.trim());
+  for (const line of offerLines(offer, VERSION)) say(line);
   if (options.check) {
     say("Run `latch update` to install it.");
     return 0;
   }
-  say(`downloading ${offer.url}`);
+  say(`downloading ${printable(offer.url)}`);
   const file = await download(offer);
   say(`${pc.green("✔")} checksum and signature verified; installing`);
   const code = await runInstall(offer.kind, file, install.root);
