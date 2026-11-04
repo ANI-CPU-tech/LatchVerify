@@ -38,7 +38,7 @@ export interface SetupOptions {
  * 1. Creates the lockfile (by default the per-user one, see userLockfilePath) if it does not exist,
  *    so latch review and verify find it from any directory without asking.
  * 2. When the client's config exists, runs `latch init` for that client (or all), non-interactively: every
- *    stdio server is pinned (trust on first use; tools with hidden-intent findings are held for
+ *    stdio server is pinned (trust on first use; tier-3 tools are held for
  *    review) and its entry rewritten to start `latch proxy` (command and args only; env is never touched).
  *
  * Safe to run again: pinned servers stay as pinned and wrapped entries are left alone. When the

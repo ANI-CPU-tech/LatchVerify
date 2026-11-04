@@ -300,10 +300,12 @@ export function launchesAs(server: ServerEntry, command: string, args: readonly 
 
 /**
  * Trust on first use, for a server linked with linkServer: approves every change in `changes`
- * (the server's first tool list) that has no critical finding, under `approvedBy`, and clears
- * trustOnFirstUse. A tool with a critical finding (hidden instructions, invisible or bidi text, a
- * reference to another server) is left out, for the proxy to queue for review. Pure; a server
- * that is not marked trustOnFirstUse is returned unchanged with nothing pinned.
+ * (the server's first tool list) below tier 3, under `approvedBy`, and clears trustOnFirstUse. A
+ * tier-3 tool (hidden instructions, invisible or bidi text, a reference to another server, or exec
+ * or credential access) is left out, for the proxy to queue for review: the same rule such a
+ * tool would meet if it appeared later, so a new server gets no more trust than a pinned one. A
+ * critical finding holds a tool back whatever its tier. Pure; a server that is not marked
+ * trustOnFirstUse is returned unchanged with nothing pinned.
  */
 export function pinFirstRun(
   lock: LockFile,
@@ -319,7 +321,7 @@ export function pinFirstRun(
   const held: string[] = [];
   for (const change of changes) {
     if (change.serverId !== serverId) continue;
-    if (change.findings.some((finding) => finding.severity === "critical")) {
+    if (change.tier === 3 || change.findings.some((finding) => finding.severity === "critical")) {
       held.push(change.toolName);
       continue;
     }

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startProxy, type ProxyOptions } from "../../src/proxy/index.js";
+import { WITHHELD_DESCRIPTION, startProxy, type ProxyOptions } from "../../src/proxy/index.js";
 import { readEvents } from "../../src/store/events.js";
 import { applyApproval, emptyLockfile, linkServer, readLockfile, serializeLockfile, writeLockfile } from "../../src/store/lockfile.js";
 import { runLockAccept } from "../../src/commands/lock.js";
@@ -484,6 +484,19 @@ describe("startProxy, first run of a server linked to be trusted on first use", 
     expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { code: -32001, data: { reason: { kind: "hard_block" } } } });
     expect((await readLockfile(linkedLock)).servers.weather!.tools.map((tool) => tool.name)).toEqual(["read_config"]);
     expect((await readPending(stateDir)).map((change) => [change.toolName, change.tier])).toContainEqual(["get_forecast", 3]);
+  });
+
+  it("holds back a shell tool on first run: the model never sees its text, and calling it is a hard block", async () => {
+    const shell = { name: "run_command", description: "Runs any command in your project folder.", inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } };
+    const server = { args: ["-e", echoServer([...benignTools, shell])] };
+    await link(server.args);
+    const call = request(2, "tools/call", { name: "run_command", arguments: { command: "id" } });
+    const { messages } = await run(server, [request(1, "tools/list"), call, (out) => waitFor(() => out().includes('"id":2'))], { lockfilePath: linkedLock });
+    expect(messages.find((m) => m.id === 2)).toMatchObject({ error: { code: -32001, data: { reason: { kind: "hard_block" } } } });
+    const listed = (messages.find((m) => m.id === 1) as { result: { tools: Array<{ name: string; description: string }> } }).result.tools;
+    expect(listed.find((tool) => tool.name === "run_command")!.description).toBe(WITHHELD_DESCRIPTION);
+    expect((await readLockfile(linkedLock)).servers.weather!.tools.map((tool) => tool.name)).toEqual(["get_alerts", "get_forecast"]);
+    expect((await readPending(stateDir)).map((change) => [change.toolName, change.tier, change.before])).toEqual([["run_command", 3, null]]);
   });
 
   it("does not trust a mark added to latch.lock outside LatchVerify", async () => {

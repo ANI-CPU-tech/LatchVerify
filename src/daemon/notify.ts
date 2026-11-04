@@ -35,12 +35,11 @@ const toolName = (serverId: string, tool: string) => `${serverId}/${tool}`;
 
 /** What a pending change does to its tool, in a few words. */
 function changeSummary(change: PendingChange): string {
-  if (change.tier === 3) {
-    const finding = change.findings.find((candidate) => candidate.severity === "critical");
-    return finding === undefined ? "a high-risk change" : finding.message;
-  }
-  if (change.before === null) return "a new tool";
+  const finding = change.tier === 3 ? change.findings.find((candidate) => candidate.severity === "critical") : undefined;
+  if (finding !== undefined) return finding.message;
   const gained = change.capabilityDelta.gained;
+  if (change.before === null) return change.tier === 3 && gained.length > 0 ? `a new tool with ${gained.join(", ")}` : "a new tool";
+  if (change.tier === 3 && gained.length === 0) return "a high-risk change";
   return gained.length > 0 ? `gained ${gained.join(", ")}` : "loosened its constraints";
 }
 
@@ -63,7 +62,8 @@ export function pendingSummary(queue: readonly PendingChange[]): DesktopNotifica
 /** The notification for a change a proxy just queued. */
 export function changeQueued(change: PendingChange): DesktopNotification {
   const name = toolName(change.serverId, change.toolName);
-  const title = change.tier === 3 ? `High risk: ${name} changed` : `${name} changed and needs review`;
+  const what = change.before === null ? "is new" : "changed";
+  const title = change.tier === 3 ? `High risk: ${name} ${what}` : `${name} ${what} and needs review`;
   const body = `${changeSummary(change)}. Its calls are blocked until you review it in LatchVerify.`;
   return { title: clean(title, MAX_TITLE), body: clean(body, MAX_BODY), urgency: change.tier === 3 ? "critical" : "normal" };
 }

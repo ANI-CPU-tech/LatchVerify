@@ -64,6 +64,11 @@ describe("changeQueued", () => {
     });
     expect(changeQueued(change("get_alerts", 2)).body).toBe("gained filesystem.read. Its calls are blocked until you review it in LatchVerify.");
     expect(changeQueued(change("new_tool", 2, { before: null })).body).toBe("a new tool. Its calls are blocked until you review it in LatchVerify.");
+    expect(changeQueued(change("run", 3, { before: null, findings: [], capabilityDelta: { gained: ["exec.enabled"], lost: [], loosened: [] } }))).toEqual({
+      title: "High risk: weather/run is new",
+      body: "a new tool with exec.enabled. Its calls are blocked until you review it in LatchVerify.",
+      urgency: "critical",
+    });
   });
 
   it("shows server-controlled names safely and cut to length", () => {

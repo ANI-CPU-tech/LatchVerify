@@ -229,7 +229,7 @@ export async function onToolsList(ctx: InterceptorContext, response: JsonRpcResp
   const result = response.result as Record<string, unknown>;
   const complete = fromStart && (typeof result.nextCursor !== "string" || result.nextCursor === "");
   // First run of a linked server: pin what it serves, then judge the list against those pins, so
-  // only the tools held back (critical findings) are queued and blocked.
+  // only the tools held back (tier 3) are queued and blocked.
   const server = Object.hasOwn(ctx.lockfile.servers, ctx.serverId) ? ctx.lockfile.servers[ctx.serverId]! : undefined;
   if (complete && server?.trustOnFirstUse === true && ctx.pinFirstRun !== undefined) {
     const written = await ctx.pinFirstRun(analysis.changes.map(({ change }) => change));
@@ -252,7 +252,7 @@ export async function onToolsList(ctx: InterceptorContext, response: JsonRpcResp
 
 /** Description given to the model in place of a tier-3 tool's own. */
 export const WITHHELD_DESCRIPTION =
-  "[LatchVerify] This tool's definition was withheld: it changed in a way that may hide instructions or gain dangerous access, and it is blocked until a person reviews it with `latch review`. Do not call it; tell the user it is blocked pending review.";
+  "[LatchVerify] This tool's definition was withheld: it may hide instructions or have dangerous access, and it is blocked until a person reviews it with `latch review`. Do not call it; tell the user it is blocked pending review.";
 
 /** What the client sees of a tier-3 tool: nothing of its own but its name. */
 export function withheldTool(name: string): McpTool {

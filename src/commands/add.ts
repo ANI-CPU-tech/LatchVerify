@@ -68,7 +68,7 @@ export function parseEnv(values: readonly string[], source: NodeJS.ProcessEnv): 
  *    in either: an existing server is never overwritten, and changes to a pinned one go through
  *    `latch review`.
  * 2. Links it in latch.lock (linkServer): its tools are pinned by the proxy the first time the
- *    client starts it, trust on first use with critical findings held for review. Nothing is
+ *    client starts it, trust on first use with tier-3 tools held for review. Nothing is
  *    started here, so the --env values are never used by latch itself.
  * 3. Writes latch.lock, then adds the server to the client config, wrapped with `latch proxy`
  *    by absolute path (proxiedEntry). Every other server and key of the config stays as it is.

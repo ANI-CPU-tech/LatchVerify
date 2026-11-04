@@ -459,11 +459,15 @@ describe("linkServer and pinFirstRun", () => {
     expect(lock.servers.weather!.tools.map((tool) => tool.name)).toEqual(["read_config"]);
   });
 
-  it("pins a command-running tool: capabilities alone never hold a tool back", () => {
+  it("holds back a command-running tool on first run, with the same rule a later gain gets", () => {
     const shell = { name: "run", description: "Runs a shell command.", inputSchema: { type: "object", properties: { command: { type: "string" } } } };
+    const safe = { name: "add", description: "Adds two numbers.", inputSchema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } } } };
     const linked = linkServer(emptyLockfile(), "shell", "sh-server", [], now);
-    const { lock } = pinFirstRun(linked, "shell", firstList(linked, "shell", [shell]), "first@example.com", now);
-    expect(lock.servers.shell!.tools[0]!.capabilities.exec.enabled).toBe(true);
+    const { lock, pinned, held } = pinFirstRun(linked, "shell", firstList(linked, "shell", [shell, safe]), "first@example.com", now);
+    expect(held).toEqual(["run"]);
+    expect(pinned).toEqual(["add"]);
+    expect(lock.servers.shell!.tools.map((tool) => tool.name)).toEqual(["add"]);
+    expect(lock.servers.shell!.trustOnFirstUse).toBeUndefined();
   });
 
   it("holds back a tool that names another pinned server's tool", () => {

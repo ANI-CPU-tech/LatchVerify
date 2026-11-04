@@ -21,7 +21,7 @@ export const ServerEntrySchema = z.object({
   tools: z.array(ToolRecordSchema),
   /**
    * Linked but not run yet: the proxy pins the tools the first time the server lists them (trust
-   * on first use), holding back any with critical findings, and then removes this flag. Linking
+   * on first use), holding back any of tier 3, and then removes this flag. Linking
    * never starts a server itself, so it never handles the keys in the client's config.
    */
   trustOnFirstUse: z.literal(true).optional(),
