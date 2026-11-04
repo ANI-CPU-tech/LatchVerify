@@ -10,7 +10,7 @@ import { SettingsPatchSchema, SimulationRequestSchema, type LockFile, type Pendi
 import { readSettings, settingsPath, updateSettings } from "../store/settings.js";
 import { clientsReport } from "./clients.js";
 import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
-import { applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
+import { LockTamperedError, applyApproval, findRecord, readLockfile, writeLockfile } from "../store/lockfile.js";
 import { dequeue, readPending, reviewOrder, updatePending } from "../store/pending.js";
 import { addRejection, readRejected, writeRejected } from "../store/rejected.js";
 import { VERSION } from "../version.js";
@@ -333,6 +333,7 @@ export function createRoutes(deps: RouteDeps): Hono {
 
   app.onError((error, c) => {
     if (error instanceof ApiError) return c.json({ error: error.message }, error.status);
+    if (error instanceof LockTamperedError) return c.json({ error: error.message }, 409);
     // Unexpected: a damaged lockfile or queue, a disk error. Report it; never answer with partial data.
     console.error(`[latch ui] ${c.req.method} ${c.req.path} failed:`, error);
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 500);

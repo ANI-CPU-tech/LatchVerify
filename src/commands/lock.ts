@@ -71,7 +71,7 @@ export async function runLockRestore(options: LockCommandOptions): Promise<numbe
   if (good === undefined) {
     throw new Error(`no trusted copy of ${options.lockfilePath} to restore; check it by hand, then run \`latch lock accept\``);
   }
-  await writeLockfile(options.lockfilePath, parseLockfile(options.lockfilePath, good));
+  await writeLockfile(options.lockfilePath, parseLockfile(options.lockfilePath, good), { overwriteUntrusted: true });
   say(pc.green(`restored ${printable(options.lockfilePath)} to the last version LatchVerify wrote`));
   return 0;
 }

@@ -17,7 +17,9 @@ import {
   readLockfile,
   serializeLockfile,
   writeLockfile,
+  LockTamperedError,
 } from "../../src/store/lockfile.js";
+import { LockIntegrity } from "../../src/store/integrity.js";
 import { analyzeToolList } from "../../src/proxy/analysis.js";
 import { LOCKFILE_VERSION, LockFileSchema, type LockFile, type PendingChange, type ToolRecord } from "../../src/schema/index.js";
 
@@ -142,6 +144,35 @@ const twoServers = async (): Promise<LockFile> => {
 };
 
 describe("writeLockfile", () => {
+  describe("over a file changed outside LatchVerify", () => {
+    it("refuses, so the next normal write cannot re-sign a tampered file", async () => {
+      const out = join(dir, "tampered.lock");
+      await writeLockfile(out, emptyLockfile());
+      const edited = `${await readFile(out, "utf8")}\n`;
+      await writeFile(out, edited);
+      const error = await rejection(writeLockfile(out, emptyLockfile()));
+      expect(error).toBeInstanceOf(LockTamperedError);
+      expect(error.message).toContain("latch lock status");
+      expect(await readFile(out, "utf8")).toBe(edited);
+      expect(await new LockIntegrity(out).check(edited)).toBe("untrusted");
+    });
+
+    it("writes over it when told to, which only `latch lock restore` does", async () => {
+      const out = join(dir, "restored.lock");
+      await writeLockfile(out, emptyLockfile());
+      await writeFile(out, "{}");
+      await writeLockfile(out, emptyLockfile(), { overwriteUntrusted: true });
+      expect(await new LockIntegrity(out).check(await readFile(out, "utf8"))).toBe("trusted");
+    });
+
+    it("still writes a file that was never recorded", async () => {
+      const out = join(dir, "unrecorded.lock");
+      await writeFile(out, JSON.stringify(emptyLockfile()));
+      await writeLockfile(out, emptyLockfile());
+      expect(await new LockIntegrity(out).check(await readFile(out, "utf8"))).toBe("trusted");
+    });
+  });
+
   it("round-trips latch.lock.example byte for byte", async () => {
     const out = join(dir, "latch.lock");
     await writeLockfile(out, await readLockfile(fileURLToPath(EXAMPLE_PATH)));

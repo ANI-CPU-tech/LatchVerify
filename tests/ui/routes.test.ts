@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLIENT_HEADER, DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, MAX_SIMULATION_BYTES, createRoutes, type RouteDeps } from "../../src/ui/routes.js";
 import { EVENTS_FILE, appendEvent, readEvents, type LatchEvent } from "../../src/store/events.js";
-import { findRecord, readLockfile } from "../../src/store/lockfile.js";
+import { findRecord, readLockfile, writeLockfile } from "../../src/store/lockfile.js";
 import { readPending, writePending } from "../../src/store/pending.js";
 import { readRejected } from "../../src/store/rejected.js";
 import { SimulationResultSchema, type PendingChange, type ToolRecord } from "../../src/schema/index.js";
@@ -218,6 +218,18 @@ describe("POST /api/pending/:id/approve", () => {
     expect(((await json(response)) as { error: string }).error).toContain('server "mail" is not in the lockfile');
     expect(await readFile(deps.lockfilePath, "utf8")).toBe(before);
     expect(await readPending(deps.stateDir)).toEqual([foreign]);
+  });
+
+  it("returns 409 and writes nothing when latch.lock was changed outside LatchVerify", async () => {
+    await writeLockfile(deps.lockfilePath, await readLockfile(deps.lockfilePath));
+    const tampered = `${await readFile(deps.lockfilePath, "utf8")}\n`;
+    await writeFile(deps.lockfilePath, tampered);
+    await writePending(deps.stateDir, [await pendingChange("chg_1", "get_forecast", 2, "2026-10-23T09:00:00.000Z")]);
+    const response = await post("/api/pending/chg_1/approve");
+    expect(response.status).toBe(409);
+    expect(((await json(response)) as { error: string }).error).toContain("latch lock status");
+    expect(await readFile(deps.lockfilePath, "utf8")).toBe(tampered);
+    expect((await readPending(deps.stateDir)).map((change) => change.id)).toEqual(["chg_1"]);
   });
 
   it("returns 500 and keeps the change queued when latch.lock is invalid", async () => {

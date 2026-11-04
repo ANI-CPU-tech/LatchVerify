@@ -3,6 +3,7 @@ import { mkdir, open, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { appDataDir, platformPath } from "../config/paths.js";
+import { withFileLock } from "./lock.js";
 import { writeFileAtomic } from "./replace.js";
 
 /**
@@ -60,6 +61,12 @@ export class LockIntegrity {
     readonly dir: string = integrityDir(),
   ) {
     this.path = resolve(path);
+  }
+
+  /** Run `task` with this lockfile's writes held off, in this and every other process. */
+  async exclusive<T>(task: () => Promise<T>): Promise<T> {
+    await mkdir(this.dir, { recursive: true, mode: 0o700 });
+    return withFileLock(join(this.dir, `${sha(this.path).slice(0, 32)}.lock`), task);
   }
 
   /**

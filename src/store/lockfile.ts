@@ -28,6 +28,13 @@ export function emptyLockfile(): LockFile {
   return { version: LOCKFILE_VERSION, generatedAt: NEVER_GENERATED, servers: {} };
 }
 
+/** latch.lock was changed outside LatchVerify, so it is not written over until a person decides. */
+export class LockTamperedError extends LockfileError {
+  constructor(path: string) {
+    super(path, "was changed outside LatchVerify, so nothing was written; run `latch lock status`, then `latch lock accept` if the change is yours or `latch lock restore` to undo it");
+  }
+}
+
 const errorCode = (error: unknown): string | undefined =>
   error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
 
@@ -144,33 +151,56 @@ async function syncDirectory(dir: string): Promise<void> {
  * Before the rename, the new content is recorded as trusted (LockIntegrity.trustContent), so
  * proxies accept it and treat any edit made outside LatchVerify as tampering.
  *
+ * Every writer read `lock` from the file it is about to replace, so a write over a file the records
+ * do not vouch for would sign whatever was edited into it. It is refused (LockTamperedError) until
+ * a person accepts or restores the file; `overwriteUntrusted` is for `latch lock restore` alone,
+ * which puts back a version the records do vouch for.
+ *
  * Throws LockfileError, leaving any existing file untouched, when `lock` is invalid, its
  * integrity cannot be recorded, or the write fails.
  */
-export async function writeLockfile(path: string, lock: LockFile): Promise<void> {
+export async function writeLockfile(path: string, lock: LockFile, { overwriteUntrusted = false } = {}): Promise<void> {
   const text = serializeLockfile(validateLockfile(path, lock));
   const dir = dirname(path);
   const temp = join(dir, `.${basename(path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+  const integrity = new LockIntegrity(path);
   try {
-    await new LockIntegrity(path).trustContent(text);
+    // Exclusive for the check, the record and the rename together: writers in other processes
+    // cannot interleave and leave a file its record does not vouch for.
+    await integrity.exclusive(async () => {
+      const current = overwriteUntrusted ? undefined : await existingText(path);
+      if (current !== undefined && (await integrity.check(current)) === "untrusted") throw new LockTamperedError(path);
+      await integrity.trustContent(text);
+      try {
+        await mkdir(dir, { recursive: true });
+        const handle = await open(temp, "wx");
+        try {
+          await handle.writeFile(text, "utf8");
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        await replaceFile(temp, path);
+      } catch (error) {
+        await rm(temp, { force: true });
+        throw new LockfileError(path, `cannot write lockfile (${error instanceof Error ? error.message : String(error)})`, { cause: error });
+      }
+    });
   } catch (error) {
+    if (error instanceof LockfileError) throw error;
     throw new LockfileError(path, `cannot record the lockfile's integrity (${error instanceof Error ? error.message : String(error)})`, { cause: error });
   }
-  try {
-    await mkdir(dir, { recursive: true });
-    const handle = await open(temp, "wx");
-    try {
-      await handle.writeFile(text, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    await replaceFile(temp, path);
-  } catch (error) {
-    await rm(temp, { force: true });
-    throw new LockfileError(path, `cannot write lockfile (${error instanceof Error ? error.message : String(error)})`, { cause: error });
-  }
   await syncDirectory(dir);
+}
+
+/** The file's text before a write; undefined when there is none, or a folder is in the way (the write reports that). */
+async function existingText(path: string): Promise<string | undefined> {
+  try {
+    return await readLockfileText(path);
+  } catch (error) {
+    if (error instanceof LockfileError && errorCode(error.cause) === "EISDIR") return undefined;
+    throw error;
+  }
 }
 
 /**
