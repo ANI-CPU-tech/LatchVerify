@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Writable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runAdd } from "../commands/add.js";
-import { SUPPORTED_CLIENTS, clientLocations, detectClients, removeClientServer, type ClientId } from "../config/clients.js";
+import { INSTALL_LAUNCH, SUPPORTED_CLIENTS, clientLocations, detectClients, removeClientServer, type ClientId } from "../config/clients.js";
 import { readLockfile, removeServer, writeLockfile } from "../store/lockfile.js";
 import { updatePending, withStateLock } from "../store/pending.js";
 
@@ -67,10 +67,11 @@ export function demoRoot(): string | undefined {
   }
 }
 
-/** How a preset is started: this node, with tsx's loader, on the demo script, all by absolute path. */
+/** How a preset is started: node, with tsx's loader, on the demo script, all by absolute path. */
 export function presetLaunch(preset: DemoPreset, root: string): { command: string; args: string[] } {
   const tsx = pathToFileURL(createRequire(join(root, "package.json")).resolve("tsx")).href;
-  return { command: process.execPath, args: ["--import", tsx, join(root, "demo", preset.script)] };
+  // INSTALL_LAUNCH's node, not process.execPath: under `pnpm desktop` that is Electron.
+  return { command: INSTALL_LAUNCH.command, args: ["--import", tsx, join(root, "demo", preset.script)] };
 }
 
 export function findPreset(id: string): DemoPreset | undefined {

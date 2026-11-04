@@ -327,12 +327,64 @@ export const PATH_LAUNCH: ProxyLaunch = { command: PROXY_COMMAND, args: [] };
  */
 export const PROXY_NODE_FLAGS: readonly string[] = ["--max-semi-space-size=1"];
 
+/** What installLaunchFor looks at: the running process and the file system, so it can be tested for any layout. */
+export interface InstallLaunchSources {
+  execPath: string;
+  /** True in the desktop app, whose execPath is the app itself and cannot run a script. */
+  electron: boolean;
+  /** This module's file. */
+  modulePath: string;
+  platform: NodeJS.Platform;
+  exists: (path: string) => boolean;
+  /** The PATH variable. */
+  pathVariable: string;
+}
+
+/** How many folders above this module an installer's marker can be: <install>/desktop/resources/app/dist/config. */
+const MAX_INSTALL_DEPTH = 6;
+
 /**
- * This install, by absolute path: the running node and this checkout's cli.js. Clients start
- * servers without the user's shell setup (a shell function or alias named `latch` is invisible
- * to them), so `latch init` and `latch add` write this launch.
+ * How this install starts `latch proxy`. Outside Electron: the running node and this checkout's
+ * cli.js. In the desktop app, execPath is the app's own binary, and an entry naming it would open
+ * the app instead of a proxy: there it is the Node.js and the CLI the installer put beside the app,
+ * so the app and `latch` write identical entries, or, from a checkout, node on PATH.
  */
-export const INSTALL_LAUNCH: ProxyLaunch = { command: process.execPath, args: [...PROXY_NODE_FLAGS, fileURLToPath(new URL("../cli.js", import.meta.url))] };
+export function installLaunchFor(sources: InstallLaunchSources): ProxyLaunch {
+  const { execPath, electron, modulePath, platform, exists, pathVariable } = sources;
+  const path = platformPath(platform);
+  const launchWith = (node: string, cli: string): ProxyLaunch => ({ command: node, args: [...PROXY_NODE_FLAGS, cli] });
+  const ownCli = path.join(path.dirname(modulePath), "..", "cli.js");
+  if (!electron) return launchWith(execPath, ownCli);
+
+  let dir = path.dirname(modulePath);
+  for (let depth = 0; depth < MAX_INSTALL_DEPTH; depth++) {
+    if (exists(path.join(dir, "install-kind"))) {
+      const node = platform === "win32" ? path.join(dir, "node", "node.exe") : path.join(dir, "node", "bin", "node");
+      const cli = path.join(dir, "app", "dist", "cli.js");
+      if (exists(node) && exists(cli)) return launchWith(node, cli);
+      break;
+    }
+    dir = path.dirname(dir);
+  }
+  const names = platform === "win32" ? ["node.exe"] : ["node"];
+  const separator = platform === "win32" ? ";" : ":";
+  const candidates = pathVariable.split(separator).filter((folder) => folder !== "").flatMap((folder) => names.map((name) => path.join(folder, name)));
+  return launchWith(candidates.find((candidate) => exists(candidate)) ?? "node", ownCli);
+}
+
+/**
+ * This install, by absolute path (installLaunchFor). Clients start servers without the user's
+ * shell setup (a shell function or alias named `latch` is invisible to them), so `latch init`,
+ * `latch add` and the background sync write this launch.
+ */
+export const INSTALL_LAUNCH: ProxyLaunch = installLaunchFor({
+  execPath: process.execPath,
+  electron: process.versions.electron !== undefined,
+  modulePath: fileURLToPath(import.meta.url),
+  platform: process.platform,
+  exists: existsSync,
+  pathVariable: process.env.PATH ?? "",
+});
 
 /** Where a wrapped entry's proxy finds latch.lock and its state directory, given as latch options. */
 export interface ProxyPaths {

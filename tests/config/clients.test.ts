@@ -14,6 +14,7 @@ import {
   clientConfigPath,
   clientLocations,
   detectClients,
+  installLaunchFor,
   unwrapProxy,
   withoutLatchEnv,
   wrapWithProxy,
@@ -771,5 +772,51 @@ describe.skipIf(onWindows)("writeClientConfig", () => {
     await writeClientConfig(wrapAll(config));
     expect((await lstat(config.path)).isSymbolicLink()).toBe(true);
     expect(JSON.parse(await readFile(real, "utf8")).mcpServers.weather.command).toBe("latch");
+  });
+});
+
+describe("installLaunchFor", () => {
+  const files = (...paths: string[]) => (path: string) => paths.includes(path);
+  const flags = PROXY_NODE_FLAGS;
+
+  it("uses the running node outside Electron", () => {
+    expect(
+      installLaunchFor({ execPath: "/opt/node/bin/node", electron: false, modulePath: "/opt/app/dist/config/clients.js", platform: "linux", exists: () => false, pathVariable: "" }),
+    ).toEqual({ command: "/opt/node/bin/node", args: [...flags, "/opt/app/dist/cli.js"] });
+  });
+
+  it("never wraps a server with the desktop app's own binary: an installed app uses the bundled node and CLI", () => {
+    const root = "/usr/lib/latchverify";
+    const launch = installLaunchFor({
+      execPath: `${root}/desktop/latchverify-desktop`,
+      electron: true,
+      modulePath: `${root}/desktop/resources/app/dist/config/clients.js`,
+      platform: "linux",
+      exists: files(`${root}/install-kind`, `${root}/node/bin/node`, `${root}/app/dist/cli.js`),
+      pathVariable: "/usr/bin",
+    });
+    expect(launch).toEqual({ command: `${root}/node/bin/node`, args: [...flags, `${root}/app/dist/cli.js`] });
+  });
+
+  it("finds the bundled node.exe on Windows", () => {
+    const root = "C:\\Users\\me\\AppData\\Local\\Programs\\LatchVerify";
+    const launch = installLaunchFor({
+      execPath: `${root}\\desktop\\latchverify-desktop.exe`,
+      electron: true,
+      modulePath: `${root}\\desktop\\resources\\app\\dist\\config\\clients.js`,
+      platform: "win32",
+      exists: files(`${root}\\install-kind`, `${root}\\node\\node.exe`, `${root}\\app\\dist\\cli.js`),
+      pathVariable: "",
+    });
+    expect(launch).toEqual({ command: `${root}\\node\\node.exe`, args: [...flags, `${root}\\app\\dist\\cli.js`] });
+  });
+
+  it("takes node from PATH when the app runs from a checkout, and never the Electron binary", () => {
+    const electron = { execPath: "/repo/node_modules/electron/dist/electron", electron: true, modulePath: "/repo/dist/config/clients.js", platform: "linux" as const };
+    expect(installLaunchFor({ ...electron, exists: files("/usr/local/bin/node"), pathVariable: "/nope:/usr/local/bin" })).toEqual({
+      command: "/usr/local/bin/node",
+      args: [...flags, "/repo/dist/cli.js"],
+    });
+    expect(installLaunchFor({ ...electron, exists: () => false, pathVariable: "/nope" })).toEqual({ command: "node", args: [...flags, "/repo/dist/cli.js"] });
   });
 });
