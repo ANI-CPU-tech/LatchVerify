@@ -142,6 +142,28 @@ describe.skipIf(process.platform === "win32")("startWatcher", { timeout: 30_000 
     expect(shown[1]!.title).toContain("no integrity record");
   });
 
+  it("reads each appended event once, however many change events the folder fires", async () => {
+    await mkdir(options.stateDir, { recursive: true });
+    // A short window: a line read twice shows up as a second notification, with a count, when it closes.
+    watcher = await startWatcher({ ...options, blockWindowMs: 100 });
+    const path = join(options.stateDir, "events.jsonl");
+    const line = (tool: string) => `${JSON.stringify({ kind: "call_blocked", at: new Date().toISOString(), serverId: "weather", toolName: tool, reason: "unpinned" })}\n`;
+    const tools = Array.from({ length: 40 }, (_, i) => `tool_${i}`);
+    await Promise.all(tools.map((tool) => appendFile(path, line(tool))));
+    await eventually(() => expect(new Set(shown.map((notification) => notification.title)).size).toBe(tools.length));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(shown).toHaveLength(tools.length);
+  });
+
+  it("says so when it links a server the user just added to a connected client", async () => {
+    await updateSettings(options.settingsPath, { clients: { cursor: true } });
+    await mkdir(dirname(clientConfigPath("cursor")), { recursive: true });
+    watcher = await startWatcher(options);
+    await writeFile(clientConfigPath("cursor"), JSON.stringify({ mcpServers: { added: stub } }));
+    await eventually(() => expect(shown.map((notification) => notification.title)).toContain("LatchVerify linked added"));
+    expect(shown.find((notification) => notification.title === "LatchVerify linked added")!.body).toContain("first run");
+  });
+
   it("stays quiet when notifications are off", async () => {
     await updateSettings(options.settingsPath, { notifications: false });
     await writePending(options.stateDir, [change("chg_1", 3)]);

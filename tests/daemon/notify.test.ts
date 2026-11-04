@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { APP_ID, callsBlocked, changeQueued, desktopNotifier, notifySendArgs, pendingSummary, toastXml } from "../../src/daemon/notify.js";
+import { APP_ID, callsBlocked, changeQueued, desktopNotifier, notifySendArgs, pendingSummary, serversLinked, toastXml } from "../../src/daemon/notify.js";
 import type { PendingChange, ToolRecord } from "../../src/schema/index.js";
 
 const record = (name: string): ToolRecord => ({
@@ -52,6 +52,15 @@ describe("pendingSummary", () => {
   it("names three tools and counts the rest", () => {
     const queue = ["a", "b", "c", "d", "e"].map((name) => change(name, 2));
     expect(pendingSummary(queue)!.body).toBe("weather/a, weather/b, weather/c and 2 more. Their calls are blocked until you approve or reject them.");
+  });
+});
+
+describe("serversLinked", () => {
+  it("names the servers, safely, and says what happens next", () => {
+    expect(serversLinked(["a"]).title).toBe("LatchVerify linked a");
+    expect(serversLinked(["a", "b"]).title).toBe("LatchVerify linked 2 new servers");
+    expect(serversLinked(["a\u001b[31m"]).title).not.toContain("\u001b");
+    expect(serversLinked(["a"]).body).toContain("first run");
   });
 });
 

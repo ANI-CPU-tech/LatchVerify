@@ -7,7 +7,7 @@ import { LatchEventSchema, type LatchEvent, type PendingChange, type Settings } 
 import { EVENTS_FILE } from "../store/events.js";
 import { PENDING_FILE, readPending } from "../store/pending.js";
 import { readSettings } from "../store/settings.js";
-import { callsBlocked, changeQueued, clientFound, lockAlert, pendingSummary, type Notifier } from "./notify.js";
+import { callsBlocked, changeQueued, clientFound, lockAlert, pendingSummary, serversLinked, type Notifier } from "./notify.js";
 import { syncClients, type SyncResult } from "./sync.js";
 
 export interface WatchOptions {
@@ -88,8 +88,8 @@ async function claim(stateDir: string): Promise<string> {
  * - Syncs at start (syncClients), then DEBOUNCE ms after any change in a folder holding a client
  *   config or settings.json, and every POLL ms, which also covers clients installed later and
  *   folders that did not exist at start. Syncs never overlap; a change during one runs one more.
- * - Links only the clients the user connected. A client found that the user was never asked
- *   about is announced once (clientFound) and left alone.
+ * - Links only the clients the user connected, and says which servers it linked (serversLinked). A
+ *   client found that the user was never asked about is announced once (clientFound) and left alone.
  * - At start, with notifications on, shows how many changes wait for review (pendingSummary).
  * - When a proxy queues a change (pending.json gains an id), shows changeQueued.
  * - When a proxy blocks a call (events.jsonl gains call_blocked), shows callsBlocked; repeats for
@@ -146,6 +146,7 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
       ...(options.launch === undefined ? {} : { launch: options.launch }),
     });
     report(result);
+    if (result.linked.length > 0) await notify("linked", serversLinked(result.linked));
     for (const { client, servers } of result.unasked) {
       if (announced.has(client)) continue;
       announced.add(client);
@@ -243,7 +244,14 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
   let offset = await stat(eventsPath).then((info) => info.size, () => 0);
   let partial = "";
   const recent = new Map<string, { count: number; timer: NodeJS.Timeout; event: Extract<LatchEvent, { kind: "call_blocked" }> }>();
-  const checkEvents = async () => {
+  // One read at a time: a folder fires several change events per write, and overlapping reads would
+  // see the same bytes and report each event more than once.
+  let eventsRead: Promise<void> = Promise.resolve();
+  const checkEvents = () => {
+    eventsRead = eventsRead.then(readNewEvents).catch((error: unknown) => log.warn(`could not read the event log: ${error instanceof Error ? error.message : String(error)}`));
+    return eventsRead;
+  };
+  const readNewEvents = async () => {
     let size: number;
     try {
       size = (await stat(eventsPath)).size;
@@ -329,6 +337,7 @@ export async function startWatcher(options: WatchOptions): Promise<Watcher> {
       for (const watcher of watchers.values()) watcher.close();
       watchers.clear();
       await running;
+      await eventsRead;
       claimed.delete(marker);
       await rm(marker, { force: true });
     },

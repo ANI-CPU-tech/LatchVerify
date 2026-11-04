@@ -106,6 +106,13 @@ export function callsBlocked(event: Extract<LatchEvent, { kind: "call_blocked" }
   return { title: clean(title, MAX_TITLE), body: clean(`The AI client's call was stopped: ${blockReason(event.reason)}.`, MAX_BODY), urgency: urgent ? "critical" : "normal" };
 }
 
+/** The notification for servers just linked: added to a connected client, so now behind the proxy. */
+export function serversLinked(serverIds: readonly string[]): DesktopNotification {
+  const title = serverIds.length === 1 ? `LatchVerify linked ${serverIds[0]}` : `LatchVerify linked ${serverIds.length} new servers`;
+  const body = `${serverIds.length === 1 ? "A new server" : serverIds.join(", ")} now runs behind the proxy. On its first run its tools are pinned, and any with exec or credential access wait for your review.`;
+  return { title: clean(title, MAX_TITLE), body: clean(body, MAX_BODY), urgency: "normal" };
+}
+
 /** The notification for latch.lock changed outside LatchVerify, or found without an integrity record. */
 export function lockAlert(kind: "lock_tampered" | "lock_unrecorded"): DesktopNotification {
   return kind === "lock_tampered"
