@@ -36,6 +36,14 @@ describe("releaseNotes", () => {
     expect(notes).toContain("SHA256SUMS");
   });
 
+  it("names each package's exact file, never a glob that also matches an older download", () => {
+    const { notes } = releaseNotes(changelog, "0.2.0-rc.2");
+    expect(notes).toContain("`sudo pacman -U latchverify-bin-0.2.0rc2-1-x86_64.pkg.tar.zst`");
+    expect(notes).toContain("`sudo apt install ./latchverify_0.2.0.rc.2_amd64.deb`");
+    expect(notes).toContain("./latchverify-0.2.0-rc.2-linux-x64/install.sh");
+    expect(notes).not.toContain("*");
+  });
+
   it("falls back to plain notes, and rejects a version that is not one", () => {
     expect(releaseNotes(changelog, "3.0.0")).toMatchObject({ fromChangelog: false });
     expect(releaseNotes(changelog, "3.0.0").notes).toMatch(/^LatchVerify 3\.0\.0\./);

@@ -6,7 +6,7 @@
  * Without a section for the version it warns on stderr and writes plain notes instead.
  */
 import { readFileSync } from "node:fs";
-import { parseVersion } from "./version.js";
+import { archVersion, debVersion, parseVersion } from "./version.js";
 
 /** The body of the "## <version>" section, without its heading; null when there is none. */
 export function changelogSection(changelog: string, version: string): string | null {
@@ -19,17 +19,27 @@ export function changelogSection(changelog: string, version: string): string | n
   return body === "" ? null : body;
 }
 
-/** Which file to download for each system, and how to check it against SHA256SUMS. */
+/**
+ * Which file to download for each system, and how to check it against SHA256SUMS. Each command
+ * names its exact file: a glob such as latchverify-bin-*.pkg.tar.zst also matches an older download
+ * in the same folder, and pacman then stops with "duplicate target".
+ */
 export function downloads(version: string): string {
+  // GitHub turns the "~" of a pre-release's Debian version into "." in the asset's name.
+  const deb = `latchverify_${debVersion(version).replaceAll("~", ".")}_amd64.deb`;
+  const arch = `latchverify-bin-${archVersion(version)}-1-x86_64.pkg.tar.zst`;
+  const tarball = `latchverify-${version}-linux-x64`;
   return [
     "## Downloads",
     "",
     "| System | File | Install |",
     "|---|---|---|",
     `| Windows 10/11 (x64) | \`latchverify-${version}-windows-x64-setup.exe\` | Run it. No administrator rights needed. |`,
-    `| Debian / Ubuntu (x64) | \`latchverify_<version>_amd64.deb\` | \`sudo apt install ./latchverify_*_amd64.deb\` |`,
-    `| Arch / CachyOS (x64) | \`latchverify-bin-<version>-1-x86_64.pkg.tar.zst\` | \`sudo pacman -U latchverify-bin-*.pkg.tar.zst\` |`,
-    `| Other Linux (x64) | \`latchverify-${version}-linux-x64.tar.gz\` | Unpack, then run \`./install.sh\` |`,
+    `| Debian / Ubuntu (x64) | \`${deb}\` | \`sudo apt install ./${deb}\` |`,
+    `| Arch / CachyOS (x64) | \`${arch}\` | \`sudo pacman -U ${arch}\` |`,
+    `| Other Linux (x64) | \`${tarball}.tar.gz\` | \`tar -xzf ${tarball}.tar.gz && ./${tarball}/install.sh\` |`,
+    "",
+    "Installing a newer version replaces the one installed; there is no need to uninstall first.",
     "",
     "After installing, choose which MCP clients to connect (the Windows installer asks; on Linux run `latch setup`). An installed LatchVerify updates itself from signed releases. See [INSTALL.md](https://github.com/ANI-CPU-tech/LatchVerify/blob/main/INSTALL.md).",
     "",

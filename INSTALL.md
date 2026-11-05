@@ -109,6 +109,10 @@ To uninstall: `sudo apt remove latchverify`, or see [Uninstall from the app](#un
 sudo pacman -U latchverify-bin-<version>-1-x86_64.pkg.tar.zst
 ```
 
+Name the one file, not `latchverify-bin-*.pkg.tar.zst`: with an older download in the same folder,
+the pattern matches both and pacman stops with `duplicate target`. A newer package replaces the
+installed version; there is no need to remove the old one first.
+
 To uninstall: `sudo pacman -R latchverify-bin`, or see [Uninstall from the app](#uninstall-from-the-app).
 
 ### Option B — build the package yourself with makepkg
