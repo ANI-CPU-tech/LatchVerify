@@ -64,6 +64,14 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           Add-Content -Path $env:GITHUB_ENV -Value "VERSION=$(pnpm -s exec tsx packaging/version.ts semver)"
           Add-Content -Path $env:GITHUB_ENV -Value "FILE_VERSION=$(pnpm -s exec tsx packaging/version.ts windows)"
+      # Electron's download, keyed on package.json (its exact version): GitHub's release downloads
+      # time out now and then, and build-desktop.ts only retries twice.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package.json') }}
       - name: Stage the app, the desktop app and a verified Node.js 22
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
@@ -177,6 +185,14 @@ jobs:
             echo "DEB_VERSION=$(pnpm -s exec tsx packaging/version.ts deb)"
             echo "ARCH_VERSION=$(pnpm -s exec tsx packaging/version.ts arch)"
           } >> "$GITHUB_ENV"
+      # Electron's download, keyed on package.json (its exact version): GitHub's release downloads
+      # time out now and then, and build-desktop.ts only retries twice.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package.json') }}
       - name: Stage the app, the desktop app and a verified Node.js 22
         run: |
           pnpm -s exec tsx packaging/stage.ts build/stage

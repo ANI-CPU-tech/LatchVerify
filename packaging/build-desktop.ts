@@ -22,6 +22,25 @@ export const DESKTOP_MAIN = "dist/desktop/main.js";
 /** The app's executable name, without .exe; the installers and the autostart entries use it. */
 export const DESKTOP_EXECUTABLE = "latchverify-desktop";
 
+/** Download failures worth another try: a GitHub 5xx or 429, a timeout, a dropped connection. */
+export function isTransientDownloadError(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.message} ${(error as NodeJS.ErrnoException).code ?? ""}` : String(error);
+  return /Response code (5\d\d|429)|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|network timeout/i.test(message);
+}
+
+/** Runs `attempt`, again after `delays[i]` ms while it fails with a transient download error. */
+export async function withDownloadRetries<T>(attempt: () => Promise<T>, delays: readonly number[] = [15_000, 45_000], log: (line: string) => void = console.error): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (i >= delays.length || !isTransientDownloadError(error)) throw error;
+      log(`build-desktop: ${error instanceof Error ? error.message : String(error)}; retrying in ${delays[i]! / 1000} s`);
+      await new Promise((done) => setTimeout(done, delays[i]));
+    }
+  }
+}
+
 export async function buildDesktop(stageDir: string, platform: "linux" | "win32", arch: "x64" | "arm64"): Promise<string> {
   const stage = resolve(stageDir);
   const app = join(stage, "app");
@@ -32,7 +51,8 @@ export async function buildDesktop(stageDir: string, platform: "linux" | "win32"
 
   const out = join(stage, "desktop-build");
   rmSync(out, { recursive: true, force: true });
-  const [built] = await packager({
+  // Electron comes from GitHub's release downloads, which answer 504 now and then.
+  const [built] = await withDownloadRetries(() => packager({
     dir: app,
     out,
     name: "LatchVerify",
@@ -48,7 +68,7 @@ export async function buildDesktop(stageDir: string, platform: "linux" | "win32"
     icon: join(root, "packaging", "windows", "latchverify.ico"),
     win32metadata: { CompanyName: "LatchVerify contributors", FileDescription: "LatchVerify", ProductName: "LatchVerify" },
     sanitizePackageJson: [defaultSanitizePackageJson, (json) => ({ ...json, main: DESKTOP_MAIN })],
-  });
+  }));
   if (!built) throw new Error("electron packager built nothing");
   const desktop = join(stage, "desktop");
   rmSync(desktop, { recursive: true, force: true });
