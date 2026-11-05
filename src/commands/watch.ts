@@ -25,7 +25,7 @@ export interface WatchCommandOptions {
 }
 
 /** A sync's outcome as lines for people. */
-export function describeSync(result: SyncResult): string[] {
+function describeSync(result: SyncResult): string[] {
   const lines: string[] = [];
   for (const id of result.linked) lines.push(`${pc.green("✔")} added ${printable(id)} to latch.lock; its tools are pinned the first time it runs`);
   for (const wrapped of result.wrapped) {

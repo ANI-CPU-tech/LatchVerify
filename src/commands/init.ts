@@ -134,23 +134,12 @@ function listOf(items: readonly string[]): string {
 }
 
 /**
- * `latch init`: put the MCP servers in this machine's client configs behind latch.
- *
- * 1. Reads latch.lock (a malformed one stops init before anything changes) and detects client
- *    configs, or only `client`'s.
- * 2. Collects their stdio servers (collectServers), asks which to wrap with a multiselect (all
- *    pre-selected; skipped when not interactive), and links each chosen server latch.lock does
- *    not have yet (linkServer): its launch is recorded and its tools are pinned by the proxy on
- *    the server's first run. Nothing is started here, so init never handles the keys in a
- *    client's config. A server already in latch.lock is left as pinned: changes to it go through
- *    `latch review`, never through a re-run of init.
- * 3. Writes latch.lock, then rewrites each client entry to run `latch proxy` (by absolute path,
- *    see INSTALL_LAUNCH) with --lockfile and --state-dir (`stateDir`, by default
- *    <lockfile dir>/.latch), so the proxy finds them whatever directory the client starts it in.
- *    Only the entry's command and args change; its env, which holds the server's keys, is never
- *    touched. The lockfile goes first: a config is only ever wrapped around a linked server.
- *
- * Running init again changes nothing. With `dryRun`, nothing is written.
+ * `latch init`: put the MCP servers in this machine's client configs behind latch. Asks which
+ * servers to wrap (all pre-selected; no prompt when not interactive), links those latch.lock does
+ * not have (their tools are pinned by the proxy on first run: nothing is started here, so init
+ * never handles the keys in a client's config), writes latch.lock, then rewrites each entry's
+ * command and args to run `latch proxy` with --lockfile and --state-dir. A server already pinned
+ * stays as pinned; changes to it go through `latch review`. Running it again changes nothing.
  *
  * Resolves with 0 when every chosen server was handled (or none was chosen), 1 when no client
  * config was found, the prompt was cancelled, or any server was skipped or failed.

@@ -1,10 +1,6 @@
 import { z } from "zod";
 
-/**
- * The LatchVerify app's bridge (src/desktop/preload.cts), present only inside the app's window.
- * In a browser (`latch review --ui`, `pnpm ui`) there is none, and the Settings page says how to
- * update or uninstall from a terminal instead. Every answer is validated before the page uses it.
- */
+/** The LatchVerify app's bridge (src/desktop/preload.cts), present only inside the app's window. */
 interface Bridge {
   updateStatus(): Promise<unknown>;
   checkForUpdates(): Promise<unknown>;

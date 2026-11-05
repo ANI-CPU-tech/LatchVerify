@@ -33,23 +33,12 @@ export interface SyncResult {
 }
 
 /**
- * Brings every enabled client in line with latch.lock: each stdio server runs behind `latch proxy`
- * and is pinned. Run by `latch watch` (and the desktop app) whenever a client config changes.
- *
- * 1. Detects the client configs and collects their servers (collectServers), unwrapping any that
- *    already run latch, so a wrapped server and its original count as one.
- * 2. Links every server latch.lock does not have yet (linkServer). Nothing is started: the
- *    proxy pins the tools on the server's first run, inside the process the client starts with
- *    its own env, so the sync never reads or uses the keys in a client's config.
- * 3. Under the state lock, merges those servers into latch.lock as it is now (mergeServers): a
- *    pin or approval made meanwhile is never overwritten.
- * 4. Rewrites the client entries of servers whose launch matches latch.lock (planRewrites). That
- *    wraps new servers, re-wraps an entry the client turned back into the original, and repairs
- *    one that starts an old latch (a moved install), while an entry already right is not touched.
- *
- * Linking comes before wrapping, so a wrapped server is always in latch.lock. Only clients the
- * user connected (settings.clients[id] true) are touched: one never asked about is reported in
- * `unasked` and left alone, and non-stdio servers are never touched.
+ * Brings every connected client in line with latch.lock, whenever a client config changes: links
+ * servers latch.lock does not have (pinned on their first run, inside the process the client starts
+ * with its own env, so the sync never reads or uses a client's keys), merges them under the state
+ * lock so a pin or approval made meanwhile is kept, then wraps new servers, re-wraps entries a
+ * client turned back, and repairs those of a moved install. Linking comes before wrapping. A client
+ * never asked about is only reported in `unasked`; non-stdio servers are never touched.
  */
 export async function syncClients(options: SyncOptions): Promise<SyncResult> {
   const now = options.now ?? (() => new Date());

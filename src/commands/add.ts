@@ -62,17 +62,10 @@ export function parseEnv(values: readonly string[], source: NodeJS.ProcessEnv): 
 }
 
 /**
- * `latch add`: put one MCP server behind latch, in one client.
- *
- * 1. Reads latch.lock and the client's config. Refuses, writing nothing, when the name is already
- *    in either: an existing server is never overwritten, and changes to a pinned one go through
- *    `latch review`.
- * 2. Links it in latch.lock (linkServer): its tools are pinned by the proxy the first time the
- *    client starts it, trust on first use with tier-3 tools held for review. Nothing is
- *    started here, so the --env values are never used by latch itself.
- * 3. Writes latch.lock, then adds the server to the client config, wrapped with `latch proxy`
- *    by absolute path (proxiedEntry). Every other server and key of the config stays as it is.
- *    Env values are written to the config but never printed.
+ * `latch add`: put one MCP server behind latch, in one client. Refuses, writing nothing, when the
+ * name is already in latch.lock or the config. Links it (tools pinned on its first run), then adds
+ * it to the config wrapped with `latch proxy`. --env values go into the config, never printed or
+ * used by latch.
  *
  * Resolves with 0 on success (or a dry run that would succeed), 1 when refused.
  *

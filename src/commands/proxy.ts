@@ -17,18 +17,10 @@ export interface ProxyCommandOptions {
 }
 
 /**
- * `latch proxy --server <id> -- <cmd> [args...]` (internal; written into client configs by init)
- *
- * Checks that a server id and a command were given, resolves the lockfile and state paths to
- * absolute ones, and delegates to startProxy(). Resolves with the real server's exit code.
- *
- * Clients launch servers from a working directory of their choosing (Claude Desktop uses "/"),
- * and a wrapped entry has nowhere to put global flags, so src/cli.ts resolves the paths with
- * statePaths(): LATCH_LOCKFILE_PATH and LATCH_STATE_DIR from the entry's `env` apply when
- * --lockfile or --state-dir was not given.
- *
- * stdout carries nothing but JSON-RPC: problems are thrown for the CLI to print on stderr, and
- * the proxy logs to stderr and .latch/events.jsonl.
+ * `latch proxy --server <id> -- <cmd> [args...]` (internal; written into client configs): resolves
+ * the lockfile and state paths to absolute ones and runs startProxy(). Resolves with the real
+ * server's exit code. stdout carries nothing but JSON-RPC: problems are thrown for the CLI to print
+ * on stderr.
  *
  * @throws Error for a missing server id or command, or as startProxy does: a malformed
  * latch.lock or pending queue, or a server that cannot be started.

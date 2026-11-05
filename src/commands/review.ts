@@ -46,27 +46,14 @@ export interface ReviewOptions {
 const BUILT_UI_DIRS = [new URL("../web/", import.meta.url), new URL("../../dist/web/", import.meta.url)];
 
 /**
- * `latch review`: walk the pending queue in review order. Each change is shown with its tier,
- * what changed in the definition (the queue stores hashes, not text, so segments rather than a
- * text diff), the capability delta and every finding, then decided:
+ * `latch review`: walk the pending queue in review order, showing each change's tier, changed
+ * segments, capability delta and findings, then Approve (written to latch.lock before the queue,
+ * so a crash leaves it queued; tier 3 asks twice), Reject (kept in rejected.json, blocked across
+ * restarts), Skip or Quit. Each decision re-reads latch.lock and the queue first; a change gone
+ * from the queue by then is not approved, since the reviewer has not seen what is there now.
  *
- * - Approve: applyApproval, write latch.lock, then drop the change from the queue and log it.
- *   latch.lock goes first, as in the review API: a crash in between leaves the change queued
- *   and approving again is idempotent. A tier-3 approval needs a second confirmation.
- * - Reject: record the definition in rejected.json, drop the change from the queue and log it.
- *   latch.lock is untouched, and the proxy blocks calls to the tool, across restarts, for as long
- *   as the server serves that definition.
- * - Skip leaves it queued; Quit (or Ctrl+C) stops, keeping every decision made so far.
- *
- * Each decision re-reads latch.lock and the queue first, because a running proxy or the review
- * UI may have changed them. A change gone from the queue by then (resolved elsewhere, or
- * replaced by a newer definition) is not approved: the reviewer has not seen what is there now.
- *
- * Without a terminal (or with `interactive: false`) the queue is only listed.
- *
- * With `ui`, the review API and the built web UI are served on 127.0.0.1:`port` instead and the
- * browser is opened on them; they run until Ctrl+C. Approvals there are recorded as the same
- * reviewer.
+ * Without a terminal the queue is only listed. With `ui`, the review UI is served on
+ * 127.0.0.1:`port` until Ctrl+C; no browser is opened.
  *
  * Resolves with 0, or 1 when an approval could not be recorded.
  *

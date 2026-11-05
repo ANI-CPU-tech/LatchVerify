@@ -63,12 +63,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  /**
-   * Applies at once. A change the viewer picks cross-fades the whole page with the View Transition
-   * API: a snapshot of the old theme fades into the new one, sky gradient and artwork included,
-   * which per-property CSS transitions cannot do (gradients do not transition and the day and
-   * night art are different elements). Without the API, or with reduced motion, it switches at once.
-   */
+  /** Applies at once. */
   const setPreference = (next: ThemePreference) => {
     const saved = writePreference(safeStorage(), next);
     const nextTheme = resolveTheme(next, prefersDark);

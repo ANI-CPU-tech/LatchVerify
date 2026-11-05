@@ -10,7 +10,6 @@ import { CLIENT_NAMES } from "../config/client-names.js";
 import { runInit } from "./init.js";
 import { configPlace, oldBackupWarning, plural, printable, problemWarning } from "./text.js";
 
-export { CLIENT_NAMES };
 
 export interface SetupOptions {
   /** The client to link (--client), or undefined for every client found (--all). Naming it is the user's consent. */
@@ -30,20 +29,11 @@ export interface SetupOptions {
 }
 
 /**
- * `latch setup --client <id>` or `latch setup --all`: link that client, or every client found, to
- * latch with no questions. Naming the clients is the user's consent, recorded in settings.json
- * (clients[id] = true), so the background sync keeps them linked, new servers included. Plain
- * `latch setup` asks first (runSetupAsk).
- *
- * 1. Creates the lockfile (by default the per-user one, see userLockfilePath) if it does not exist,
- *    so latch review and verify find it from any directory without asking.
- * 2. When the client's config exists, runs `latch init` for that client (or all), non-interactively: every
- *    stdio server is pinned (trust on first use; tier-3 tools are held for
- *    review) and its entry rewritten to start `latch proxy` (command and args only; env is never touched).
- *
- * Safe to run again: pinned servers stay as pinned and wrapped entries are left alone. When the
- * client is not installed yet it says so and resolves 0, so an installer never fails over it; run
- * `latch setup` again after installing the client.
+ * `latch setup --client <id>` or `--all`: link that client, or every one found, with no questions.
+ * Naming the clients is the user's consent, recorded in settings.json so the background sync keeps
+ * them linked. Creates the lockfile if needed, then runs `latch init` for them non-interactively
+ * (command and args only; env is never touched). Safe to run again. A client not installed yet is
+ * reported and resolves 0, so an installer never fails over it.
  *
  * Resolves with init's result: 0 when every server was handled, 1 when any was skipped or failed.
  */

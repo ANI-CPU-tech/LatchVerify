@@ -34,9 +34,9 @@ export interface Watcher {
   close(): Promise<void>;
 }
 
-export const DEFAULT_DEBOUNCE_MS = 1000;
-export const DEFAULT_POLL_MS = 60_000;
-export const DEFAULT_BLOCK_WINDOW_MS = 60_000;
+const DEFAULT_DEBOUNCE_MS = 1000;
+const DEFAULT_POLL_MS = 60_000;
+const DEFAULT_BLOCK_WINDOW_MS = 60_000;
 
 /** The single-instance marker in the state directory, holding the watcher's pid. */
 export const WATCH_PID_FILE = "watch.pid";
