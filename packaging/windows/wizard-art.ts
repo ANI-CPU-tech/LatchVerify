@@ -255,8 +255,10 @@ export function png(canvas: Canvas): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", new Uint8Array())]);
 }
 
-/** "#rrggbb", as Inno Setup's WizardBackColor and StrToColor take it. */
+/** "#rrggbb", as Inno Setup's WizardBackColor takes it. */
 const hex = (color: Rgb) => `#${color.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+/** A Pascal TColor literal, $00bbggrr: needs no StrToColor, which older Inno Setup 6 releases lack. */
+const tColor = ([r, g, b]: Rgb) => `$00${[b, g, r].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 
 /** Writes every image and the three include files into `out`. Returns the files written. */
 export function writeWizardArt(out: string): string[] {
@@ -289,7 +291,7 @@ export function writeWizardArt(out: string): string[] {
         const name = write(`button-${kind}-${state}-${mode}.png`, buttonImage(button));
         files.push(`Source: "${join(resolve(out), name)}"; Flags: dontcopy noencryption`);
         // The label the installer draws over the image (#define for its [Code]).
-        if (state !== "hover") setup[mode]!.push(`#define ButtonText_${kind}_${state}_${mode} "${hex(state === "disabled" ? mix(button.text, button.fill, 0.5) : button.text)}"`);
+        if (state !== "hover") setup[mode]!.push(`#define ButtonText_${kind}_${state}_${mode} "${tColor(state === "disabled" ? mix(button.text, button.fill, 0.5) : button.text)}"`);
       }
     }
   }

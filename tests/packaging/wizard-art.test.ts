@@ -36,9 +36,13 @@ describe("the installer's wizard art", () => {
       expect(light).toMatch(/^WizardSmallImageFile=.*wizard-small-light-58\.png,/m);
       expect(dark).toMatch(/^WizardBackImageFileDynamicDark=.*wizard-back-dark-1630x1148\.png$/m);
       for (const directive of ["WizardBackColorDynamicDark", "WizardImageFileDynamicDark", "WizardSmallImageFileDynamicDark"]) expect(dark).toMatch(new RegExp(`^${directive}=`, "m"));
-      // Every color latchverify.iss's [Code] reads.
+      // Every color latchverify.iss's [Code] reads, as a TColor literal: no StrToColor, NativeInt or other
+      // script API newer than the Inno Setup 6.6 the workflow installs.
       const iss = read("packaging/windows/latchverify.iss");
-      for (const [, name] of iss.matchAll(/\{#(ButtonText_\w+)\}/g)) expect(light + dark).toMatch(new RegExp(`^#define ${name} "#[0-9a-f]{6}"$`, "m"));
+      const used = [...iss.matchAll(/\{#(ButtonText_\w+)\}/g)];
+      expect(used).toHaveLength(8);
+      for (const [, name] of used) expect(light + dark).toMatch(new RegExp(`^#define ${name} "\\$00[0-9a-f]{6}"$`, "m"));
+      expect(iss).not.toMatch(/\bStrToColor\b|\bNativeInt\b/);
       const listed = await readFile(join(out, "wizard-files.iss"), "utf8");
       for (const kind of BUTTON_KINDS) for (const state of BUTTON_STATES) for (const mode of ["light", "dark"]) expect(listed).toContain(`button-${kind}-${state}-${mode}.png"; Flags: dontcopy noencryption`);
     } finally {

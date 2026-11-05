@@ -151,7 +151,7 @@ const
 var
   ThemedButtons: array of TThemedButton;
 
-function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT; lpTimerFunc: NativeInt): UINT_PTR;
+function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT; lpTimerFunc: LongWord): UINT_PTR; { LongWord: Inno Setup 6.6 lacks the newer pointer-sized type, and this Setup is 32-bit }
   external 'SetTimer@user32.dll stdcall';
 function GetCursorPos(var Point: TCursorPoint): BOOL;
   external 'GetCursorPos@user32.dll stdcall';
@@ -173,20 +173,20 @@ begin
   begin
     if Kind = 'primary' then
     begin
-      if Enabled then Result := StrToColor('{#ButtonText_primary_normal_dark}')
-      else Result := StrToColor('{#ButtonText_primary_disabled_dark}');
+      if Enabled then Result := {#ButtonText_primary_normal_dark}
+      else Result := {#ButtonText_primary_disabled_dark};
     end else begin
-      if Enabled then Result := StrToColor('{#ButtonText_secondary_normal_dark}')
-      else Result := StrToColor('{#ButtonText_secondary_disabled_dark}');
+      if Enabled then Result := {#ButtonText_secondary_normal_dark}
+      else Result := {#ButtonText_secondary_disabled_dark};
     end;
   end else begin
     if Kind = 'primary' then
     begin
-      if Enabled then Result := StrToColor('{#ButtonText_primary_normal_light}')
-      else Result := StrToColor('{#ButtonText_primary_disabled_light}');
+      if Enabled then Result := {#ButtonText_primary_normal_light}
+      else Result := {#ButtonText_primary_disabled_light};
     end else begin
-      if Enabled then Result := StrToColor('{#ButtonText_secondary_normal_light}')
-      else Result := StrToColor('{#ButtonText_secondary_disabled_light}');
+      if Enabled then Result := {#ButtonText_secondary_normal_light}
+      else Result := {#ButtonText_secondary_disabled_light};
     end;
   end;
 end;
