@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import pc from "picocolors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installersByKind, makeManifest } from "../../packaging/make-latest-json.js";
+import { installersByKind, makeManifest, parseSigningKey } from "../../packaging/make-latest-json.js";
 import { offerLines } from "../../src/commands/update.js";
 import { INSTALL_KIND_FILE, checkForUpdate, download, installCommand, installKind, isNewer, runInstall, signatureValid, signedMessage, updateUrl, type Offer } from "../../src/update/index.js";
 
@@ -195,5 +195,34 @@ describe("make-latest-json", () => {
     expect(() => makeManifest("1.2.4-rc.1", dir, privateKey, "", new Date(), publicKey)).toThrow("pre-release");
     expect(() => makeManifest("1.2.3", dir, keys().privateKey, "", new Date(), publicKey)).toThrow("does not match the public key the apps ship");
     expect(() => installersByKind(files.slice(1))).toThrow("expected one inno installer, found 0");
+  });
+
+  describe("parseSigningKey", () => {
+    const base64 = privateKey.split("\n").filter((line) => line !== "" && !line.startsWith("-----")).join("");
+    const lines = privateKey.trimEnd().split("\n");
+
+    // Each of these made createPrivateKey fail the release with "DECODER routines::unsupported".
+    it.each([
+      ["as keygen.ts prints it", privateKey],
+      ["with Windows line endings", lines.join("\r\n")],
+      ["indented, as copied from a rendered terminal", lines.map((line) => `  ${line}`).join("\n")],
+      ["joined on one line by spaces", lines.join(" ")],
+      ["joined on one line with no separator", lines.join("")],
+      ["with \\n written out", lines.join("\\n")],
+      ["wrapped in quotes", `"${privateKey}"`],
+      ["as a JSON string", JSON.stringify(privateKey)],
+      ["only its base64 line", base64],
+      ["with the public key after it", `${privateKey}\n${publicKey}`],
+      ["with the public key before it", `${publicKey}\n${privateKey}`],
+    ])("reads the key %s", (_name, secret) => {
+      expect(parseSigningKey(secret).export({ type: "pkcs8", format: "pem" })).toBe(privateKey);
+    });
+
+    it("signs a manifest the apps accept from a reshaped key", async () => {
+      const files = ["latchverify-1.2.3-windows-x64-setup.exe", "latchverify_1.2.3_amd64.deb", "latchverify-bin-1.2.3-1-x86_64.pkg.tar.zst", "latchverify-1.2.3-linux-x64.tar.gz"];
+      for (const file of files) await writeFile(join(dir, file), `contents of ${file}`);
+      const latest = makeManifest("1.2.3", dir, lines.map((line) => `  ${line}`).join("\n"), "## 1.2.3\n\nFixed things.\n", new Date(), publicKey);
+      expect(await checkForUpdate("deb", { current: "1.2.2", publicKey, fetch: fetchJson(latest) })).toMatchObject({ version: "1.2.3" });
+    });
   });
 });
