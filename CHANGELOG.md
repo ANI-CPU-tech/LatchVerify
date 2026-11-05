@@ -2,7 +2,7 @@
 
 ## 0.2.0 - 2026-11-05
 
-The LatchVerify app, installers for Windows and Linux, signed updates, and consent before any MCP client is connected. Installs of 0.2.0-rc.1 and 0.2.0-rc.2 are offered this release.
+The LatchVerify app, installers for Windows and Linux, signed updates, and consent before any MCP client is connected. The release signing key was rotated for this release, so installs of 0.2.0-rc.1 and 0.2.0-rc.2 cannot verify it and are not offered it: install 0.2.0 once by hand, and updates come by themselves from then on.
 
 ### Installers
 - **The Windows installer looks like LatchVerify**: the landscape behind every page, the padlock icon on the Welcome page, and the app's own buttons (orange Next and Install, card-style Back and Cancel, with hover and disabled states), in Default Light's colors in Windows light mode and Terminal Dark's in dark mode.
