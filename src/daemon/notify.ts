@@ -18,7 +18,7 @@ export interface DesktopNotification {
 export type Notifier = (notification: DesktopNotification) => Promise<void>;
 
 /** The app's id: the desktop entry and icon name on Linux, the AppUserModelID of the Start menu shortcut on Windows. */
-export const APP_ID = "io.github.vinayakkam.LatchVerify";
+export const APP_ID = "io.github.ANI-CPU-tech.LatchVerify";
 
 const MAX_TITLE = 80;
 const MAX_BODY = 240;

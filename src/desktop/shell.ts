@@ -60,7 +60,7 @@ export function autostartPath(home: string, env: NodeJS.ProcessEnv = process.env
 /** The autostart entry starting `executable` hidden in the tray. The path is quoted per the Desktop Entry spec. */
 export function autostartEntry(executable: string): string {
   const quoted = `"${executable.replace(/(["`$\\])/g, "\\$1")}"`;
-  return ["[Desktop Entry]", "Type=Application", "Name=LatchVerify", "Comment=Keeps your MCP clients behind LatchVerify", `Exec=${quoted} --hidden`, "Icon=io.github.vinayakkam.LatchVerify", "Terminal=false", "X-GNOME-Autostart-enabled=true", ""].join("\n");
+  return ["[Desktop Entry]", "Type=Application", "Name=LatchVerify", "Comment=Keeps your MCP clients behind LatchVerify", `Exec=${quoted} --hidden`, "Icon=io.github.ANI-CPU-tech.LatchVerify", "Terminal=false", "X-GNOME-Autostart-enabled=true", ""].join("\n");
 }
 
 /** The route a notification click opens. */
