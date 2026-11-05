@@ -4,8 +4,9 @@
 ;
 ; <stage> holds app\ (packaging/stage.ts), node\ (fetch-node.ps1) and desktop\ (packaging/build-desktop.ts). Add /DSignTool=1 together with
 ; /Slatchsign=<command> to Authenticode-sign the installer and uninstaller. Add /DWizardArtDir=<dir> after
-; `tsx packaging/windows/wizard-art.ts <dir>` for the app's landscape in the wizard: Default Light's sunset
-; in Windows light mode, Terminal Dark's night in dark mode (Inno Setup 6.6 or newer).
+; `tsx packaging/windows/wizard-art.ts <dir>` for the LatchVerify look (Inno Setup 6.6 or newer): the app's
+; landscape behind the whole wizard and the app's own buttons, in Default Light's colors in Windows light
+; mode and Terminal Dark's in dark mode. Without it the wizard has the stock look.
 ;
 ; Per-user install: no administrator rights, nothing written outside the user's profile. Installing
 ; connects no MCP client unless the user ticks that task or passes /TASKS=linkclients, as on Linux; an
@@ -61,8 +62,10 @@ OutputBaseFilename=latchverify-{#AppVersion}-windows-x64-setup
 Compression=lzma2/max
 SolidCompression=yes
 #if defined(WizardArtDir) && Ver >= EncodeVer(6,6,0)
-; Follows Windows light or dark mode, with the matching landscape on the Welcome and Finished pages.
-WizardStyle=modern dynamic
+#define ThemedWizard
+; Follows Windows light or dark mode: the theme's background color, the landscape behind every page
+; (no left-hand image), the padlock top right, and the app's buttons ([Code] below).
+WizardStyle=modern dynamic windows11 hidebevels
 DisableWelcomePage=no
 #include AddBackslash(WizardArtDir) + "wizard-art.iss"
 #include AddBackslash(WizardArtDir) + "wizard-art-dark.iss"
@@ -99,6 +102,10 @@ Source: "latch.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "latchverify.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; How `latch update` and the app install updates (src/update): with this installer.
 Source: "install-kind"; DestDir: "{app}"; Flags: ignoreversion
+#ifdef ThemedWizard
+; The button images [Code] draws; extracted to {tmp} while Setup runs, never installed.
+#include AddBackslash(WizardArtDir) + "wizard-files.iss"
+#endif
 
 [Icons]
 Name: "{group}\LatchVerify"; Filename: "{app}\desktop\latchverify-desktop.exe"; IconFilename: "{app}\latchverify.ico"; Comment: "Keep your MCP clients behind LatchVerify and review tool changes"; AppUserModelID: "io.github.ANI-CPU-tech.LatchVerify"

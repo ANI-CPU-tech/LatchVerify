@@ -57,8 +57,8 @@ describe("the installer's wizard art", () => {
   it("is drawn by the workflow and used by the installer script", () => {
     const iss = read("packaging/windows/latchverify.iss");
     expect(iss).toContain('#if defined(WizardArtDir) && Ver >= EncodeVer(6,6,0)');
-    expect(iss).toContain("WizardStyle=modern dynamic");
-    for (const file of ["wizard-art.iss", "wizard-art-dark.iss"]) expect(iss).toContain(`#include AddBackslash(WizardArtDir) + "${file}"`);
+    expect(iss).toContain("WizardStyle=modern dynamic windows11 hidebevels");
+    for (const file of ["wizard-art.iss", "wizard-art-dark.iss", "wizard-files.iss"]) expect(iss).toContain(`#include AddBackslash(WizardArtDir) + "${file}"`);
     const workflow = read(".github/workflows/build-installers.yml");
     expect(workflow).toContain("pnpm -s exec tsx packaging/windows/wizard-art.ts build/wizard");
     expect(workflow).toContain('"/DWizardArtDir=$env:GITHUB_WORKSPACE\\build\\wizard"');
