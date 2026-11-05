@@ -26,7 +26,7 @@ keep working whatever is on PATH.
 |---|---|
 | `stage.ts` | Copies the built app into `<out>/app` and installs production dependencies from `pnpm-lock.yaml` (frozen, no scripts, hoisted, so no symlinks). |
 | `build-desktop.ts` | Builds `<stage>/desktop` with `@electron/packager` from the staged app, with the Electron version pinned in `devDependencies`. |
-| `make-latest-json.ts`, `keygen.ts` | The signed update manifest the release job publishes (needs the `LATCH_UPDATE_SIGNING_KEY` secret), and a new key pair for it. |
+| `make-latest-json.ts`, `keygen.ts` | The signed update manifest the release job publishes (needs the `LATCH_UPDATE_SIGNING_KEY` secret: the whole private key `keygen.ts` prints, BEGIN and END lines included), and a new key pair for it. |
 | `version.ts` | `package.json`'s version in each format: `semver`, `deb` (`1.2.0~rc.1`), `arch` (`1.2.0rc1`), `windows` (`1.2.0.0`). |
 | `release-notes.ts` | The GitHub release body: the version's `CHANGELOG.md` section plus a downloads table. |
 | `linux/fetch-node.sh`, `windows/fetch-node.ps1` | Download a verified Node.js 22 into `<stage>/node`. `NODE_VERSION=v22.x.y` pins a release. |
