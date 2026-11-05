@@ -59,6 +59,9 @@ describe("the installer's wizard art", () => {
     expect(iss).toContain('#if defined(WizardArtDir) && Ver >= EncodeVer(6,6,0)');
     expect(iss).toContain("WizardStyle=modern dynamic windows11 hidebevels");
     for (const file of ["wizard-art.iss", "wizard-art-dark.iss", "wizard-files.iss"]) expect(iss).toContain(`#include AddBackslash(WizardArtDir) + "${file}"`);
+    // The drawn buttons press the wizard's own, which stay in the form for Enter and Esc.
+    for (const button of ["BackButton", "NextButton", "CancelButton"]) expect(iss).toMatch(new RegExp(`AddThemedButton\\(WizardForm\\.${button}, '(primary|secondary)'\\)`));
+    expect(iss).toContain("SetTimer(WizardForm.Handle, 1, 50, CreateCallback(@SyncThemedButtons))");
     const workflow = read(".github/workflows/build-installers.yml");
     expect(workflow).toContain("pnpm -s exec tsx packaging/windows/wizard-art.ts build/wizard");
     expect(workflow).toContain('"/DWizardArtDir=$env:GITHUB_WORKSPACE\\build\\wizard"');

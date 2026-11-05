@@ -128,6 +128,204 @@ Type: files; Name: "{app}\setup.log"
 const
   EnvKey = 'Environment';
 
+#ifdef ThemedWizard
+{ The app's buttons (buttonClass in web/src/components/ui.tsx) drawn over the wizard's own: Next as the
+  primary button, Back and Cancel as secondary ones, each with hover and disabled faces. The wizard's
+  buttons move out of sight but keep working, so Enter and Esc still press them; a timer copies their
+  caption, state and visibility onto the drawn ones, and follows the mouse for the hover face. }
+type
+  TThemedButton = record
+    Real: TNewButton;
+    Kind: String;
+    X, Y, W, H: Integer;
+    Normal, Hover, Disabled: TBitmapImage;
+    Text: TLabel;
+  end;
+  TCursorPoint = record
+    X, Y: Longint;
+  end;
+
+const
+  OffScreen = -10000;
+
+var
+  ThemedButtons: array of TThemedButton;
+
+function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT; lpTimerFunc: NativeInt): UINT_PTR;
+  external 'SetTimer@user32.dll stdcall';
+function GetCursorPos(var Point: TCursorPoint): BOOL;
+  external 'GetCursorPos@user32.dll stdcall';
+function ScreenToClient(hWnd: HWND; var Point: TCursorPoint): BOOL;
+  external 'ScreenToClient@user32.dll stdcall';
+
+function ThemeMode: String;
+begin
+  if IsDarkInstallMode then
+    Result := 'dark'
+  else
+    Result := 'light';
+end;
+
+{ The label color packaging/windows/wizard-art.ts wrote for this kind of button, in this mode. }
+function ButtonTextColor(Kind: String; Enabled: Boolean): TColor;
+begin
+  if IsDarkInstallMode then
+  begin
+    if Kind = 'primary' then
+    begin
+      if Enabled then Result := StrToColor('{#ButtonText_primary_normal_dark}')
+      else Result := StrToColor('{#ButtonText_primary_disabled_dark}');
+    end else begin
+      if Enabled then Result := StrToColor('{#ButtonText_secondary_normal_dark}')
+      else Result := StrToColor('{#ButtonText_secondary_disabled_dark}');
+    end;
+  end else begin
+    if Kind = 'primary' then
+    begin
+      if Enabled then Result := StrToColor('{#ButtonText_primary_normal_light}')
+      else Result := StrToColor('{#ButtonText_primary_disabled_light}');
+    end else begin
+      if Enabled then Result := StrToColor('{#ButtonText_secondary_normal_light}')
+      else Result := StrToColor('{#ButtonText_secondary_disabled_light}');
+    end;
+  end;
+end;
+
+{ A click on a drawn button presses the wizard's own, as long as that one could be pressed. }
+procedure ThemedButtonClick(Sender: TObject);
+var
+  Real: TNewButton;
+begin
+  Real := ThemedButtons[TComponent(Sender).Tag].Real;
+  if Real.Visible and Real.Enabled then
+    Real.OnClick(Real);
+end;
+
+function ButtonImage(Index: Integer; State: String): TBitmapImage;
+var
+  Name: String;
+begin
+  Name := 'button-' + ThemedButtons[Index].Kind + '-' + State + '-' + ThemeMode + '.png';
+  ExtractTemporaryFile(Name);
+  Result := TBitmapImage.Create(WizardForm);
+  Result.Parent := ThemedButtons[Index].Real.Parent;
+  Result.BackColor := clNone;
+  Result.Stretch := True;
+  Result.PngImage.LoadFromFile(ExpandConstant('{tmp}\') + Name);
+  Result.Visible := False;
+  Result.Tag := Index;
+  if State <> 'disabled' then
+  begin
+    Result.Cursor := crHand;
+    Result.OnClick := @ThemedButtonClick;
+  end;
+end;
+
+{ Puts the drawn button where the wizard put its own, and moves that one out of sight. }
+procedure PlaceThemedButton(Index: Integer);
+var
+  Real: TNewButton;
+  Text: TLabel;
+  TextHeight: Integer;
+begin
+  Real := ThemedButtons[Index].Real;
+  ThemedButtons[Index].X := Real.Left;
+  ThemedButtons[Index].Y := Real.Top;
+  ThemedButtons[Index].W := Real.Width;
+  ThemedButtons[Index].H := Real.Height;
+  ThemedButtons[Index].Normal.SetBounds(Real.Left, Real.Top, Real.Width, Real.Height);
+  ThemedButtons[Index].Hover.SetBounds(Real.Left, Real.Top, Real.Width, Real.Height);
+  ThemedButtons[Index].Disabled.SetBounds(Real.Left, Real.Top, Real.Width, Real.Height);
+  Text := ThemedButtons[Index].Text;
+  Text.AutoSize := True;
+  TextHeight := Text.Height;
+  Text.AutoSize := False;
+  Text.SetBounds(Real.Left, Real.Top + (Real.Height - TextHeight) div 2, Real.Width, TextHeight);
+  Real.Left := OffScreen;
+end;
+
+procedure AddThemedButton(Real: TNewButton; Kind: String);
+var
+  I: Integer;
+  Text: TLabel;
+begin
+  I := GetArrayLength(ThemedButtons);
+  SetArrayLength(ThemedButtons, I + 1);
+  ThemedButtons[I].Real := Real;
+  ThemedButtons[I].Kind := Kind;
+  ThemedButtons[I].Normal := ButtonImage(I, 'normal');
+  ThemedButtons[I].Hover := ButtonImage(I, 'hover');
+  ThemedButtons[I].Disabled := ButtonImage(I, 'disabled');
+  { Created last, so it is drawn over the images. }
+  Text := TLabel.Create(WizardForm);
+  Text.Parent := Real.Parent;
+  Text.Transparent := True;
+  Text.StyleElements := Text.StyleElements - [seFont];
+  Text.Alignment := taCenter;
+  if Kind = 'primary' then
+    Text.Font.Style := [fsBold];
+  Text.Caption := 'Ag';
+  Text.Cursor := crHand;
+  Text.Tag := I;
+  Text.OnClick := @ThemedButtonClick;
+  ThemedButtons[I].Text := Text;
+  PlaceThemedButton(I);
+end;
+
+procedure SetShown(Control: TControl; Value: Boolean);
+begin
+  if Control.Visible <> Value then
+    Control.Visible := Value;
+end;
+
+procedure SyncThemedButtons(Wnd: HWND; Msg: UINT; Id: UINT_PTR; Time: DWORD);
+var
+  I: Integer;
+  Point: TCursorPoint;
+  Real: TNewButton;
+  Text: TLabel;
+  Shown, Enabled, Over: Boolean;
+  Caption: String;
+  Color: TColor;
+begin
+  for I := 0 to GetArrayLength(ThemedButtons) - 1 do
+  begin
+    Real := ThemedButtons[I].Real;
+    { The wizard placed its button again: follow it. }
+    if Real.Left <> OffScreen then
+      PlaceThemedButton(I);
+    Shown := Real.Visible;
+    Enabled := Real.Enabled;
+    Over := False;
+    if GetCursorPos(Point) and ScreenToClient(Real.Parent.Handle, Point) then
+      Over := (Point.X >= ThemedButtons[I].X) and (Point.X < ThemedButtons[I].X + ThemedButtons[I].W) and
+        (Point.Y >= ThemedButtons[I].Y) and (Point.Y < ThemedButtons[I].Y + ThemedButtons[I].H);
+    SetShown(ThemedButtons[I].Normal, Shown and Enabled and not Over);
+    SetShown(ThemedButtons[I].Hover, Shown and Enabled and Over);
+    SetShown(ThemedButtons[I].Disabled, Shown and not Enabled);
+    Text := ThemedButtons[I].Text;
+    SetShown(Text, Shown);
+    Caption := Real.Caption;
+    StringChangeEx(Caption, '&', '', True);
+    if Text.Caption <> Caption then
+      Text.Caption := Caption;
+    Color := ButtonTextColor(ThemedButtons[I].Kind, Enabled);
+    if Text.Font.Color <> Color then
+      Text.Font.Color := Color;
+  end;
+end;
+
+procedure InitializeWizard;
+begin
+  AddThemedButton(WizardForm.BackButton, 'secondary');
+  AddThemedButton(WizardForm.NextButton, 'primary');
+  AddThemedButton(WizardForm.CancelButton, 'secondary');
+  SyncThemedButtons(0, 0, 0, 0);
+  { Tied to the wizard's window, so it stops when the wizard closes. }
+  SetTimer(WizardForm.Handle, 1, 50, CreateCallback(@SyncThemedButtons));
+end;
+#endif
+
 { True when Dir is not already one of the entries in the user's Path. }
 function NeedsAddPath(Dir: string): Boolean;
 var
