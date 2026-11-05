@@ -282,7 +282,7 @@ describe("writeLockfile", () => {
     const final = await readLockfile(out);
     expect(versions).toContainEqual(final);
     expect(await readdir(dir)).toEqual(["latch.lock"]);
-  });
+  }, 30_000); // 20 writes in turn, each with several fsyncs: slow on a Windows runner
 });
 
 describe("findRecord", () => {
