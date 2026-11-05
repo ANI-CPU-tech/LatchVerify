@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0-rc.2 - 2026-11-05
+
+Second release candidate for 0.2.0. Installs of it are offered 0.2.0 when that is released.
+
+### Changed
+- **The Windows installer looks like LatchVerify**: the landscape behind every page, the padlock icon on the Welcome page, and the app's own buttons (orange Next and Install, card-style Back and Cancel, with hover and disabled states), in Default Light's colors in Windows light mode and Terminal Dark's in dark mode.
+
+### Fixed
+- **Installer builds survive a flaky Electron download**: a 504 from GitHub's release downloads is retried, and the workflow caches Electron's download.
+
 ## 0.2.0-rc.1 - 2026-11-05
 
 Release candidate for 0.2.0. Installs of it are offered 0.2.0 when that is released.
