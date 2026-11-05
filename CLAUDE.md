@@ -133,9 +133,13 @@ that blocks on every reword gets disabled by its users.
 - The app's window bridge (`preload.cts`: updateStatus, checkForUpdates, installUpdate, uninstall)
   is read only through `web/src/lib/desktop.ts`, which validates every answer; in a browser the
   Settings page shows the `latch update` / `latch uninstall --yes` commands instead.
-- Installer art: `packaging/windows/wizard-art.ts` renders the landscape and padlock PNGs (Default
-  Light by day, Terminal Dark at night) and include files; `latchverify.iss` uses them with
-  `WizardStyle=modern dynamic` when built with `/DWizardArtDir` on Inno Setup 6.6+. The private key is the release workflow's
+- Installer look: `packaging/windows/wizard-art.ts` renders, from the app's theme tokens (Default
+  Light by day, Terminal Dark at night), the landscape behind the whole wizard, the padlock on the
+  Welcome page and top right, and the app's buttons (primary, secondary; normal, hover, disabled),
+  plus include files. `latchverify.iss` uses them with `WizardStyle=modern dynamic windows11
+  hidebevels` when built with `/DWizardArtDir` on Inno Setup 6.6+; its [Code] draws the buttons over
+  the wizard's own (moved off-screen, still pressed by Enter and Esc) and a 50 ms timer mirrors their
+  caption, state and visibility. Only Windows CI compiles it: no Inno Setup here. The private key is the release workflow's
   `LATCH_UPDATE_SIGNING_KEY` secret, never in the repo. `latch update` (`commands/update.ts`).
 - Dev: `src/dev/presets.ts` (demo presets; `demo/` referenced by path, never imported), the Dev
   Tools page and `pnpm demo:add`.
