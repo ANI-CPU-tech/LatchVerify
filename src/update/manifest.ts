@@ -48,11 +48,14 @@ export function parseRelease(version: string): [number, number, number] | undefi
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
 }
 
-/** True when `candidate` is a newer release than `current`. */
+/**
+ * True when `candidate` is a newer release than `current`. A release outranks its own pre-releases
+ * (semver): an install of 1.2.0-rc.1 is offered 1.2.0.
+ */
 export function isNewer(candidate: string, current: string): boolean {
   const a = parseRelease(candidate);
   const b = parseRelease(current.replace(/[-+].*$/, ""));
   if (a === undefined || b === undefined) return false;
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i]! > b[i]!;
-  return false;
+  return /^[^+]*-/.test(current);
 }
