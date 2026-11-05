@@ -1,13 +1,14 @@
 // The LatchVerify desktop app (Electron main process): the review UI in its own window, a tray
 // icon, the background watcher with native notifications, and start at login. It runs the same
-// review server and watcher as `latch review --ui` and `latch watch`, in one process; the proxies
+// review UI and watcher as `latch review --ui` and `latch watch`, in one process (the UI through its
+// own latchverify:// scheme, not a port); the proxies
 // stay plain Node processes started by the MCP clients.
 import { existsSync, rmSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, type MenuItemConstructorOptions } from "electron";
+import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, protocol, type MenuItemConstructorOptions } from "electron";
 import { loadDotEnv, loadEnv } from "../config/env.js";
 import { userLockfilePath } from "../config/paths.js";
 import { defaultReviewer } from "../config/reviewer.js";
@@ -17,10 +18,10 @@ import { createLogger } from "../log.js";
 import { emptyLockfile, writeLockfile } from "../store/lockfile.js";
 import { readPending } from "../store/pending.js";
 import { readSettings, settingsPath } from "../store/settings.js";
-import { startUiServer, type UiServerHandle } from "../ui/server.js";
+import { createUiApp } from "../ui/server.js";
 import { VERSION } from "../version.js";
 import { appPidPath } from "./launch.js";
-import { REVIEW_ROUTE, autostartEntry, autostartPath, navigationAllowed, parseFlags, trayMenu, trayTooltip, type TrayAction } from "./shell.js";
+import { APP_ORIGIN, APP_SCHEME, REVIEW_ROUTE, autostartEntry, loopbackRequest, autostartPath, navigationAllowed, parseFlags, trayMenu, trayTooltip, type TrayAction } from "./shell.js";
 import { updateHandlers } from "./updates.js";
 
 const flags = parseFlags(process.argv);
@@ -29,6 +30,10 @@ const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 const WEB_DIR = here("../web/");
 const ICON = here("../web/icon-256.png");
 const TRAY_ICON = here("../web/icon-32.png");
+
+// The window's own origin (shell.ts APP_ORIGIN): a standard, secure scheme, so localStorage and fetch
+// work as on https. Registered before the app is ready, as Electron requires.
+protocol.registerSchemesAsPrivileged([{ scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -63,8 +68,8 @@ async function main(): Promise<void> {
   // The app has its own window only: no application menu.
   Menu.setApplicationMenu(null);
 
-  const server: UiServerHandle = await startUiServer({
-    port: 0,
+  // The review UI and API, served to the window through APP_SCHEME: no port, one origin on every start.
+  const ui = await createUiApp({
     lockfilePath,
     stateDir,
     settingsPath: settingsFile,
@@ -72,12 +77,13 @@ async function main(): Promise<void> {
     staticDir: WEB_DIR,
     dev: env.dev || flags.dev,
   });
+  protocol.handle(APP_SCHEME, (request) => ui.fetch(loopbackRequest(request)));
 
   let window: BrowserWindow | undefined;
   let quitting = false;
   const showWindow = (route = "#/") => {
-    if (window === undefined || window.isDestroyed()) window = createWindow(server.url);
-    void window.loadURL(`${server.url}/${route}`);
+    if (window === undefined || window.isDestroyed()) window = createWindow(APP_ORIGIN);
+    void window.loadURL(`${APP_ORIGIN}/${route}`);
     window.show();
     window.focus();
   };
@@ -114,14 +120,16 @@ async function main(): Promise<void> {
   };
 
   if (flags.smoke) {
-    if (!(await startWatching())) {
-      await server.close();
+    // The window's page and API, through the same handler the window uses.
+    const page = await ui.fetch(loopbackRequest(new Request(`${APP_ORIGIN}/`)));
+    const info = await ui.fetch(loopbackRequest(new Request(`${APP_ORIGIN}/api/info`)));
+    if (!page.ok || !info.ok || !(await startWatching())) {
+      log.error(`smoke test failed: page HTTP ${page.status}, /api/info HTTP ${info.status}`);
       app.exit(1);
       return;
     }
-    process.stdout.write(`latchverify desktop ${VERSION}: review server on ${server.url}, watcher running\n`);
+    process.stdout.write(`latchverify desktop ${VERSION}: review UI on ${APP_ORIGIN} (no port), watcher running\n`);
     await watcher!.close();
-    await server.close();
     app.exit(0);
     return;
   }
@@ -198,7 +206,6 @@ async function main(): Promise<void> {
     quitting = true;
     clearInterval(poll);
     void watcher?.close();
-    void server.close();
   });
 
   if (flags.uninstall) void updates.uninstall();
@@ -216,7 +223,7 @@ async function main(): Promise<void> {
       autoHideMenuBar: true,
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: here("./preload.cjs") },
     });
-    // Nothing leaves the app's own server: no new windows, no navigation elsewhere.
+    // Nothing leaves the app's own origin: no new windows, no navigation elsewhere.
     created.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     created.webContents.on("will-navigate", (event, url) => {
       if (!navigationAllowed(url, base)) event.preventDefault();

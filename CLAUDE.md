@@ -121,7 +121,12 @@ that blocks on every reword gets disabled by its users.
   `notify.ts` desktop notifications via notify-send or a PowerShell toast). Settings:
   `src/store/settings.ts` (`settings.json` beside the per-user lockfile).
 - Desktop app: `src/desktop/` (`main.ts` Electron main process: window, tray, login start; `shell.ts`
-  pure helpers; `preload.cts`; `updates.ts` the update dialogs). `pnpm desktop` runs it from a
+  pure helpers; `preload.cts`; `updates.ts` the update dialogs). The window loads `latchverify://app`
+  (`APP_ORIGIN`), served by `protocol.handle` straight into `createUiApp` (`ui/server.ts`), with no
+  port: one origin on every start, so localStorage (theme, card opacity) persists, and no other
+  program reaches the API. `loopbackRequest` rewrites those requests to 127.0.0.1 so the API's
+  loopback guard is unchanged; `navigationAllowed` compares scheme and host, since URL.origin is
+  "null" for every custom scheme. `pnpm desktop` runs it from a
   checkout; `--smoke` starts the services, prints and quits. It opens no browser, and nothing else does.
   The app records its pid in `app.pid` beside the per-user lockfile; `launch.ts` (no Electron import)
   lets `latch proxy` start an installed app hidden when that pid is not alive, with `appEnvironment`

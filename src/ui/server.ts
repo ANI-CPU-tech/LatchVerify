@@ -26,17 +26,12 @@ export interface UiServerHandle {
 }
 
 /**
- * Starts the review server on 127.0.0.1 (never 0.0.0.0). With `staticDir`, it also serves the
- * built review UI, answering unknown non-API paths with index.html so client-side routes load.
- * Resolves once the port is bound; rejects if it cannot be (for example, EADDRINUSE) or if
- * `staticDir` has no index.html.
+ * The review API, plus with `staticDir` the built review UI, answering unknown non-API paths with
+ * index.html so client-side routes load. Rejects if `staticDir` has no index.html. The desktop app
+ * serves this through its own protocol, with no port; startUiServer serves it on 127.0.0.1.
  */
-export async function startUiServer(options: UiServerOptions): Promise<UiServerHandle> {
-  if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65_535) {
-    throw new RangeError(`startUiServer: port must be an integer from 0 to 65535, got ${options.port}`);
-  }
+export async function createUiApp(options: RouteDeps & { staticDir?: string }): Promise<ReturnType<typeof createRoutes>> {
   const app = createRoutes(options);
-
   if (options.staticDir !== undefined) {
     const root = resolve(options.staticDir);
     let indexHtml: string;
@@ -48,6 +43,19 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServerH
     app.use("*", serveStatic({ root }));
     app.get("*", (c) => (c.req.path === "/api" || c.req.path.startsWith("/api/") ? c.notFound() : c.html(indexHtml)));
   }
+  return app;
+}
+
+/**
+ * Starts the review server on 127.0.0.1 (never 0.0.0.0), serving createUiApp. Resolves once the
+ * port is bound; rejects if it cannot be (for example, EADDRINUSE) or if `staticDir` has no
+ * index.html.
+ */
+export async function startUiServer(options: UiServerOptions): Promise<UiServerHandle> {
+  if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65_535) {
+    throw new RangeError(`startUiServer: port must be an integer from 0 to 65535, got ${options.port}`);
+  }
+  const app = await createUiApp(options);
 
   const server = createAdaptorServer({ fetch: app.fetch });
   await new Promise<void>((resolveListen, reject) => {

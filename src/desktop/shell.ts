@@ -21,13 +21,47 @@ export function parseFlags(argv: readonly string[]): AppFlags {
   return { hidden: argv.includes("--hidden"), smoke: argv.includes("--smoke"), dev: argv.includes("--dev"), uninstall: argv.includes("--uninstall") };
 }
 
-/** True when the window may load `url`: only the app's own review server, never another origin. */
+/**
+ * The scheme the window loads the review UI from (main.ts serves it with protocol.handle): one
+ * origin on every start, so what the UI keeps in localStorage (theme, card opacity) stays, and no
+ * port is opened, so no other program on the machine reaches the API.
+ */
+export const APP_SCHEME = "latchverify";
+/** The window's base URL. */
+export const APP_ORIGIN = `${APP_SCHEME}://app`;
+
+/**
+ * True when the window may load `url`: only the app's own origin, never another. Compared by
+ * scheme and host, not URL.origin, which is "null" for every non-web scheme alike.
+ */
 export function navigationAllowed(url: string, base: string): boolean {
   try {
-    return new URL(url).origin === new URL(base).origin;
+    const target = new URL(url);
+    const own = new URL(base);
+    return target.protocol === own.protocol && target.host === own.host;
   } catch {
     return false;
   }
+}
+
+/**
+ * A request the window sent to APP_ORIGIN, as the review API expects it: on 127.0.0.1, and from a
+ * loopback origin when it names one. Only the app's own window can send these (the scheme exists
+ * in its session alone), so it stands in for the loopback check a TCP server needs.
+ *
+ * @throws TypeError for a request to any other origin.
+ */
+export function loopbackRequest(request: Request): Request {
+  const from = new URL(request.url);
+  if (from.protocol !== `${APP_SCHEME}:` || from.host !== "app") throw new TypeError(`not a ${APP_ORIGIN} request: ${request.url}`);
+  const headers = new Headers(request.headers);
+  if (headers.has("origin")) headers.set("origin", "http://127.0.0.1");
+  const hasBody = request.method !== "GET" && request.method !== "HEAD";
+  return new Request(`http://127.0.0.1${from.pathname}${from.search}`, {
+    method: request.method,
+    headers,
+    ...(hasBody ? { body: request.body, duplex: "half" } : {}),
+  } as RequestInit);
 }
 
 /** One tray menu item: an action the app runs, or a separator. */
