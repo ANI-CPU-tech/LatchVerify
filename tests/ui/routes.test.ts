@@ -21,7 +21,7 @@ let deps: RouteDeps;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "latch-ui-"));
-  deps = { lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), reviewer: "alice@example.com", now: () => NOW };
+  deps = { lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), settingsPath: join(dir, "settings.json"), reviewer: "alice@example.com", now: () => NOW };
   await copyFile(EXAMPLE_LOCK, deps.lockfilePath);
 });
 afterEach(async () => {
@@ -359,12 +359,23 @@ describe("GET /api/info", () => {
   it("names the version and says development mode is off by default", async () => {
     const response = await request("/api/info");
     expect(response.status).toBe(200);
-    expect(await json(response)).toEqual({ version: VERSION, dev: false });
+    expect(await json(response)).toEqual({ version: VERSION, dev: false, devLocked: false });
   });
 
-  it("says when development mode is on", async () => {
+  it("says when development mode is forced on for the run", async () => {
     deps = { ...deps, dev: true };
-    expect(await json(await request("/api/info"))).toEqual({ version: VERSION, dev: true });
+    expect(await json(await request("/api/info"))).toEqual({ version: VERSION, dev: true, devLocked: true });
+  });
+
+  it("follows the Settings switch, and its routes come and go with it", async () => {
+    const put = (devMode: boolean) =>
+      request("http://127.0.0.1/api/settings", { method: "PUT", headers: { "content-type": "application/json", [CLIENT_HEADER]: "test" }, body: JSON.stringify({ devMode }) });
+    expect((await put(true)).status).toBe(200);
+    expect(await json(await request("/api/info"))).toEqual({ version: VERSION, dev: true, devLocked: false });
+    expect((await request("/api/dev/presets")).status).toBe(200);
+    expect((await put(false)).status).toBe(200);
+    expect(await json(await request("/api/info"))).toEqual({ version: VERSION, dev: false, devLocked: false });
+    expect((await request("/api/dev/presets")).status).toBe(404);
   });
 });
 
