@@ -1,20 +1,11 @@
 # Changelog
 
-## 0.2.0-rc.2 - 2026-11-05
+## 0.2.0 - 2026-11-05
 
-Second release candidate for 0.2.0. Installs of it are offered 0.2.0 when that is released.
-
-### Changed
-- **The Windows installer looks like LatchVerify**: the landscape behind every page, the padlock icon on the Welcome page, and the app's own buttons (orange Next and Install, card-style Back and Cancel, with hover and disabled states), in Default Light's colors in Windows light mode and Terminal Dark's in dark mode.
-
-### Fixed
-- **Installer builds survive a flaky Electron download**: a 504 from GitHub's release downloads is retried, and the workflow caches Electron's download.
-
-## 0.2.0-rc.1 - 2026-11-05
-
-Release candidate for 0.2.0. Installs of it are offered 0.2.0 when that is released.
+The LatchVerify app, installers for Windows and Linux, signed updates, and consent before any MCP client is connected. Installs of 0.2.0-rc.1 and 0.2.0-rc.2 are offered this release.
 
 ### Installers
+- **The Windows installer looks like LatchVerify**: the landscape behind every page, the padlock icon on the Welcome page, and the app's own buttons (orange Next and Install, card-style Back and Cancel, with hover and disabled states), in Default Light's colors in Windows light mode and Terminal Dark's in dark mode.
 - **Windows installer, Debian/Ubuntu and Arch/CachyOS packages, and a portable Linux archive**, built by the **Build installers** workflow on GitHub's Windows and Linux machines. Each carries its own Node.js 22, so nothing else needs installing.
 - **The LatchVerify app comes with every installer**: it starts after installing (Windows), from your app menu or in the tray (Linux), and at login. Uninstalling stops it and removes its login start.
 - **Installing creates your per-user `latch.lock` and connects only the MCP clients you choose**: the Windows installer's checkbox (off by default, and updates never link anything), or `latch setup` afterwards on Linux (`install.sh` asks in your terminal). Uninstalling gives every client its original server commands back (`latch setup --remove --all`) and keeps `latch.lock`; before, only Claude Code was restored, and a client linked by hand kept pointing at the removed install.
@@ -32,14 +23,13 @@ Release candidate for 0.2.0. Installs of it are offered 0.2.0 when that is relea
 - **`latch watch`** keeps connected clients linked in the background: new servers are linked within a second, entries a client turned back are re-wrapped, entries of a moved install are repaired.
 - **Desktop notifications** (notify-send on Linux, a toast on Windows) when changes wait for review at start, when a proxy queues a change, when calls are blocked (repeats summed per minute) and when a new MCP client is found. Settings has switches for them, for update checks and for starting at login.
 - **The MCP Servers page shows each client and its servers**: which client starts which server, whether it is protected, waiting for its first run or not connected, with Connect and Disconnect.
-- **The LatchVerify app** (Electron): the review UI in its own window and a tray icon with the review queue count, Pause watching, Check for updates and Quit. It runs the background sync and shows native notifications; clicking one opens the review queue. Closing the window keeps it in the tray, and it starts at login unless Settings turns that off. The window loads only its own loopback server: no new windows, no navigation elsewhere, sandboxed with context isolation.
+- **The LatchVerify app** (Electron): the review UI in its own window and a tray icon with the review queue count, Pause watching, Check for updates and Quit. It runs the background sync and shows native notifications; clicking one opens the review queue. Closing the window keeps it in the tray, and it starts at login unless Settings turns that off. The window loads only the app's own `latchverify://app` origin: no new windows, no navigation elsewhere, sandboxed with context isolation.
 - **Opening an MCP client brings the app up.** When a client starts a protected server and the installed app is not running, the proxy starts it hidden in the tray, passing it only the desktop session's variables, never the server's keys. A second start never pops the window up.
 - **Updates, signed.** The app checks for a new release 10 s after it starts and then once a day (Settings can turn this off), shows the release notes and installs on one click: the Windows installer, `apt-get` or `pacman` through `pkexec`, or the portable archive's own `install.sh`. Nothing is downloaded before you click. Every release publishes a `latest.json` signed with ed25519; the installer's sha256 and signature are checked before it runs. `latch update` does the same from a terminal, and `latch update --check` only reports. A source checkout never updates itself.
 - **Dev Tools** (development mode only) and `pnpm demo:add` add the demo servers to a client in one step.
 - **Settings → Updates**: the running version, the last check, **Check for updates**, and the release notes with **Install x.y.z and restart** when one is out. Works on Windows and on every Linux install (deb, Arch, portable archive).
 - **Settings → Development**: a switch for development mode, saved in `settings.json`. `--dev` and `LATCH_DEV=1` still turn it on for one run.
 - **Uninstall from the app**: **Settings → Uninstall LatchVerify...**, the Linux menu entry's **Uninstall LatchVerify** action, or `latch uninstall --yes`. Each restores every MCP client first and keeps `latch.lock`. The portable install keeps its `uninstall.sh`, so the unpacked archive is no longer needed to remove it.
-- **The Windows installer shows the app's landscape**: Default Light's sunset in Windows light mode, Terminal Dark's night in dark mode, with a Welcome page.
 
 ### Changed
 - **Nothing is connected without your say-so.** LatchVerify connects an MCP client only after you answer yes: `latch setup` lists the clients it found and asks, `--client` and `--all` connect without asking, the Windows installer has a checkbox, and the MCP Servers page has Connect and Disconnect. Linux packages connect nothing by themselves. Your answers are kept in `settings.json`.
@@ -52,6 +42,7 @@ Release candidate for 0.2.0. Installs of it are offered 0.2.0 when that is relea
 - **`GET /api/info`** reports the running version and whether development mode is on.
 
 ### Security
+- **The app opens no network port.** Its window reaches the review UI and API through the app's own `latchverify://` scheme, so no other program on the machine can reach the API. `latch review --ui` still serves on 127.0.0.1 for a browser.
 - **A server's first run holds back exec and credential tools**, not only tools with hidden instructions, so a new server gets no more trust than a pinned one. Such a server needs one approval after it is linked.
 - **A normal write can no longer sign a tampered `latch.lock`**, and the previous version stops being trusted once a write finishes. A lockfile with no integrity record now warns, logs `lock_unrecorded` and never pins a first run; the app and `latch watch` show a notification for these and for `lock_tampered`.
 - **Updates sign the download URL and notes**, and the downloaded file's name no longer comes from the URL, which could write outside the temp folder. Releases are signed before anything is published, and fail if the key does not match the one apps ship.
@@ -64,6 +55,10 @@ Release candidate for 0.2.0. Installs of it are offered 0.2.0 when that is relea
 - **Rejections last.** A rejected definition stays blocked after the proxy restarts, whatever its tier, and is not queued for review again.
 
 ### Fixed
+- **The app remembers your theme and card opacity.** It served its window from a new port on every start, and the browser storage holding them belongs to the address, port included; both were back to the defaults after every restart.
+- **The menu no longer shows LatchVerify twice** after the portable install is updated or removed: the entry and icon of versions before 0.2.0 (app id `io.github.vinayakkam.LatchVerify`) go too.
+- **The release notes name each package's exact file.** `sudo pacman -U latchverify-bin-*.pkg.tar.zst` also matched an older download in the same folder and stopped with `duplicate target`.
+- **Installer builds survive a flaky Electron download**: a 504 from GitHub's release downloads is retried, and the workflow caches Electron's download.
 - **An install of a pre-release is offered its release**: 0.2.0-rc.1 now updates to 0.2.0. Before, a release candidate never saw the release it led to.
 - **The deb's in-app update no longer waits on debconf**: `apt-get` runs non-interactively under `pkexec`, and a cancelled password prompt or a missing polkit agent is explained instead of reported as an exit code.
 - **Connect and the app's background sync start proxies with Node.js.** They used the app's own binary, so wrapped servers did not start.
