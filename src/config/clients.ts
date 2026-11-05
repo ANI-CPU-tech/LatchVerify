@@ -43,6 +43,11 @@ export interface NewServerEntry {
 export interface ClientLocation {
   path: string;
   serversPath: string[];
+  /**
+   * How its entries are shaped. Absent: { command, args, env }, as most clients write them.
+   * "opencode": { type: "local", command: [program, ...args], environment }, OpenCode's.
+   */
+  format?: "opencode";
 }
 
 /** A client config located on this machine. */
@@ -88,6 +93,7 @@ export interface Detection {
  * | zed             | %APPDATA%/Zed/settings.json, <config>/zed/settings.json            | context_servers |
  * | lm-studio       | ~/.lmstudio/mcp.json                                               | mcpServers      |
  * | amazon-q        | ~/.aws/amazonq/mcp.json, then ~/.aws/amazonq/default.json          | mcpServers      |
+ * | opencode        | ~/.config/opencode/opencode.json, then opencode.jsonc              | mcp             |
  *
  * <app data> is %APPDATA% on Windows (falling back to ~/AppData/Roaming), $XDG_CONFIG_HOME or
  * ~/.config on Linux, and ~/Library/Application Support on macOS (appDataDir). ~ is
@@ -146,6 +152,11 @@ export function clientLocations(client: ClientId, platform: NodeJS.Platform = pr
         { path: path.join(home, ".aws", "amazonq", "mcp.json"), serversPath: ["mcpServers"] },
         { path: path.join(home, ".aws", "amazonq", "default.json"), serversPath: ["mcpServers"] },
       ];
+    // https://opencode.ai/docs/config/ (global config ~/.config/opencode/opencode.json, JSON or JSONC, the
+    // same path on every system); https://opencode.ai/docs/mcp-servers/ (local servers under "mcp": type
+    // "local", command as one array, env as "environment"). Checked 2026-11-05.
+    case "opencode":
+      return ["opencode.json", "opencode.jsonc"].map((file) => ({ path: path.join(home, ".config", "opencode", file), serversPath: ["mcp"], format: "opencode" as const }));
     default:
       throw new TypeError(`unknown MCP client ${JSON.stringify(client)}; expected one of ${SUPPORTED_CLIENTS.join(", ")}`);
   }
@@ -211,7 +222,7 @@ function claudeCodeProjects(user: ClientConfig, root: Record<string, unknown>): 
 }
 
 /** The config at `location` (and, for Claude Code, its projects'), problems, or nothing when the file is missing. */
-async function readClientConfig(client: ClientId, { path, serversPath }: ClientLocation): Promise<Array<ClientConfig | ConfigProblem>> {
+async function readClientConfig(client: ClientId, { path, serversPath, format }: ClientLocation): Promise<Array<ClientConfig | ConfigProblem>> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
@@ -224,7 +235,7 @@ async function readClientConfig(client: ClientId, { path, serversPath }: ClientL
   if (!isPlainObject(parsed.value)) return [{ client, path, message: "is not a JSON object" }];
   const map = valueAt(parsed.value, serversPath);
   if (map !== undefined && !isPlainObject(map)) return [{ client, path, message: `keeps "${serversPath.join(".")}" as something other than an object` }];
-  const config: ClientConfig = { client, path, serversPath, servers: stdioServers(map), serverIds: isPlainObject(map) ? Object.keys(map) : [] };
+  const config: ClientConfig = { client, path, serversPath, ...(format === undefined ? {} : { format }), servers: stdioServers(map, format), serverIds: isPlainObject(map) ? Object.keys(map) : [] };
   return client === "claude-code" ? [config, ...claudeCodeProjects(config, parsed.value)] : [config];
 }
 
@@ -276,11 +287,19 @@ export async function readServersFile(path: string): Promise<Record<string, Clie
  * The stdio entries of a server map, each reduced to its command, args and env variable names.
  * Env values and every other key are left behind here, right after parsing.
  */
-function stdioServers(value: unknown): Record<string, ClientServerEntry> {
+function stdioServers(value: unknown, format?: ClientLocation["format"]): Record<string, ClientServerEntry> {
   if (!isPlainObject(value)) return {};
   // fromEntries: a server named "__proto__" stays a plain key.
   return Object.fromEntries(
     Object.entries(value).flatMap(([id, raw]): Array<[string, ClientServerEntry]> => {
+      if (format === "opencode") {
+        if (!isOpenCodeLocal(raw)) return [];
+        const [command, ...args] = raw.command as string[];
+        const entry: ClientServerEntry = { command: command! };
+        if (args.length > 0) entry.args = args;
+        if (raw.environment !== undefined) entry.envNames = Object.keys(raw.environment as object);
+        return [[id, entry]];
+      }
       if (!isStdioEntry(raw)) return [];
       const entry: ClientServerEntry = { command: raw.command as string };
       if (raw.args !== undefined) entry.args = [...(raw.args as string[])];
@@ -299,6 +318,20 @@ function isStdioEntry(value: unknown): value is Record<string, unknown> {
     (type === undefined || type === "stdio") &&
     (args === undefined || (Array.isArray(args) && args.every((arg) => typeof arg === "string"))) &&
     (env === undefined || isPlainObject(env))
+  );
+}
+
+/** An OpenCode local server: type "local", command a non-empty array of strings, environment absent or an object. */
+function isOpenCodeLocal(value: unknown): value is Record<string, unknown> {
+  if (!isPlainObject(value)) return false;
+  const { type, command, environment } = value;
+  return (
+    type === "local" &&
+    Array.isArray(command) &&
+    command.length > 0 &&
+    command.every((part) => typeof part === "string") &&
+    command[0] !== "" &&
+    (environment === undefined || isPlainObject(environment))
   );
 }
 
@@ -556,8 +589,11 @@ function withCommand<T extends Launchable>(entry: T, command: string, args: stri
 export async function writeClientConfig(config: {
   path: string;
   serversPath: string[];
+  format?: ClientLocation["format"];
   servers: Record<string, ClientServerEntry | NewServerEntry>;
 }): Promise<void> {
+  const opencode = config.format === "opencode";
+  const envKey = opencode ? "environment" : "env";
   const target = await resolveSymlinks(config.path);
   const current = await readIfExists(target);
   const before = current?.text ?? "{}\n";
@@ -575,21 +611,28 @@ export async function writeClientConfig(config: {
     for (const [serverId, entry] of Object.entries(config.servers)) {
       const path = [...config.serversPath, serverId];
       const now = map !== undefined && Object.hasOwn(map, serverId) ? map[serverId] : undefined;
+      const env = "env" in entry && entry.env !== undefined && Object.keys(entry.env).length > 0 ? entry.env : undefined;
       if (!isPlainObject(now)) {
-        const created: Record<string, unknown> = { command: entry.command };
-        if (entry.args !== undefined && entry.args.length > 0) created.args = entry.args;
-        if ("env" in entry && entry.env !== undefined && Object.keys(entry.env).length > 0) created.env = entry.env;
+        const created: Record<string, unknown> = opencode
+          ? { type: "local", command: [entry.command, ...(entry.args ?? [])], ...(env === undefined ? {} : { environment: env }), enabled: true }
+          : { command: entry.command, ...(entry.args !== undefined && entry.args.length > 0 ? { args: entry.args } : {}), ...(env === undefined ? {} : { env }) };
         planned.push([path, created]);
         continue;
       }
-      if (now.command !== entry.command) planned.push([[...path, "command"], entry.command]);
-      const args = entry.args !== undefined && entry.args.length > 0 ? entry.args : undefined;
-      const nowArgs = Array.isArray(now.args) && now.args.length > 0 ? now.args : undefined;
-      if (!isDeepStrictEqual(nowArgs, args)) planned.push([[...path, "args"], args]);
-      const envNames = isPlainObject(now.env) ? Object.keys(now.env) : [];
+      if (opencode) {
+        // OpenCode keeps program and arguments in one array: only that array is written.
+        const command = [entry.command, ...(entry.args ?? [])];
+        if (!isDeepStrictEqual(now.command, command)) planned.push([[...path, "command"], command]);
+      } else {
+        if (now.command !== entry.command) planned.push([[...path, "command"], entry.command]);
+        const args = entry.args !== undefined && entry.args.length > 0 ? entry.args : undefined;
+        const nowArgs = Array.isArray(now.args) && now.args.length > 0 ? now.args : undefined;
+        if (!isDeepStrictEqual(nowArgs, args)) planned.push([[...path, "args"], args]);
+      }
+      const envNames = isPlainObject(now[envKey]) ? Object.keys(now[envKey]) : [];
       const ours = envNames.filter(isLatchEnv);
-      if (ours.length > 0 && ours.length === envNames.length) planned.push([[...path, "env"], undefined]);
-      else for (const name of ours) planned.push([[...path, "env", name], undefined]);
+      if (ours.length > 0 && ours.length === envNames.length) planned.push([[...path, envKey], undefined]);
+      else for (const name of ours) planned.push([[...path, envKey, name], undefined]);
     }
   }
   let text = before;

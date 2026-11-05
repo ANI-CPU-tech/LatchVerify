@@ -15,5 +15,6 @@ export const SUPPORTED_CLIENTS = [
   "zed",
   "lm-studio",
   "amazon-q",
+  "opencode",
 ] as const;
 export type ClientId = (typeof SUPPORTED_CLIENTS)[number];

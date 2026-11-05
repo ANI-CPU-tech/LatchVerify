@@ -14,4 +14,5 @@ export const CLIENT_NAMES: Record<ClientId, string> = {
   zed: "Zed",
   "lm-studio": "LM Studio",
   "amazon-q": "Amazon Q Developer",
+  opencode: "OpenCode",
 };

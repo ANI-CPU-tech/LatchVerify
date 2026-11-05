@@ -59,6 +59,10 @@ describe("clientConfigPath", () => {
         { path: "/home/dev/.aws/amazonq/mcp.json", serversPath: ["mcpServers"] },
         { path: "/home/dev/.aws/amazonq/default.json", serversPath: ["mcpServers"] },
       ],
+      opencode: [
+        { path: "/home/dev/.config/opencode/opencode.json", serversPath: ["mcp"], format: "opencode" },
+        { path: "/home/dev/.config/opencode/opencode.jsonc", serversPath: ["mcp"], format: "opencode" },
+      ],
     });
     expect(SUPPORTED_CLIENTS.map((client) => clientConfigPath(client, "linux"))).toEqual(
       SUPPORTED_CLIENTS.map((client) => clientLocations(client, "linux")[0]!.path),
@@ -358,7 +362,9 @@ describe.skipIf(onWindows)("detectClients", () => {
     home = await fakeHome();
     const weather = { command: "npx", args: ["tsx", "demo/weather-server.ts"] };
     for (const client of [...SUPPORTED_CLIENTS].reverse()) {
-      await writeConfig(client, { [mapKey(client)]: { weather }, other: 1 });
+      // OpenCode's own shape: one command array, type "local".
+      const entry = client === "opencode" ? { type: "local", command: [weather.command, ...weather.args] } : weather;
+      await writeConfig(client, { [mapKey(client)]: { weather: entry }, other: 1 });
     }
     const { configs: found, problems } = await detectClients();
     expect(problems).toEqual([]);
@@ -385,6 +391,7 @@ describe.skipIf(onWindows)("detectClients", () => {
       "context_servers",
       "mcpServers",
       "mcpServers",
+      "mcp",
     ]);
     await writeConfig("vscode", { mcpServers: { a: { command: "a" } }, servers: { b: { type: "stdio", command: "b" } } });
     await writeConfig("cursor", { servers: { a: { command: "a" } }, mcpServers: { b: { command: "b" } } });
@@ -512,6 +519,7 @@ const FIXTURE_SERVERS: Record<ClientId, string[][]> = {
   zed: [["local-mcp-server"]],
   "lm-studio": [["time"]],
   "amazon-q": [["awslabs.aws-documentation-mcp-server"], ["git"]],
+  opencode: [["my-local-server"], ["everything"]],
 };
 
 describe.skipIf(onWindows)("every supported client, on its documented example config", () => {
@@ -568,8 +576,8 @@ describe.skipIf(onWindows)("every supported client, on its documented example co
       const dropEmptyArgs = (value: unknown) => JSON.parse(JSON.stringify(value, (key, v) => (key === "args" && Array.isArray(v) && v.length === 0 ? undefined : v)));
       expect(parseJsonc(restored), config.path).toEqual({ ok: true, value: dropEmptyArgs((parseJsonc(original) as { value: unknown }).value) });
     }
-    // VS Code's three fixtures carry 3 comments each, Zed's 4.
-    expect(checkedComments).toBe(13);
+    // VS Code's three fixtures carry 3 comments each, Zed's 4, OpenCode's JSONC 1.
+    expect(checkedComments).toBe(14);
   });
 });
 
@@ -818,5 +826,46 @@ describe("installLaunchFor", () => {
       args: [...flags, "/repo/dist/cli.js"],
     });
     expect(installLaunchFor({ ...electron, exists: () => false, pathVariable: "/nope" })).toEqual({ command: "node", args: [...flags, "/repo/dist/cli.js"] });
+  });
+});
+
+describe.skipIf(onWindows)("OpenCode configs", () => {
+  let home: string | undefined;
+  afterEach(async () => {
+    if (home !== undefined) await rm(home, { recursive: true, force: true });
+    home = undefined;
+  });
+
+  it("reads only local servers, as command and args, keeping no environment value", async () => {
+    home = await fakeHome();
+    const [location] = clientLocations("opencode");
+    await mkdir(dirname(location!.path), { recursive: true });
+    await writeFile(location!.path, await readFile(fixture("opencode", location!.path), "utf8"));
+    const config = (await detectClients()).configs.find((c) => c.client === "opencode")!;
+    expect(config.format).toBe("opencode");
+    expect(config.servers).toEqual({ "my-local-server": { command: "npx", args: ["-y", "some-mcp-package"], envNames: ["API_TOKEN"] } });
+    expect(config.serverIds).toEqual(["my-local-server", "my-remote-server"]);
+    expect(JSON.stringify(config)).not.toContain("example_value");
+  });
+
+  it("wraps by rewriting the command array alone, and adds new servers in OpenCode's shape", async () => {
+    home = await fakeHome();
+    const [location] = clientLocations("opencode");
+    await mkdir(dirname(location!.path), { recursive: true });
+    await writeFile(location!.path, await readFile(fixture("opencode", location!.path), "utf8"));
+    const config = (await detectClients()).configs.find((c) => c.client === "opencode")!;
+    await writeClientConfig({ ...config, servers: { "my-local-server": wrapWithProxy("my-local-server", config.servers["my-local-server"]!), added: { command: "uvx", args: ["mcp-server-time"], env: { TZ: "UTC" } } } });
+    const written = (parseJsonc(await readFile(location!.path, "utf8")) as { value: { mcp: Record<string, Record<string, unknown>> } }).value.mcp;
+    expect(written["my-local-server"]).toEqual({
+      type: "local",
+      command: ["latch", "proxy", "--server", "my-local-server", "--", "npx", "-y", "some-mcp-package"],
+      cwd: "./tools",
+      environment: { API_TOKEN: "example_value" },
+      enabled: true,
+      timeout: 30000,
+    });
+    expect(written["my-remote-server"]).toEqual({ type: "remote", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer MY_API_KEY" }, enabled: true });
+    expect(written.added).toEqual({ type: "local", command: ["uvx", "mcp-server-time"], environment: { TZ: "UTC" }, enabled: true });
+    expect(written["my-local-server"]).not.toHaveProperty("args");
   });
 });

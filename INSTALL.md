@@ -28,6 +28,7 @@ anything. Nothing asks where a `latch.lock` is.
    | Zed | `%APPDATA%\Zed\settings.json` / `~/.config/zed/settings.json` |
    | LM Studio | `~/.lmstudio/mcp.json` |
    | Amazon Q Developer | `~/.aws/amazonq/mcp.json` and `~/.aws/amazonq/default.json` |
+   | OpenCode | `~/.config/opencode/opencode.json` or `opencode.jsonc` |
 
    A config that exists but cannot be read (for example half-written JSON) is reported and left
    untouched. Project files that teams commit (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`)
@@ -160,7 +161,7 @@ The bundled Node.js needs glibc 2.28 or newer (Debian 10, Ubuntu 20.04, RHEL 8 a
 | Command | What it does |
 |---|---|
 | `latch setup` | List the MCP clients found and ask which to connect (without a terminal, only lists them). Creates your `latch.lock` if needed. |
-| `latch setup --client cursor` | Connect one client without asking: `claude-desktop`, `claude-code`, `cursor`, `vscode`, `vscode-insiders`, `vscodium`, `cline`, `cline-cli`, `gemini-cli`, `zed`, `lm-studio` or `amazon-q`. |
+| `latch setup --client cursor` | Connect one client without asking: `claude-desktop`, `claude-code`, `cursor`, `vscode`, `vscode-insiders`, `vscodium`, `cline`, `cline-cli`, `gemini-cli`, `zed`, `lm-studio`, `amazon-q` or `opencode`. |
 | `latch setup --all` | Connect every client found without asking. |
 | `latch setup --dry-run` | Show what would change, without writing anything. |
 | `latch setup --remove --client cursor` | Disconnect a client: its servers get their original commands back. `--remove --all` for every client. Your `latch.lock` is kept, so connecting again keeps your approvals. |

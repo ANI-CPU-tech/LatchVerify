@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "my-local-server": {
+      "type": "local",
+      "command": ["npx", "-y", "some-mcp-package"],
+      "cwd": "./tools",
+      "environment": {
+        "API_TOKEN": "example_value"
+      },
+      "enabled": true,
+      "timeout": 30000
+    },
+    "my-remote-server": {
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer MY_API_KEY"
+      },
+      "enabled": true
+    }
+  }
+}
