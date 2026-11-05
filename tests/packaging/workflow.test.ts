@@ -11,9 +11,9 @@ describe("the build-installers workflow", () => {
     expect(workflow).not.toMatch(/\t/);
   });
 
-  it("runs on demand and on version tags, with the four jobs", () => {
+  it("runs on demand and on version tags, with the five jobs", () => {
     expect(workflow).toMatch(/^on:\n {2}workflow_dispatch:\n {2}push:\n {4}tags: \["v\*"\]$/m);
-    for (const name of ["windows", "linux", "checksums", "release"]) expect(job(name), name).not.toBe("");
+    for (const name of ["test", "windows", "linux", "checksums", "release"]) expect(job(name), name).not.toBe("");
   });
 
   it("runs pnpm exec silently, so captured output is only the command's", () => {
@@ -86,12 +86,14 @@ describe("the build-installers workflow", () => {
     expect(job("linux")).toContain("xvfb-run -a latchverify-desktop --smoke --hidden");
   });
 
-  it("runs the tests on Windows without hiding failures, and in ci.yml on every push", () => {
+  it("is the only workflow: tests run in it, on Linux and Windows, before any build, never on a plain push", () => {
+    expect(existsSync(new URL(".github/workflows/ci.yml", root))).toBe(false);
     expect(workflow).not.toContain("continue-on-error");
-    const ci = readFileSync(new URL(".github/workflows/ci.yml", root), "utf8");
-    expect(ci).toMatch(/^on:\n {2}push:\n {2}pull_request:$/m);
-    expect(ci).toContain("os: [ubuntu-24.04, windows-latest]");
-    for (const step of ["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm test"]) expect(ci).toContain(`run: ${step}`);
+    expect(workflow).not.toMatch(/^ {2}pull_request:/m);
+    const test = job("test");
+    expect(test).toContain("os: [ubuntu-24.04, windows-latest]");
+    for (const step of ["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm test"]) expect(test).toContain(`run: ${step}`);
+    for (const name of ["windows", "linux"]) expect(job(name), name).toContain("needs: [test]");
   });
 
   it("signs the Windows installer only when the certificate secret is set", () => {

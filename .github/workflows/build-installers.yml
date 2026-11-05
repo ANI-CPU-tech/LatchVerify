@@ -2,7 +2,9 @@
 # machine, links Claude Code as a user would and checks that worked, then uninstalls it and checks
 # the client was restored.
 # Run it from the Actions tab ("Run workflow"), or push a tag like v0.2.0 to also publish a GitHub
-# Release. The tag must match the version in package.json.
+# Release. The tag must match the version in package.json. The typecheck and the test suite run
+# first, on Linux and Windows, and every build waits for them: this is the only workflow, so pushes
+# and merges start no CI of their own.
 #
 # Every package carries its own Node.js 22 (checksum-checked from nodejs.org), so users install
 # nothing else. Installing connects no MCP client by itself: `latch setup`, the app or the Windows
@@ -23,8 +25,27 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
   windows:
     name: Windows (setup EXE)
+    needs: [test]
     runs-on: windows-latest
     defaults:
       run:
@@ -37,7 +58,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck && pnpm test
       - run: pnpm build
       - name: Read the version
         run: |
@@ -130,6 +150,7 @@ jobs:
 
   linux:
     name: Linux (deb, Arch/CachyOS, tar.gz)
+    needs: [test]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -143,7 +164,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck && pnpm test
       - run: pnpm build
       - name: Read the version
         run: |

@@ -295,8 +295,9 @@ There is no browser test runner. To check the UI visually, serve the built bundl
 
 - CI results are not stored, so the Git & CI page documents `latch verify` rather than
   showing CI runs, and no page shows live proxy connections.
-- `.github/workflows/ci.yml` runs typecheck and tests on Ubuntu and Windows; Windows has not yet had
-  a green run.
+- There is no push or pull-request CI: `build-installers.yml` (run on demand or by a `v*` tag) runs
+  typecheck and tests on Ubuntu and Windows first, and every build waits for them. Run
+  `pnpm typecheck && pnpm test` before merging.
 - The portable Linux archive has no setuid `chrome-sandbox`, so the app needs unprivileged user
   namespaces there (the deb and the Arch package ship a setuid helper).
 - On Windows, MCP clients that spawn `latch` without a shell may not resolve `latch.cmd`.

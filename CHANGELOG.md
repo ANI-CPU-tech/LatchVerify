@@ -32,7 +32,7 @@
 - **Linked entries keep your env untouched**: only `command` and `args` change, the lockfile path travels as `--lockfile`, and no `.bak` copy of the config is made any more. `latch setup` lists the copies earlier versions left, which hold your keys, so you can delete them.
 - **The demo stays out of real installs.** The Simulation page and its API (`POST /api/simulate`) exist only in development mode, `LATCH_DEV=1`. Its code and the demo tool lists load as a separate chunk only then. An installed review UI never shows sample data: when the API is down, it says so.
 - **LatchVerify opens no browser.** `latch review --ui` serves the review UI and prints its address; the app is how you open it. The `latchverify-review` launcher and the **LatchVerify Review** menu entry are replaced by **LatchVerify**.
-- **CI runs on every push**, on Linux and Windows (`ci.yml`), and Windows test failures now fail the installer build instead of being reported only.
+- **One workflow.** Pushes and merges no longer start CI. The **Build installers** workflow (run on demand or by a `v*` tag) runs the typecheck and tests on Linux and Windows first, and no installer is built or published unless they pass.
 - **`GET /api/info`** reports the running version and whether development mode is on.
 
 ### Security
