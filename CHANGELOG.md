@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 - 2026-11-05
+
+### Added
+- **OpenCode is a supported MCP client.** `latch setup --client opencode`, the MCP Servers page and the background watcher find `~/.config/opencode/opencode.json` (or `opencode.jsonc`) and protect its local servers. OpenCode keeps a server's program and arguments in one `command` array and its env under `environment`: linking rewrites only that array, and remote servers, `environment`, comments and every other key stay as they are.
+
 ## 0.2.0 - 2026-11-05
 
 The LatchVerify app, installers for Windows and Linux, signed updates, and consent before any MCP client is connected. The release signing key was rotated for this release, so installs of 0.2.0-rc.1 and 0.2.0-rc.2 cannot verify it and are not offered it: install 0.2.0 once by hand, and updates come by themselves from then on.
