@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 - 2026-11-05
+
+### Fixed
+- **Release notes in Settings → Updates read properly**: headings, bullet lists, **bold** and `code` are formatted instead of shown as raw Markdown.
+
 ## 0.2.1 - 2026-11-05
 
 ### Added
