@@ -6,9 +6,13 @@
  *
  * Usage: tsx packaging/windows/wizard-art.ts <out-dir>
  *
- * Writes PNGs at every DPI step Inno Setup picks from, plus two include files for latchverify.iss:
- * wizard-art.iss (light, WizardImageFile and WizardSmallImageFile) and wizard-art-dark.iss (the
- * DynamicDark directives, Inno Setup 6.6 and newer).
+ * Writes, for Inno Setup 6.6 and newer:
+ * - the landscape as the background of the whole wizard (WizardBackImageFile) at every DPI step,
+ * - the padlock tile (WizardSmallImageFile) at every DPI step,
+ * - the app's buttons (web/src/components/ui.tsx buttonClass): primary and secondary, each normal,
+ *   hover and disabled, which latchverify.iss draws over the wizard's own buttons,
+ * - include files for latchverify.iss: wizard-art.iss (light [Setup] directives, and #defines the
+ *   [Code] reads), wizard-art-dark.iss (the DynamicDark directives) and wizard-files.iss ([Files]).
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -24,12 +28,20 @@ export const WIZARD_THEMES = [
   { mode: "dark", theme: "terminal", time: "night", extra: "fireflies" },
 ] as const satisfies ReadonlyArray<{ mode: string; theme: string; time: ArtTime; extra: ArtExtra }>;
 
-/** Inno Setup's large image (Welcome and Finished pages) at 100% to 250% DPI. */
-export const LARGE_SIZES: ReadonlyArray<[number, number]> = [
-  [164, 314], [192, 386], [246, 459], [273, 556], [328, 604], [355, 700], [410, 797],
+/** Inno Setup 6.6's background image area (the whole wizard, 497:360) at 100% to 250% DPI. */
+export const BACK_SIZES: ReadonlyArray<[number, number]> = [
+  [596, 432], [796, 576], [994, 720], [1193, 864], [1272, 922], [1471, 1066], [1630, 1148],
 ];
-/** Inno Setup's small image (top right of the other pages) at 100% to 250% DPI. */
-export const SMALL_SIZES: readonly number[] = [58, 73, 87, 102, 116, 145];
+/** Inno Setup 6.6's left-hand image area of the Welcome and Finished pages at 100% to 250% DPI. */
+export const WELCOME_SIZES: ReadonlyArray<[number, number]> = [
+  [202, 386], [269, 515], [336, 643], [403, 772], [430, 824], [498, 953], [534, 1022],
+];
+/** Inno Setup 6.6's small image (top right of the inner pages) at 100% to 250% DPI. */
+export const SMALL_SIZES: readonly number[] = [58, 77, 97, 116, 124, 143, 159];
+/** One size for every button image: 3x a button at 100% DPI; the installer stretches it to the real button. */
+export const BUTTON_SIZE: Readonly<[number, number]> = [270, 78];
+export const BUTTON_KINDS = ["primary", "secondary"] as const;
+export const BUTTON_STATES = ["normal", "hover", "disabled"] as const;
 
 /** Layers index.css hides in the still scene (second poses and copies). */
 const HIDDEN = new Set(["glint-b", "smoke-b", "birds-b", "geese-b", "fireflies-b", "shooting-star", "deer-b"]);
@@ -71,11 +83,12 @@ class Canvas {
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
     this.data.set([r, g, b, a], (y * this.width + x) * 4);
   }
-  /** Paints `art` at `scale` with its pixel (ax, ay) at canvas (x0, y0), hidden layers left out. */
-  draw(art: PixelArt, colors: Map<string, Rgb>, scale: number, x0: number, y0: number): void {
+  /** Paints `art` at `scale` with its pixel (ax, ay) at canvas (x0, y0), hidden layers left out; `keep` can skip runs by canvas row. */
+  draw(art: PixelArt, colors: Map<string, Rgb>, scale: number, x0: number, y0: number, keep: (y: number, x: number) => boolean = () => true): void {
     for (const layer of art.layers) {
       if (HIDDEN.has(layer.name)) continue;
       for (const run of layer.runs) {
+        if (!keep(y0 + run.y * scale, x0 + run.x * scale)) continue;
         const color = colors.get(`art-${run.color satisfies ArtColor}`);
         if (color === undefined) throw new Error(`the theme has no --art-${run.color}`);
         for (let dy = 0; dy < scale; dy++) for (let dx = 0; dx < run.w * scale; dx++) this.set(x0 + run.x * scale + dx, y0 + run.y * scale + dy, color);
@@ -84,25 +97,77 @@ class Canvas {
   }
 }
 
-/** The large image: the scene at the bottom, cropped around the sun, its sky stretched to the top. */
-export function largeImage(colors: Map<string, Rgb>, time: ArtTime, extra: ArtExtra, width: number, height: number): Canvas {
+/**
+ * The background of the whole wizard: the scene along the bottom at a whole-number scale wide
+ * enough to fill it, cropped around the sun, its sky stretched to the top, where the text is.
+ */
+export function backImage(colors: Map<string, Rgb>, time: ArtTime, extra: ArtExtra, width: number, height: number): Canvas {
   const art = landscape(time, extra);
-  const scale = Math.max(1, Math.floor((height * 0.62) / art.height));
+  const scale = Math.ceil(width / art.width);
   const top = height - art.height * scale;
   const sky = colors.get("art-sky")!;
   const horizon = colors.get("art-horizon")!;
   const horizonY = top + HORIZON_ROW * scale;
   const canvas = new Canvas(width, height);
   for (let y = 0; y < height; y++) {
-    const color = mix(sky, horizon, Math.min(1, y / horizonY));
+    const color = mix(sky, horizon, Math.min(1, Math.max(0, y / horizonY) ** 1.6));
     for (let x = 0; x < width; x++) canvas.set(x, y, color);
   }
-  const x0 = Math.round(width / 2 - SUN_X * scale);
+  const x0 = Math.min(0, Math.max(width - art.width * scale, Math.round(width / 2 - SUN_X * scale)));
   if (time === "night") {
     const stars = starrySky();
-    canvas.draw(stars, colors, scale, x0, top - stars.height * scale);
+    // The top of the wizard holds its text: no stars there, and fewer just below.
+    const clear = height * 0.3;
+    const thin = height * 0.5;
+    canvas.draw(stars, colors, scale, x0, top - stars.height * scale, (y, x) => y >= thin || (y >= clear && (x * 7 + y * 13) % 3 === 0));
   }
   canvas.draw(art, colors, scale, x0, top);
+  return canvas;
+}
+
+/** The colors of one button image, from the theme: buttonClass in web/src/components/ui.tsx. */
+export function buttonColors(colors: Map<string, Rgb>, kind: (typeof BUTTON_KINDS)[number], state: (typeof BUTTON_STATES)[number]): { fill: Rgb; border: Rgb; text: Rgb; alpha: number } {
+  const get = (name: string) => {
+    const color = colors.get(name);
+    if (color === undefined) throw new Error(`the theme has no --${name}`);
+    return color;
+  };
+  const primary = kind === "primary";
+  const base = primary ? get("primary") : get("card");
+  // hover:bg-primary/90 over the background, and hover:bg-muted.
+  const fill = state === "hover" ? (primary ? mix(base, get("background"), 0.1) : get("muted")) : base;
+  return { fill, border: primary ? get("primary") : get("input"), text: primary ? get("primary-foreground") : get("foreground"), alpha: state === "disabled" ? 0.5 : 1 };
+}
+
+/** A rounded button face (rounded-md, a 1px border at 100% DPI), antialiased, transparent outside. */
+export function buttonImage(colors: { fill: Rgb; border: Rgb; alpha: number }, [width, height]: Readonly<[number, number]> = BUTTON_SIZE): Canvas {
+  const canvas = new Canvas(width, height);
+  const radius = height * 0.2;
+  const borderWidth = height / 26;
+  const SAMPLES = 4;
+  /** Distance inside the rounded rectangle (negative outside). */
+  const inside = (px: number, py: number) => {
+    const cx = Math.min(Math.max(px, radius), width - radius);
+    const cy = Math.min(Math.max(py, radius), height - radius);
+    return radius - Math.hypot(px - cx, py - cy);
+  };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let cover = 0;
+      let border = 0;
+      for (let sy = 0; sy < SAMPLES; sy++) {
+        for (let sx = 0; sx < SAMPLES; sx++) {
+          const d = inside(x + (sx + 0.5) / SAMPLES, y + (sy + 0.5) / SAMPLES);
+          if (d <= 0) continue;
+          cover++;
+          if (d <= borderWidth) border++;
+        }
+      }
+      if (cover === 0) continue;
+      const color = mix(colors.fill, colors.border, border / cover);
+      canvas.set(x, y, [...color, Math.round(255 * colors.alpha * (cover / SAMPLES ** 2))] as Rgba);
+    }
+  }
   return canvas;
 }
 
@@ -121,9 +186,8 @@ export function padlock(): Array<{ x: number; y: number; w: number; color: Rgb }
 /** The favicon's outline color: on a dark tile it takes the theme's text color, as the app's header glow does. */
 const OUTLINE = "241d17";
 
-/** The small image: the padlock on a rounded tile of the theme's sky, the rest transparent. */
-export function smallImage(colors: Map<string, Rgb>, size: number, dark = false): Canvas {
-  const canvas = new Canvas(size, size);
+/** Paints the padlock on a rounded tile of the theme's sky, `size` square, its corner at (left, top). */
+function drawTile(canvas: Canvas, colors: Map<string, Rgb>, size: number, left: number, top: number, dark: boolean): void {
   const scale = Math.max(1, Math.floor((size * 0.7) / 16));
   const inset = Math.round(size * 0.04);
   const radius = Math.round(size * 0.18);
@@ -134,15 +198,29 @@ export function smallImage(colors: Map<string, Rgb>, size: number, dark = false)
       const cx = Math.min(Math.max(x, inset + radius), size - inset - radius - 1);
       const cy = Math.min(Math.max(y, inset + radius), size - inset - radius - 1);
       if ((x - cx) ** 2 + (y - cy) ** 2 > radius ** 2) continue;
-      canvas.set(x, y, mix(sky, horizon, (y - inset) / (size - 2 * inset)));
+      canvas.set(left + x, top + y, mix(sky, horizon, (y - inset) / (size - 2 * inset)));
     }
   }
   const offset = Math.floor((size - 16 * scale) / 2);
   const outline = [0, 2, 4].map((i) => parseInt(OUTLINE.slice(i, i + 2), 16)).join();
   for (const run of padlock()) {
     const color = dark && run.color.join() === outline ? colors.get("foreground")! : run.color;
-    for (let dy = 0; dy < scale; dy++) for (let dx = 0; dx < run.w * scale; dx++) canvas.set(offset + run.x * scale + dx, offset + run.y * scale + dy, color);
+    for (let dy = 0; dy < scale; dy++) for (let dx = 0; dx < run.w * scale; dx++) canvas.set(left + offset + run.x * scale + dx, top + offset + run.y * scale + dy, color);
   }
+}
+
+/** The small image: the padlock tile, the rest transparent. */
+export function smallImage(colors: Map<string, Rgb>, size: number, dark = false): Canvas {
+  const canvas = new Canvas(size, size);
+  drawTile(canvas, colors, size, 0, 0, dark);
+  return canvas;
+}
+
+/** The Welcome and Finished pages' image: the padlock tile near the top, beside the heading; transparent elsewhere, so the landscape shows. */
+export function welcomeImage(colors: Map<string, Rgb>, width: number, height: number, dark = false): Canvas {
+  const canvas = new Canvas(width, height);
+  const size = Math.round(width * 0.62);
+  drawTile(canvas, colors, size, Math.round((width - size) / 2), Math.round(height * 0.08), dark);
   return canvas;
 }
 
@@ -177,31 +255,46 @@ export function png(canvas: Canvas): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", new Uint8Array())]);
 }
 
-/** Writes every image and the two include files into `out`. Returns the files written. */
+/** "#rrggbb", as Inno Setup's WizardBackColor and StrToColor take it. */
+const hex = (color: Rgb) => `#${color.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+
+/** Writes every image and the three include files into `out`. Returns the files written. */
 export function writeWizardArt(out: string): string[] {
   mkdirSync(out, { recursive: true });
   const css = readFileSync(join(root, "web/src/index.css"), "utf8");
   const written: string[] = [];
-  const directives: Record<string, string[]> = { light: [], dark: [] };
+  const setup: Record<string, string[]> = { light: [], dark: [] };
+  const files: string[] = [];
+  const write = (name: string, canvas: Canvas) => {
+    writeFileSync(join(out, name), png(canvas));
+    written.push(name);
+    return name;
+  };
+  const list = (names: string[]) => names.map((name) => join(resolve(out), name)).join(",");
   for (const { mode, theme, time, extra } of WIZARD_THEMES) {
     const colors = themeColors(css, theme);
-    const large = LARGE_SIZES.map(([w, h]) => {
-      const name = `wizard-${mode}-${w}x${h}.png`;
-      writeFileSync(join(out, name), png(largeImage(colors, time, extra, w, h)));
-      return name;
-    });
-    const small = SMALL_SIZES.map((size) => {
-      const name = `wizard-small-${mode}-${size}.png`;
-      writeFileSync(join(out, name), png(smallImage(colors, size, mode === "dark")));
-      return name;
-    });
-    written.push(...large, ...small);
-    const list = (names: string[]) => names.map((name) => join(resolve(out), name)).join(",");
+    const back = BACK_SIZES.map(([w, h]) => write(`wizard-back-${mode}-${w}x${h}.png`, backImage(colors, time, extra, w, h)));
+    const small = SMALL_SIZES.map((size) => write(`wizard-small-${mode}-${size}.png`, smallImage(colors, size, mode === "dark")));
+    const welcome = WELCOME_SIZES.map(([w, h]) => write(`wizard-welcome-${mode}-${w}x${h}.png`, welcomeImage(colors, w, h, mode === "dark")));
     const suffix = mode === "dark" ? "DynamicDark" : "";
-    directives[mode]!.push(`WizardImageFile${suffix}=${list(large)}`, `WizardSmallImageFile${suffix}=${list(small)}`);
+    setup[mode]!.push(
+      `WizardBackColor${suffix}=${hex(colors.get("background")!)}`,
+      `WizardBackImageFile${suffix}=${list(back)}`,
+      `WizardImageFile${suffix}=${list(welcome)}`,
+      `WizardSmallImageFile${suffix}=${list(small)}`,
+    );
+    for (const kind of BUTTON_KINDS) {
+      for (const state of BUTTON_STATES) {
+        const button = buttonColors(colors, kind, state);
+        const name = write(`button-${kind}-${state}-${mode}.png`, buttonImage(button));
+        files.push(`Source: "${join(resolve(out), name)}"; Flags: dontcopy noencryption`);
+        // The label the installer draws over the image (#define for its [Code]).
+        if (state !== "hover") setup[mode]!.push(`#define ButtonText_${kind}_${state}_${mode} "${hex(state === "disabled" ? mix(button.text, button.fill, 0.5) : button.text)}"`);
+      }
+    }
   }
-  for (const [mode, file] of [["light", "wizard-art.iss"], ["dark", "wizard-art-dark.iss"]] as const) {
-    writeFileSync(join(out, file), `; Written by packaging/windows/wizard-art.ts.\n${directives[mode]!.join("\n")}\n`);
+  for (const [file, lines] of [["wizard-art.iss", setup.light!], ["wizard-art-dark.iss", setup.dark!], ["wizard-files.iss", files]] as const) {
+    writeFileSync(join(out, file), `; Written by packaging/windows/wizard-art.ts.\n${lines.join("\n")}\n`);
     written.push(file);
   }
   return written;
