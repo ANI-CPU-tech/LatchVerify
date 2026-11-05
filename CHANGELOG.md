@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3 - 2026-11-05
+
+### Changed
+- **Leaner source**: the longest code comments in the commands, background sync and web UI were condensed, and helpers used in one file are no longer exported. No change in behavior.
+
 ## 0.2.2 - 2026-11-05
 
 ### Fixed
