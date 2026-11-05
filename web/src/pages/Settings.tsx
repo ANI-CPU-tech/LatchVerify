@@ -7,6 +7,7 @@ import { saveSettings } from "../lib/api";
 import { describeError, useData } from "../lib/data";
 import { checkForUpdates, checkSummary, inDesktopApp, installUpdate, uninstallApp, updateStatus, type UpdateStatus } from "../lib/desktop";
 import { relativeTime } from "../lib/format";
+import { parseNotes, type Inline } from "../lib/notes";
 import { href } from "../lib/router";
 import { useTheme } from "../lib/theme";
 import { DEFAULT_SURFACE, SURFACE_STEP, surfaceAlpha } from "../lib/surface";
@@ -181,6 +182,53 @@ function Background() {
   );
 }
 
+function InlineText({ parts }: { parts: Inline[] }) {
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.kind === "bold" ? (
+          <strong key={i} className="font-semibold text-foreground">
+            {part.text}
+          </strong>
+        ) : part.kind === "code" ? (
+          <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em] text-foreground">
+            {part.text}
+          </code>
+        ) : (
+          <span key={i}>{part.text}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+/** A release's notes, formatted: headings, bullet lists, bold and code (lib/notes.ts; never HTML). */
+function ReleaseNotes({ notes }: { notes: string }) {
+  return (
+    <div className="max-h-64 space-y-2 overflow-auto pr-1 text-sm text-muted-foreground">
+      {parseNotes(notes).map((block, i) =>
+        block.kind === "heading" ? (
+          <h3 key={i} className="pt-1 text-xs font-semibold uppercase tracking-wide text-foreground">
+            <InlineText parts={block.text} />
+          </h3>
+        ) : block.kind === "list" ? (
+          <ul key={i} className="list-disc space-y-1.5 pl-5">
+            {block.items.map((item, j) => (
+              <li key={j}>
+                <InlineText parts={item} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p key={i}>
+            <InlineText parts={block.text} />
+          </p>
+        ),
+      )}
+    </div>
+  );
+}
+
 /**
  * Updates, inside the app: check now, then install the release on one click. The app downloads it,
  * checks its signature and checksum, installs it and restarts. In a browser: `latch update`.
@@ -255,7 +303,7 @@ function Updates() {
             {offer && (
               <div className="space-y-2 rounded-md border border-primary/40 bg-primary/5 p-3">
                 <p className="text-sm font-medium">LatchVerify {offer.version} is available</p>
-                {offer.notes.trim() !== "" && <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-sans text-xs text-muted-foreground">{offer.notes.trim()}</pre>}
+                {offer.notes.trim() !== "" && <ReleaseNotes notes={offer.notes} />}
               </div>
             )}
             <div className="flex flex-wrap gap-2">
