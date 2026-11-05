@@ -224,5 +224,29 @@ describe("make-latest-json", () => {
       const latest = makeManifest("1.2.3", dir, lines.map((line) => `  ${line}`).join("\n"), "## 1.2.3\n\nFixed things.\n", new Date(), publicKey);
       expect(await checkForUpdate("deb", { current: "1.2.2", publicKey, fetch: fetchJson(latest) })).toMatchObject({ version: "1.2.3" });
     });
+
+    it.each([
+      ["a public key", publicKey, "PUBLIC KEY"],
+      ["an OpenSSH key", "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----\n", "OPENSSH PRIVATE KEY"],
+      ["a key cut off before its END line", lines.slice(0, 2).join("\n"), "no complete PRIVATE KEY block"],
+      ["a damaged key", privateKey.replace(base64, base64.slice(0, 20)), "cannot be decoded"],
+      ["text that is no key", "not a key", "cannot be decoded"],
+      ["blank text", "  \n", "cannot be decoded"],
+    ])("explains what is wrong with %s", (_name, secret, expected) => {
+      expect(() => parseSigningKey(secret)).toThrow(expected);
+    });
+
+    it("never repeats the secret in its error", () => {
+      for (const secret of [privateKey.replace(base64, `${base64.slice(0, 20)}!`), `${base64.slice(0, 40)}`, lines.slice(0, 2).join("\n")]) {
+        let message = "";
+        try {
+          parseSigningKey(secret);
+        } catch (error) {
+          message = error instanceof Error ? `${error.message} ${String(error.cause ?? "")}` : "";
+        }
+        expect(message).not.toBe("");
+        expect(message).not.toContain(base64.slice(0, 20));
+      }
+    });
   });
 });
