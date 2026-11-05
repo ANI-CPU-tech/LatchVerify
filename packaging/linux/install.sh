@@ -33,6 +33,10 @@ if [ -L "$bin/latchverify-review" ] && [ "$(readlink "$bin/latchverify-review")"
 mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps"
 sed "s|^Exec=latchverify-desktop|Exec=\"$lib/desktop/latchverify-desktop\"|" "$src/io.github.ANI-CPU-tech.LatchVerify.desktop" > "$data/applications/io.github.ANI-CPU-tech.LatchVerify.desktop"
 cp "$src/io.github.ANI-CPU-tech.LatchVerify.svg" "$data/icons/hicolor/scalable/apps/"
+# Versions before 0.2.0 used the app id io.github.vinayakkam.LatchVerify: drop their menu entry and
+# icon, or the menu shows LatchVerify twice. Only an entry that starts this install is removed.
+old="$data/applications/io.github.vinayakkam.LatchVerify.desktop"
+if [ -f "$old" ] && grep -q "$lib/" "$old"; then rm -f "$old" "$data/icons/hicolor/scalable/apps/io.github.vinayakkam.LatchVerify.svg"; fi
 
 echo "Installed LatchVerify $("$lib/latch" --version) in $lib"
 if [ "${LATCH_SKIP_SETUP:-}" = 1 ]; then

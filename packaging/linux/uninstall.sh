@@ -31,4 +31,7 @@ done
 if [ -f "$autostart" ] && grep -q "$lib/desktop/" "$autostart"; then rm -f "$autostart"; fi
 rm -rf "$lib"
 rm -f "$data/applications/io.github.ANI-CPU-tech.LatchVerify.desktop" "$data/icons/hicolor/scalable/apps/io.github.ANI-CPU-tech.LatchVerify.svg"
+# The menu entry of versions before 0.2.0 (app id io.github.vinayakkam.LatchVerify), if it starts this install.
+old="$data/applications/io.github.vinayakkam.LatchVerify.desktop"
+if [ -f "$old" ] && grep -q "$lib/" "$old"; then rm -f "$old" "$data/icons/hicolor/scalable/apps/io.github.vinayakkam.LatchVerify.svg"; fi
 echo "LatchVerify removed. Your latch.lock was kept."
