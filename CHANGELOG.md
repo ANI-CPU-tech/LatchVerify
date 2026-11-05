@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-rc.1 - 2026-11-05
+
+Release candidate for 0.2.0. Installs of it are offered 0.2.0 when that is released.
 
 ### Installers
 - **Windows installer, Debian/Ubuntu and Arch/CachyOS packages, and a portable Linux archive**, built by the **Build installers** workflow on GitHub's Windows and Linux machines. Each carries its own Node.js 22, so nothing else needs installing.
@@ -24,6 +26,10 @@
 - **Opening an MCP client brings the app up.** When a client starts a protected server and the installed app is not running, the proxy starts it hidden in the tray, passing it only the desktop session's variables, never the server's keys. A second start never pops the window up.
 - **Updates, signed.** The app checks for a new release 10 s after it starts and then once a day (Settings can turn this off), shows the release notes and installs on one click: the Windows installer, `apt-get` or `pacman` through `pkexec`, or the portable archive's own `install.sh`. Nothing is downloaded before you click. Every release publishes a `latest.json` signed with ed25519; the installer's sha256 and signature are checked before it runs. `latch update` does the same from a terminal, and `latch update --check` only reports. A source checkout never updates itself.
 - **Dev Tools** (development mode only) and `pnpm demo:add` add the demo servers to a client in one step.
+- **Settings → Updates**: the running version, the last check, **Check for updates**, and the release notes with **Install x.y.z and restart** when one is out. Works on Windows and on every Linux install (deb, Arch, portable archive).
+- **Settings → Development**: a switch for development mode, saved in `settings.json`. `--dev` and `LATCH_DEV=1` still turn it on for one run.
+- **Uninstall from the app**: **Settings → Uninstall LatchVerify...**, the Linux menu entry's **Uninstall LatchVerify** action, or `latch uninstall --yes`. Each restores every MCP client first and keeps `latch.lock`. The portable install keeps its `uninstall.sh`, so the unpacked archive is no longer needed to remove it.
+- **The Windows installer shows the app's landscape**: Default Light's sunset in Windows light mode, Terminal Dark's night in dark mode, with a Welcome page.
 
 ### Changed
 - **Nothing is connected without your say-so.** LatchVerify connects an MCP client only after you answer yes: `latch setup` lists the clients it found and asks, `--client` and `--all` connect without asking, the Windows installer has a checkbox, and the MCP Servers page has Connect and Disconnect. Linux packages connect nothing by themselves. Your answers are kept in `settings.json`.
@@ -32,7 +38,7 @@
 - **Linked entries keep your env untouched**: only `command` and `args` change, the lockfile path travels as `--lockfile`, and no `.bak` copy of the config is made any more. `latch setup` lists the copies earlier versions left, which hold your keys, so you can delete them.
 - **The demo stays out of real installs.** The Simulation page and its API (`POST /api/simulate`) exist only in development mode, `LATCH_DEV=1`. Its code and the demo tool lists load as a separate chunk only then. An installed review UI never shows sample data: when the API is down, it says so.
 - **LatchVerify opens no browser.** `latch review --ui` serves the review UI and prints its address; the app is how you open it. The `latchverify-review` launcher and the **LatchVerify Review** menu entry are replaced by **LatchVerify**.
-- **CI runs on every push**, on Linux and Windows (`ci.yml`), and Windows test failures now fail the installer build instead of being reported only.
+- **One workflow.** Pushes and merges no longer start CI. The **Build installers** workflow (run on demand or by a `v*` tag) runs the typecheck and tests on Linux and Windows first, and no installer is built or published unless they pass.
 - **`GET /api/info`** reports the running version and whether development mode is on.
 
 ### Security
@@ -48,6 +54,8 @@
 - **Rejections last.** A rejected definition stays blocked after the proxy restarts, whatever its tier, and is not queued for review again.
 
 ### Fixed
+- **An install of a pre-release is offered its release**: 0.2.0-rc.1 now updates to 0.2.0. Before, a release candidate never saw the release it led to.
+- **The deb's in-app update no longer waits on debconf**: `apt-get` runs non-interactively under `pkexec`, and a cancelled password prompt or a missing polkit agent is explained instead of reported as an exit code.
 - **Connect and the app's background sync start proxies with Node.js.** They used the app's own binary, so wrapped servers did not start.
 - **The app keeps running when its watcher cannot start**, and starts paused so the tray can retry.
 - **Changing one setting no longer resets the others.**

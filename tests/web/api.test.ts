@@ -182,7 +182,7 @@ describe("fetchEvents, fetchLockfile, fetchLockfileGit, fetchInfo", () => {
   it("read what the real review API serves", async () => {
     const dir = await mkdtemp(join(tmpdir(), "latch-web-api-"));
     try {
-      const deps = { lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), reviewer: "alice@example.com" };
+      const deps = { lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), settingsPath: join(dir, "settings.json"), reviewer: "alice@example.com" };
       await copyFile(new URL("../../latch.lock.example", import.meta.url), deps.lockfilePath);
       await writePending(deps.stateDir, [change]);
       await appendEvent(deps.stateDir, { kind: "tools_listed", at: "2026-10-23T09:00:00.000Z", serverId: "weather", toolCount: 2 });
@@ -193,7 +193,7 @@ describe("fetchEvents, fetchLockfile, fetchLockfileGit, fetchInfo", () => {
       expect(await fetchEvents()).toEqual([{ kind: "tools_listed", at: "2026-10-23T09:00:00.000Z", serverId: "weather", toolCount: 2 }]);
       expect((await fetchPending()).map((item) => item.change)).toEqual([change]);
       expect(await fetchLockfileGit()).toMatchObject({ available: expect.any(Boolean) });
-      expect(await fetchInfo()).toEqual({ version: VERSION, dev: false });
+      expect(await fetchInfo()).toEqual({ version: VERSION, dev: false, devLocked: false });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -207,7 +207,7 @@ describe("simulateRugPull", () => {
   it("posts with the client header and returns the validated result from the real API", async () => {
     const dir = await mkdtemp(join(tmpdir(), "latch-api-sim-"));
     try {
-      const app = createRoutes({ lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), reviewer: "alice@example.com", dev: true });
+      const app = createRoutes({ lockfilePath: join(dir, "latch.lock"), stateDir: join(dir, ".latch"), settingsPath: join(dir, "settings.json"), reviewer: "alice@example.com", dev: true });
       const mock = stubFetch(async (input, init) => app.request(`http://127.0.0.1${String(input)}`, init));
       const result = await simulateRugPull(request);
       expect(mock.mock.calls[0]![1]).toMatchObject({ method: "POST", headers: { [CLIENT_HEADER]: "review-ui" } });

@@ -9,3 +9,8 @@ Terminal=false
 StartupWMClass=LatchVerify
 Categories=Development;Security;
 Keywords=MCP;Claude;security;proxy;review;
+Actions=Uninstall;
+
+[Desktop Action Uninstall]
+Name=Uninstall LatchVerify
+Exec=latchverify-desktop --uninstall

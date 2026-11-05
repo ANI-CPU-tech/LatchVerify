@@ -102,7 +102,8 @@ pnpm link --global   # puts `latch` on your PATH
 | `latch review` | Walk the pending queue in the terminal, or with `--ui` serve the review UI on a local port (no browser is opened). Approving rewrites `latch.lock` for you to commit; rejecting keeps that definition blocked, even after a restart. |
 | `latch lock status` / `accept` / `restore` | Check `latch.lock` for edits made outside LatchVerify (a server tampering with its own approvals, or a `git pull`). Proxies ignore such an edit, and approvals refuse to write over it, until you `accept` it; `restore` puts back the last version LatchVerify wrote. |
 | `latch verify` | CI check. Starts every server in `latch.lock` (launch lines from `--config .mcp.json` or the client configs, since `latch.lock` keeps only their hash), diffs live tools against pinned ones, and exits non-zero on tier 2+ drift. |
-| `latch update` | Check for a signed release and install it (`--check` only reports). Installed packages only; a source checkout never updates itself. |
+| `latch update` | Check for a signed release and install it (`--check` only reports). Installed packages only; a source checkout never updates itself. The app does the same from **Settings → Updates**. |
+| `latch uninstall` | Remove an installed LatchVerify with its own uninstaller, after giving every MCP client its original commands back; `latch.lock` is kept. Says what it would run unless given `--yes`. The app does the same from **Settings → Uninstall**. |
 | `latch inspect` | Print derived capabilities and findings for a server or a saved `tools/list` JSON, without touching the lockfile. |
 
 `latch proxy` also exists. It is hidden from `--help` because only the client configs
@@ -134,8 +135,8 @@ The repository keeps the demo for development and testing. None of it ships in a
 
 - `pnpm demo:benign` and `pnpm demo:evil`: a benign weather MCP server and its rug-pull twin.
   [docs/DEMO.md](docs/DEMO.md) walks through the rug pull end to end.
-- `LATCH_DEV=1` (in `.env`, or the shell running `pnpm ui` or `latch review --ui`) turns on
-  development mode: the review UI adds the Simulation page, which rehearses the rug pull in memory,
+- **Settings → Development mode** in the app, or `LATCH_DEV=1` (in `.env`, or the shell running
+  `pnpm ui` or `latch review --ui`) for one run, turns on development mode: the review UI adds the Simulation page, which rehearses the rug pull in memory,
   and the Dev Tools page, which adds the demo servers to an MCP client in one click.
 - `pnpm demo:add` does the same from a terminal: `pnpm demo:add` lists the presets
   (`demo-weather`, `demo-rugpull`, `demo-poisoned`, `demo-devtools`),

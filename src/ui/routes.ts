@@ -6,7 +6,7 @@ import { runUnlink } from "../commands/setup.js";
 import { SUPPORTED_CLIENTS, type ClientId, type ProxyLaunch } from "../config/clients.js";
 import { syncClients } from "../daemon/sync.js";
 import { addPreset, demoRoot, findPreset, presetStates, removePreset } from "../dev/presets.js";
-import { SettingsPatchSchema, SimulationRequestSchema, type LockFile, type PendingChange } from "../schema/index.js";
+import { DEFAULT_SETTINGS, SettingsPatchSchema, SimulationRequestSchema, type LockFile, type PendingChange } from "../schema/index.js";
 import { readSettings, settingsPath, updateSettings } from "../store/settings.js";
 import { clientsReport } from "./clients.js";
 import { appendEvent, readEvents, type LatchEvent } from "../store/events.js";
@@ -25,7 +25,10 @@ export interface RouteDeps {
   reviewer: string;
   /** Clock for approval and event timestamps. Defaults to the system clock. */
   now?: () => Date;
-  /** Development mode (LATCH_DEV): also serve POST /api/simulate. Off by default. */
+  /**
+   * Development mode forced on for this run (`--dev`, LATCH_DEV). Otherwise settings.json's
+   * devMode (the Settings switch) decides, per request. Off by default.
+   */
   dev?: boolean;
   /** settings.json (GET/PUT /api/settings, client answers). Defaults to the one beside the per-user lockfile. */
   settingsPath?: string;
@@ -102,8 +105,10 @@ export function createRoutes(deps: RouteDeps): Hono {
   const reviewer = deps.reviewer.trim();
   if (reviewer.length === 0) throw new TypeError("createRoutes: reviewer must not be empty; approvals record who made them");
   const now = deps.now ?? (() => new Date());
-  const dev = deps.dev ?? false;
+  const devLocked = deps.dev ?? false;
   const settingsFile = deps.settingsPath ?? settingsPath();
+  /** Development mode now: forced by the run, or switched on in Settings. Unreadable settings count as off. */
+  const devOn = async (): Promise<boolean> => devLocked || (await readSettings(settingsFile).catch(() => DEFAULT_SETTINGS)).devMode;
   const app = new Hono();
 
   // Request guard, ahead of every route:
@@ -121,6 +126,14 @@ export function createRoutes(deps: RouteDeps): Hono {
     c.header("X-Content-Type-Options", "nosniff");
     await next();
   });
+
+  // Development-mode routes answer as if they did not exist while it is off.
+  const devOnly = async (c: { req: { method: string; path: string }; json: (body: unknown, status: 404) => Response }, next: () => Promise<void>) => {
+    if (!(await devOn())) return c.json({ error: `no route for ${c.req.method} ${c.req.path}` }, 404);
+    await next();
+  };
+  app.use("/api/dev/*", devOnly);
+  app.use("/api/simulate", devOnly);
 
   /** The pending change with this id, or a 404. */
   const pendingById = (queue: PendingChange[], id: string): PendingChange => {
@@ -191,9 +204,10 @@ export function createRoutes(deps: RouteDeps): Hono {
     return c.body(null, 204);
   });
 
-  // What is serving: the LatchVerify version, and whether development mode is on (the UI shows
-  // the Simulation page only then). Returns { version, dev }.
-  app.get("/api/info", (c) => c.json({ version: VERSION, dev }));
+  // What is serving: the LatchVerify version, whether development mode is on (the UI shows the
+  // Simulation and Dev Tools pages only then), and whether --dev or LATCH_DEV forces it on, so the
+  // Settings switch cannot turn it off. Returns { version, dev, devLocked }.
+  app.get("/api/info", async (c) => c.json({ version: VERSION, dev: await devOn(), devLocked }));
 
   // The newest events, oldest first. ?limit= defaults to DEFAULT_EVENT_LIMIT. Returns LatchEvent[].
   app.get("/api/events", async (c) => c.json(await readEvents(deps.stateDir, eventLimit(c.req.query("limit")))));
@@ -256,9 +270,9 @@ export function createRoutes(deps: RouteDeps): Hono {
   // Whether latch.lock is committed: tracked, modified, last commit. Read-only. Returns LockfileGitStatus.
   app.get("/api/lockfile/git", async (c) => c.json(await lockfileGitStatus(deps.lockfilePath)));
 
-  // Development mode only: the demo presets of the Dev Tools page (src/dev/presets.ts). In real use
-  // these routes do not exist and answer 404.
-  if (dev) {
+  // Development mode only: the demo presets of the Dev Tools page (src/dev/presets.ts). While it is
+  // off these routes answer 404 (devOnly).
+  {
     const presetParam = (id: string) => {
       const preset = findPreset(id);
       if (preset === undefined) throw new ApiError(404, `no demo preset "${id}"`);
@@ -305,8 +319,8 @@ export function createRoutes(deps: RouteDeps): Hono {
 
   // Rehearse a rug pull in memory with the proxy's own pipeline (src/ui/simulation.ts). Reads and
   // writes nothing, but is a POST, so it passes the same write guard. Returns SimulationResult.
-  // Development mode only: in real use the route does not exist and answers 404.
-  if (dev) {
+  // Development mode only: while it is off the route answers 404 (devOnly).
+  {
     app.post(
       "/api/simulate",
       bodyLimit({ maxSize: MAX_SIMULATION_BYTES, onError: (c) => c.json({ error: `the simulation body is over ${MAX_SIMULATION_BYTES} bytes` }, 413) }),

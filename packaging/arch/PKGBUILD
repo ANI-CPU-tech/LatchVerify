@@ -16,6 +16,7 @@ license=('MIT')
 # What the bundled Node.js links against.
 depends=('glibc' 'gcc-libs' 'hicolor-icon-theme')
 optdepends=('git: approvals are recorded under your git user.email'
+            'polkit: install updates and uninstall from the LatchVerify app'
             'gtk3: the LatchVerify desktop app'
             'nss: the LatchVerify desktop app'
             'mesa: the LatchVerify desktop app'

@@ -127,7 +127,15 @@ that blocks on every reword gets disabled by its users.
   lets `latch proxy` start an installed app hidden when that pid is not alive, with `appEnvironment`
   (session variables only, never the server's env).
 - Updates: `src/update/` (`manifest.ts` schema and signed message, `index.ts` check, download,
-  install per kind, `key.ts` the public key). The private key is the release workflow's
+  install and uninstall per kind, `key.ts` the public key). `isNewer` ranks a release above its own
+  pre-releases. Uninstall: `latch uninstall` (`commands/uninstall.ts`), the app's Settings and the
+  Linux menu entry's `--uninstall` action; the portable install keeps its `uninstall.sh`.
+- The app's window bridge (`preload.cts`: updateStatus, checkForUpdates, installUpdate, uninstall)
+  is read only through `web/src/lib/desktop.ts`, which validates every answer; in a browser the
+  Settings page shows the `latch update` / `latch uninstall --yes` commands instead.
+- Installer art: `packaging/windows/wizard-art.ts` renders the landscape and padlock PNGs (Default
+  Light by day, Terminal Dark at night) and include files; `latchverify.iss` uses them with
+  `WizardStyle=modern dynamic` when built with `/DWizardArtDir` on Inno Setup 6.6+. The private key is the release workflow's
   `LATCH_UPDATE_SIGNING_KEY` secret, never in the repo. `latch update` (`commands/update.ts`).
 - Dev: `src/dev/presets.ts` (demo presets; `demo/` referenced by path, never imported), the Dev
   Tools page and `pnpm demo:add`.
@@ -149,7 +157,9 @@ that blocks on every reword gets disabled by its users.
 
 ## Review UI
 
-**API** (`src/ui/routes.ts`): `GET /api/info` (`{ version, dev }`), `GET /api/clients`
+**API** (`src/ui/routes.ts`): `GET /api/info` (`{ version, dev, devLocked }`: development mode is
+settings.json's `devMode`, the Settings switch, read per request, unless `--dev`/LATCH_DEV force it on
+for the run, which is `devLocked`; the `devOnly` middleware 404s `/api/dev/*` and `/api/simulate` while it is off), `GET /api/clients`
 (per client: answer, files, each server's program, link and pin state; never args or env),
 `POST /api/clients/:id/connect|disconnect`, `GET|PUT /api/settings`, `GET /api/pending`, `GET /api/pending/:id`,
 `POST /api/pending/:id/approve|reject`, `GET /api/events?limit=`, `GET /api/lockfile`,
@@ -295,8 +305,9 @@ There is no browser test runner. To check the UI visually, serve the built bundl
 
 - CI results are not stored, so the Git & CI page documents `latch verify` rather than
   showing CI runs, and no page shows live proxy connections.
-- `.github/workflows/ci.yml` runs typecheck and tests on Ubuntu and Windows; Windows has not yet had
-  a green run.
+- There is no push or pull-request CI: `build-installers.yml` (run on demand or by a `v*` tag) runs
+  typecheck and tests on Ubuntu and Windows first, and every build waits for them. Run
+  `pnpm typecheck && pnpm test` before merging.
 - The portable Linux archive has no setuid `chrome-sandbox`, so the app needs unprivileged user
   namespaces there (the deb and the Arch package ship a setuid helper).
 - On Windows, MCP clients that spawn `latch` without a shell may not resolve `latch.cmd`.

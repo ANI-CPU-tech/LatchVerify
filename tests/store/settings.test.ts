@@ -25,7 +25,7 @@ describe("settingsPath", () => {
 
 describe("readSettings", () => {
   it("gives the defaults when there is no file", async () => {
-    expect(await readSettings(path)).toEqual({ clients: {}, notifications: true, checkForUpdates: true, launchAtLogin: true });
+    expect(await readSettings(path)).toEqual({ clients: {}, notifications: true, checkForUpdates: true, launchAtLogin: true, devMode: false });
     expect(await readSettings(path)).toEqual(DEFAULT_SETTINGS);
   });
 

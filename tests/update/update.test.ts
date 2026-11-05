@@ -7,7 +7,7 @@ import pc from "picocolors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installersByKind, makeManifest, parseSigningKey } from "../../packaging/make-latest-json.js";
 import { offerLines } from "../../src/commands/update.js";
-import { INSTALL_KIND_FILE, checkForUpdate, download, installCommand, installKind, isNewer, runInstall, signatureValid, signedMessage, updateUrl, type Offer } from "../../src/update/index.js";
+import { INSTALL_KIND_FILE, checkForUpdate, download, installCommand, installKind, isNewer, privilegeFailure, runInstall, signatureValid, signedMessage, uninstallCommand, updateUrl, type Offer } from "../../src/update/index.js";
 
 const keys = () => {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -45,7 +45,9 @@ describe("versions and signatures", () => {
     expect(isNewer("0.1.0", "0.1.0")).toBe(false);
     expect(isNewer("0.0.9", "0.1.0")).toBe(false);
     expect(isNewer("0.2.0-rc.1", "0.1.0")).toBe(false);
-    expect(isNewer("0.2.0", "0.2.0-rc.1")).toBe(false);
+    expect(isNewer("0.2.0", "0.2.0-rc.1")).toBe(true);
+    expect(isNewer("0.1.0", "0.2.0-rc.1")).toBe(false);
+    expect(isNewer("0.2.0", "0.2.0+build.5")).toBe(false);
   });
 
   it("accepts only the release key's signature of exactly that message", () => {
@@ -167,7 +169,7 @@ describe("downloading and installing", () => {
 
   it("installs each kind its own way", () => {
     expect(installCommand("inno", "C:\\t\\setup.exe", "C:\\app")).toEqual({ command: "C:\\t\\setup.exe", args: ["/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTART", "/RELAUNCH=1"] });
-    expect(installCommand("deb", "/t/x.deb", "/usr/lib/latchverify")).toEqual({ command: "pkexec", args: ["apt-get", "install", "-y", "/t/x.deb"] });
+    expect(installCommand("deb", "/t/x.deb", "/usr/lib/latchverify")).toEqual({ command: "pkexec", args: ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "/t/x.deb"] });
     expect(installCommand("pacman", "/t/x.pkg.tar.zst", "/usr/lib/latchverify")).toEqual({ command: "pkexec", args: ["pacman", "-U", "--noconfirm", "/t/x.pkg.tar.zst"] });
     const tarball = installCommand("tarball", "/t/x.tar.gz", "/home/me/.local/lib/latchverify");
     expect(tarball.args.slice(-2)).toEqual(["/t/x.tar.gz", "/home/me/.local"]);
@@ -248,5 +250,22 @@ describe("make-latest-json", () => {
         expect(message).not.toContain(base64.slice(0, 20));
       }
     });
+  });
+
+  it("uninstalls with each kind's own uninstaller, which restores the MCP clients first", () => {
+    expect(uninstallCommand("inno", "C:\\app")).toMatchObject({ command: join("C:\\app", "unins000.exe"), args: [] });
+    expect(uninstallCommand("deb", "/usr/lib/latchverify")).toEqual({ command: "pkexec", args: ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "remove", "-y", "latchverify"] });
+    expect(uninstallCommand("pacman", "/usr/lib/latchverify")).toEqual({ command: "pkexec", args: ["pacman", "-R", "--noconfirm", "latchverify-bin"] });
+    const tarball = uninstallCommand("tarball", "/home/me/.local/lib/latchverify");
+    expect(tarball.command).toBe("sh");
+    expect(tarball.args).toEqual([join("/home/me/.local/lib/latchverify", "uninstall.sh")]);
+    expect(tarball.env?.PREFIX).toBe(dirname(dirname("/home/me/.local/lib/latchverify")));
+  });
+
+  it("explains a cancelled or unanswered pkexec, and only for the packages that use it", () => {
+    expect(privilegeFailure("deb", 126)).toMatch(/password was not given/);
+    expect(privilegeFailure("pacman", 127)).toMatch(/polkit/);
+    expect(privilegeFailure("deb", 100)).toBeUndefined();
+    expect(privilegeFailure("tarball", 126)).toBeUndefined();
   });
 });

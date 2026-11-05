@@ -3,8 +3,9 @@ import { autostartEntry, autostartPath, navigationAllowed, parseFlags, trayMenu,
 
 describe("the desktop shell", () => {
   it("reads its flags", () => {
-    expect(parseFlags(["electron", "main.js", "--hidden"])).toEqual({ hidden: true, smoke: false, dev: false });
-    expect(parseFlags(["--smoke", "--dev"])).toEqual({ hidden: false, smoke: true, dev: true });
+    expect(parseFlags(["electron", "main.js", "--hidden"])).toEqual({ hidden: true, smoke: false, dev: false, uninstall: false });
+    expect(parseFlags(["--smoke", "--dev"])).toEqual({ hidden: false, smoke: true, dev: true, uninstall: false });
+    expect(parseFlags(["--uninstall"]).uninstall).toBe(true);
   });
 
   it("lets the window load only its own review server", () => {

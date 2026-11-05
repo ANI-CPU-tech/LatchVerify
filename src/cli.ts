@@ -149,6 +149,12 @@ program
   .option("--check", "only check, install nothing", false)
   .action((opts: { check: boolean }) => run(async () => (await import("./commands/update.js")).runUpdate(opts)));
 
+program
+  .command("uninstall")
+  .description("remove this installed LatchVerify; every MCP client gets its original commands back, latch.lock is kept")
+  .option("-y, --yes", "go ahead (without it, only say what would run)", false)
+  .action((opts: { yes: boolean }) => run(async () => (await import("./commands/uninstall.js")).runUninstallCommand(opts)));
+
 const lock = program
   .command("lock")
   .description("check latch.lock for edits made outside LatchVerify, and accept or undo them");

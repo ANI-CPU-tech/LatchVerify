@@ -4,7 +4,13 @@
 # latch.lock stays, so reinstalling keeps your approvals.
 set -eu
 
-prefix=${PREFIX:-$HOME/.local}
+# Run from the install itself (<prefix>/lib/latchverify/uninstall.sh: the app's Uninstall and
+# `latch uninstall` do that), the prefix is where it lives; from the unpacked archive, ~/.local.
+here=$(dirname "$(readlink -f "$0")")
+case "$here" in
+  */lib/latchverify) prefix=${PREFIX:-$(dirname "$(dirname "$here")")} ;;
+  *) prefix=${PREFIX:-$HOME/.local} ;;
+esac
 lib="$prefix/lib/latchverify"
 bin="$prefix/bin"
 data=${XDG_DATA_HOME:-$HOME/.local/share}

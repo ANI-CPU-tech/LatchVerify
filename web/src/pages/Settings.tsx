@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PixelLandscape } from "../art/PixelLandscape";
-import { CheckIcon } from "../components/icons";
+import { CheckIcon, RefreshIcon } from "../components/icons";
 import type { SettingsPatch } from "@schema/index.js";
-import { PageHeader, Panel, Switch, buttonClass } from "../components/ui";
+import { PageHeader, Panel, Switch, Terminal, buttonClass } from "../components/ui";
 import { saveSettings } from "../lib/api";
 import { describeError, useData } from "../lib/data";
+import { checkForUpdates, checkSummary, inDesktopApp, installUpdate, uninstallApp, updateStatus, type UpdateStatus } from "../lib/desktop";
+import { relativeTime } from "../lib/format";
 import { href } from "../lib/router";
 import { useTheme } from "../lib/theme";
 import { DEFAULT_SURFACE, SURFACE_STEP, surfaceAlpha } from "../lib/surface";
@@ -179,6 +181,195 @@ function Background() {
   );
 }
 
+/**
+ * Updates, inside the app: check now, then install the release on one click. The app downloads it,
+ * checks its signature and checksum, installs it and restarts. In a browser: `latch update`.
+ */
+function Updates() {
+  const { info } = useData();
+  const desktop = inDesktopApp();
+  const [status, setStatus] = useState<UpdateStatus | null>(null);
+  const [phase, setPhase] = useState<"idle" | "checking" | "installing">("idle");
+  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await updateStatus());
+    } catch (failure) {
+      setMessage({ tone: "error", text: describeError(failure) });
+    }
+  }, []);
+  useEffect(() => {
+    if (desktop) void refresh();
+  }, [desktop, refresh]);
+
+  const current = status?.current ?? (info.status === "ready" ? info.data.version : null);
+  const check = async () => {
+    setPhase("checking");
+    setMessage(null);
+    try {
+      const result = await checkForUpdates();
+      setMessage({ tone: result.error === undefined ? "ok" : "error", text: checkSummary(result, current ?? "") });
+      await refresh();
+    } catch (failure) {
+      setMessage({ tone: "error", text: describeError(failure) });
+    } finally {
+      setPhase("idle");
+    }
+  };
+  const install = async () => {
+    setPhase("installing");
+    setMessage(null);
+    try {
+      const result = await installUpdate();
+      // On success the app restarts (or the Windows installer takes over) before this returns.
+      if (!result.installed) setMessage({ tone: "error", text: `The update was not installed: ${result.error ?? "it was cancelled"}.` });
+    } catch (failure) {
+      setMessage({ tone: "error", text: describeError(failure) });
+    } finally {
+      setPhase("idle");
+    }
+  };
+
+  const offer = status?.offer;
+  return (
+    <Panel title="Updates">
+      <div className="space-y-3">
+        <p className="text-sm">
+          You have LatchVerify <span className="font-mono">{current ?? "..."}</span>
+          {status?.lastCheck && <span className="text-muted-foreground"> · last checked {relativeTime(status.lastCheck)}</span>}
+        </p>
+        {!desktop ? (
+          <>
+            <p className="text-sm text-muted-foreground">Updates install from the LatchVerify app. In a terminal:</p>
+            <Terminal>latch update</Terminal>
+          </>
+        ) : status !== null && !status.installed ? (
+          <p className="text-sm text-muted-foreground">This LatchVerify was built from source, so it does not update itself: use git pull and pnpm build.</p>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Every release is signed. Nothing is downloaded until you click Install, and the download is checked against the signed
+              checksum before it runs. On Linux your system asks for your password.
+            </p>
+            {offer && (
+              <div className="space-y-2 rounded-md border border-primary/40 bg-primary/5 p-3">
+                <p className="text-sm font-medium">LatchVerify {offer.version} is available</p>
+                {offer.notes.trim() !== "" && <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-sans text-xs text-muted-foreground">{offer.notes.trim()}</pre>}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {offer && (
+                <button type="button" onClick={() => void install()} disabled={phase !== "idle" || status?.busy === true} className={buttonClass("primary")}>
+                  {phase === "installing" && <RefreshIcon aria-hidden="true" className="motion-safe:animate-spin" />}
+                  {phase === "installing" ? "Installing..." : `Install ${offer.version} and restart`}
+                </button>
+              )}
+              <button type="button" onClick={() => void check()} disabled={phase !== "idle" || status === null} className={buttonClass("secondary")}>
+                {phase === "checking" && <RefreshIcon aria-hidden="true" className="motion-safe:animate-spin" />}
+                {phase === "checking" ? "Checking..." : "Check for updates"}
+              </button>
+            </div>
+          </>
+        )}
+        {message && (
+          <p role={message.tone === "error" ? "alert" : "status"} className={`text-sm ${message.tone === "error" ? "text-destructive" : "text-success"}`}>
+            {message.text}
+          </p>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+/** Development mode: the Simulation and Dev Tools pages, saved in settings.json. --dev and LATCH_DEV still force it on. */
+function Development() {
+  const { settings, info, reload } = useData();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const locked = info.status === "ready" && info.data.devLocked;
+  const current = settings.status === "ready" ? settings.data.devMode : null;
+  const change = async (devMode: boolean) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await saveSettings({ devMode });
+      reload();
+    } catch (failure) {
+      setError(describeError(failure));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Panel title="Development">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <label htmlFor="setting-devMode" className="text-sm font-medium">
+            Development mode
+          </label>
+          <p className="text-xs text-muted-foreground">
+            {locked
+              ? "On for this run: LatchVerify was started with --dev or LATCH_DEV=1. Start it without them to use this switch."
+              : "Adds the Simulation and Dev Tools pages. The demo servers they use come only with a source checkout."}
+          </p>
+        </div>
+        <Switch id="setting-devMode" label="Development mode" checked={locked || current === true} disabled={locked || current === null || saving} onChange={(next) => void change(next)} />
+      </div>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+/** Uninstall, inside the installed app; the app asks before anything is removed. */
+function Uninstall() {
+  const desktop = inDesktopApp();
+  const [installed, setInstalled] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (desktop) void updateStatus().then((status) => setInstalled(status.installed), () => setInstalled(false));
+  }, [desktop]);
+  const uninstall = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await uninstallApp();
+      if (result.error !== undefined) setError(result.error);
+    } catch (failure) {
+      setError(describeError(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Panel title="Uninstall">
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Removes LatchVerify. Every MCP client gets its original server commands back first, so its servers then start without these checks.
+          Your latch.lock and settings are kept, so a reinstall keeps your approvals.
+        </p>
+        {desktop && installed ? (
+          <button type="button" onClick={() => void uninstall()} disabled={busy} className={buttonClass("danger")}>
+            {busy ? "Uninstalling..." : "Uninstall LatchVerify..."}
+          </button>
+        ) : (
+          <Terminal>latch uninstall --yes</Terminal>
+        )}
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 export function Settings() {
   const { preference, setPreference } = useTheme();
   const [notSaved, setNotSaved] = useState(false);
@@ -242,7 +433,10 @@ export function Settings() {
       </Panel>
 
       <Background />
+      <Updates />
       <CardOpacity />
+      <Development />
+      <Uninstall />
 
       <Panel title="About this screen">
         <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">

@@ -97,7 +97,7 @@ The package creates the `latch.lock` of the user who ran `sudo` and lists their 
 connects none. Then, as yourself, run `latch setup` to choose which to connect, and restart those
 clients. Uninstalling disconnects every client first.
 
-To uninstall: `sudo apt remove latchverify`
+To uninstall: `sudo apt remove latchverify`, or see [Uninstall from the app](#uninstall-from-the-app).
 
 ---
 
@@ -109,7 +109,7 @@ To uninstall: `sudo apt remove latchverify`
 sudo pacman -U latchverify-bin-<version>-1-x86_64.pkg.tar.zst
 ```
 
-To uninstall: `sudo pacman -R latchverify-bin`
+To uninstall: `sudo pacman -R latchverify-bin`, or see [Uninstall from the app](#uninstall-from-the-app).
 
 ### Option B — build the package yourself with makepkg
 
@@ -135,8 +135,17 @@ This installs to `~/.local/lib/latchverify`, puts `latch` in `~/.local/bin`, add
 and runs `latch setup`, which asks in your terminal which MCP clients to connect.
 Set `PREFIX=/some/dir` to install somewhere else. Run `install.sh` from a newer archive to update.
 
-To uninstall, run `./latchverify-<version>-linux-x64/uninstall.sh`. Use the same `PREFIX` if
-you set one.
+To uninstall, run `~/.local/lib/latchverify/uninstall.sh` (the install keeps a copy), or
+`./latchverify-<version>-linux-x64/uninstall.sh` with the same `PREFIX` if you set one.
+
+### Uninstall from the app
+
+**Uninstall from the app** on any Linux install: **Settings → Uninstall LatchVerify...**, or
+right-click LatchVerify in your app menu and choose **Uninstall LatchVerify**. It asks first, then
+your system asks for your password (deb and Arch packages). From a terminal: `latch uninstall --yes`.
+
+Every way of uninstalling gives each MCP client its original server commands back first, and keeps
+your `latch.lock` and settings, so a reinstall keeps your approvals.
 
 The bundled Node.js needs glibc 2.28 or newer (Debian 10, Ubuntu 20.04, RHEL 8 and later).
 
@@ -174,8 +183,10 @@ On Windows: `Get-FileHash latchverify-<version>-windows-x64-setup.exe`, then com
 
 You never need to uninstall first, and your `latch.lock` and approvals are kept.
 
-**The app updates itself.** It checks once a day, shows the release notes, and installs when you
-click **Install now** (on Linux packages it asks for your password through `pkexec`). Each update is
+**The app updates itself.** It checks once a day; **Settings → Updates** shows the release notes
+and installs on one click (**Install x.y.z and restart**), on Windows and every Linux install. On
+the deb and Arch packages your system asks for your password through polkit (`pkexec`).
+**Check for updates** there checks at once. Each update is
 checked against the release's ed25519 signature before it runs. `latch update` does the same from a
 terminal; `latch update --check` only reports. To update by hand:
 

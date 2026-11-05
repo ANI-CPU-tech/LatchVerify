@@ -130,8 +130,10 @@ async function main(): Promise<void> {
   await applyLoginStart(settingsFile);
   const updates = updateHandlers({ notify, showWindow, log });
   ipcMain.handle("latch:version", () => VERSION);
-  ipcMain.handle("latch:check-for-updates", () => updates.check(true));
+  ipcMain.handle("latch:update-status", () => updates.status());
+  ipcMain.handle("latch:check-for-updates", () => updates.check("inline"));
   ipcMain.handle("latch:install-update", () => updates.install());
+  ipcMain.handle("latch:uninstall", () => updates.uninstall());
 
   // Tray: the app lives here; closing the window only hides it.
   const tray = new Tray(nativeImage.createFromPath(TRAY_ICON));
@@ -159,8 +161,8 @@ async function main(): Promise<void> {
         }
         return refreshTray();
       case "updates":
-        if (updates.label().startsWith("Install")) await updates.install();
-        else await updates.check(true);
+        if (updates.label().startsWith("Install")) await updates.install(true);
+        else await updates.check("dialog");
         return refreshTray();
       case "quit":
         quitting = true;
@@ -184,8 +186,11 @@ async function main(): Promise<void> {
   updates.schedule(refreshTray);
 
   // A proxy starting the app again (--hidden) must not pop the window up; a user launching it does.
+  // The menu entry's Uninstall action (--uninstall) reaches the running app the same way.
   app.on("second-instance", (_event, argv) => {
-    if (!parseFlags(argv).hidden) showWindow();
+    const again = parseFlags(argv);
+    if (again.uninstall) void updates.uninstall();
+    else if (!again.hidden) showWindow();
   });
   // Stay in the tray when the window closes.
   app.on("window-all-closed", () => undefined);
@@ -196,7 +201,8 @@ async function main(): Promise<void> {
     void server.close();
   });
 
-  if (!flags.hidden) showWindow();
+  if (flags.uninstall) void updates.uninstall();
+  else if (!flags.hidden) showWindow();
 
   function createWindow(base: string): BrowserWindow {
     const created = new BrowserWindow({

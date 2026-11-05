@@ -8,6 +8,7 @@ const SETTING_FIELDS = {
   checkForUpdates: z.boolean(),
   launchAtLogin: z.boolean(),
   lastUpdateCheck: z.iso.datetime(),
+  devMode: z.boolean(),
 };
 
 /**
@@ -30,6 +31,11 @@ export const SettingsSchema = z.object({
   launchAtLogin: SETTING_FIELDS.launchAtLogin.default(true),
   /** When updates were last checked for. */
   lastUpdateCheck: SETTING_FIELDS.lastUpdateCheck.optional(),
+  /**
+   * Development mode, switched in Settings: the Simulation and Dev Tools pages and their API.
+   * `--dev` and LATCH_DEV still turn it on for one run, whatever this says.
+   */
+  devMode: SETTING_FIELDS.devMode.default(false),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 

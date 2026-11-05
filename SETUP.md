@@ -164,8 +164,9 @@ LATCH_DEV=1 pnpm desktop                 # development mode
 pnpm desktop                             # normal mode
 ```
 
-Development mode lasts for that run only: nothing is saved, and the login start always uses
-normal mode. In an installed app the Dev Tools page says the demo servers are not there, since
+Or switch it in the app: **Settings → Development → Development mode**. The switch is saved in
+`settings.json` and takes effect at once. `--dev` and `LATCH_DEV=1` still turn it on for one run
+only (nothing is saved, and the switch then shows on and locked); the login start uses the switch. In an installed app the Dev Tools page says the demo servers are not there, since
 packages ship neither `demo/` nor `tsx`; run the app from the checkout to add them.
 `Failed to load module "appmenu-gtk-module"` on start is a harmless GTK message.
 

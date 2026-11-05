@@ -74,7 +74,7 @@ const LockfileGitStatusSchema = z.discriminatedUnion("available", [
   }),
 ]);
 
-const ApiInfoSchema = z.object({ version: z.string(), dev: z.boolean() });
+const ApiInfoSchema = z.object({ version: z.string(), dev: z.boolean(), devLocked: z.boolean() });
 
 const isJson = (response: Response): boolean => (response.headers.get("content-type") ?? "").includes("application/json");
 
@@ -154,7 +154,7 @@ export async function fetchEvents(limit: number = MAX_EVENTS, signal?: AbortSign
 /** What GET /api/info reports: the LatchVerify version, and whether development mode is on. */
 export type ApiInfo = z.infer<typeof ApiInfoSchema>;
 
-/** The serving LatchVerify's version and mode (LATCH_DEV). */
+/** The serving LatchVerify's version and mode (the Settings switch, or --dev / LATCH_DEV forcing it on). */
 export async function fetchInfo(signal?: AbortSignal): Promise<ApiInfo> {
   return getJson("/api/info", ApiInfoSchema, "info", signal);
 }
