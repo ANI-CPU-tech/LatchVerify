@@ -3,8 +3,8 @@
 #
 #   /usr/lib/latchverify/{app,node,desktop,latch,link-user}
 #   /usr/bin/latch, /usr/bin/latchverify-desktop         symlinks into /usr/lib/latchverify
-#   /usr/share/applications/io.github.vinayakkam.LatchVerify.desktop
-#   /usr/share/icons/hicolor/scalable/apps/io.github.vinayakkam.LatchVerify.svg
+#   /usr/share/applications/io.github.ANI-CPU-tech.LatchVerify.desktop
+#   /usr/share/icons/hicolor/scalable/apps/io.github.ANI-CPU-tech.LatchVerify.svg
 #   /usr/share/doc/latchverify/copyright
 #
 # packaging/build-desktop.ts builds <stage-dir>/desktop, the Electron app.
@@ -34,8 +34,8 @@ printf 'deb\n' > "$lib/install-kind"
 install -m 755 "$repo/packaging/linux/latch" "$repo/packaging/linux/link-user" "$lib/"
 ln -s ../lib/latchverify/latch "$root/usr/bin/latch"
 ln -s ../lib/latchverify/desktop/latchverify-desktop "$root/usr/bin/latchverify-desktop"
-install -Dm 644 "$repo/packaging/linux/io.github.vinayakkam.LatchVerify.desktop" "$root/usr/share/applications/io.github.vinayakkam.LatchVerify.desktop"
-install -Dm 644 "$repo/web/public/favicon.svg" "$root/usr/share/icons/hicolor/scalable/apps/io.github.vinayakkam.LatchVerify.svg"
+install -Dm 644 "$repo/packaging/linux/io.github.ANI-CPU-tech.LatchVerify.desktop" "$root/usr/share/applications/io.github.ANI-CPU-tech.LatchVerify.desktop"
+install -Dm 644 "$repo/web/public/favicon.svg" "$root/usr/share/icons/hicolor/scalable/apps/io.github.ANI-CPU-tech.LatchVerify.svg"
 install -Dm 644 "$repo/LICENSE" "$root/usr/share/doc/latchverify/copyright"
 # Files must be readable and not group- or world-writable, whatever the build machine's umask or a
 # tool's private temp directories (0700), and the tree's root (mktemp makes it 0700) must not carry

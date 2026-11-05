@@ -24,8 +24,8 @@ cp -a "$stage/app" "$stage/node" "$stage/desktop" "$dir/"
 # How `latch update` and the app install updates (src/update): this is the portable archive.
 printf 'tarball\n' > "$dir/install-kind"
 install -m 755 "$repo/packaging/linux/latch" "$repo/packaging/linux/install.sh" "$repo/packaging/linux/uninstall.sh" "$dir/"
-install -m 644 "$repo/packaging/linux/io.github.vinayakkam.LatchVerify.desktop" "$repo/LICENSE" "$dir/"
-install -m 644 "$repo/web/public/favicon.svg" "$dir/io.github.vinayakkam.LatchVerify.svg"
+install -m 644 "$repo/packaging/linux/io.github.ANI-CPU-tech.LatchVerify.desktop" "$repo/LICENSE" "$dir/"
+install -m 644 "$repo/web/public/favicon.svg" "$dir/io.github.ANI-CPU-tech.LatchVerify.svg"
 chmod -R go+rX,go-w "$dir"
 
 mkdir -p "$out"

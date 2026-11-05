@@ -40,7 +40,7 @@ describe("the Inno Setup script", () => {
     expect(section("Run")).toContain("Flags: nowait postinstall skipifsilent");
     expect(section("Run")).toContain("Check: RelaunchRequested");
     expect(iss).toContain("ExpandConstant('{param:relaunch|0}') = '1'");
-    expect(section("Registry")).toContain('ValueName: "io.github.vinayakkam.LatchVerify"; Flags: uninsdeletevalue');
+    expect(section("Registry")).toContain('ValueName: "io.github.ANI-CPU-tech.LatchVerify"; Flags: uninsdeletevalue');
     expect(iss).toMatch(/usUninstall[\s\S]*taskkill\.exe'\), '\/F \/IM latchverify-desktop\.exe'[\s\S]*RunLatch\('setup --remove --all'/);
   });
 
@@ -69,7 +69,7 @@ describe("the Linux install hooks", () => {
 
   it("ship and launch the desktop app, never the old terminal launcher", () => {
     expect(existsSync(new URL("packaging/linux/latchverify-review", root))).toBe(false);
-    const entry = read("linux/io.github.vinayakkam.LatchVerify.desktop");
+    const entry = read("linux/io.github.ANI-CPU-tech.LatchVerify.desktop");
     expect(entry).toContain("Exec=latchverify-desktop");
     expect(entry).toContain("Terminal=false");
     for (const script of ["linux/build-deb.sh", "linux/build-tarball.sh", "linux/install.sh"]) {

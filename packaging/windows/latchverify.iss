@@ -86,12 +86,12 @@ Source: "latchverify.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install-kind"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\LatchVerify"; Filename: "{app}\desktop\latchverify-desktop.exe"; IconFilename: "{app}\latchverify.ico"; Comment: "Keep your MCP clients behind LatchVerify and review tool changes"; AppUserModelID: "io.github.vinayakkam.LatchVerify"
+Name: "{group}\LatchVerify"; Filename: "{app}\desktop\latchverify-desktop.exe"; IconFilename: "{app}\latchverify.ico"; Comment: "Keep your MCP clients behind LatchVerify and review tool changes"; AppUserModelID: "io.github.ANI-CPU-tech.LatchVerify"
 Name: "{group}\Uninstall LatchVerify"; Filename: "{uninstallexe}"
 
 [Registry]
 ; The app's login start (src/desktop/main.ts writes it under this name); removed with the app.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "io.github.vinayakkam.LatchVerify"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "io.github.ANI-CPU-tech.LatchVerify"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
 
 [Run]

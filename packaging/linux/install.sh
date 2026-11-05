@@ -31,8 +31,8 @@ if [ -L "$bin/latchverify-review" ] && [ "$(readlink "$bin/latchverify-review")"
 
 # The menu entry runs the app by absolute path: desktop sessions may not have ~/.local/bin on PATH.
 mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps"
-sed "s|^Exec=.*|Exec=\"$lib/desktop/latchverify-desktop\"|" "$src/io.github.vinayakkam.LatchVerify.desktop" > "$data/applications/io.github.vinayakkam.LatchVerify.desktop"
-cp "$src/io.github.vinayakkam.LatchVerify.svg" "$data/icons/hicolor/scalable/apps/"
+sed "s|^Exec=.*|Exec=\"$lib/desktop/latchverify-desktop\"|" "$src/io.github.ANI-CPU-tech.LatchVerify.desktop" > "$data/applications/io.github.ANI-CPU-tech.LatchVerify.desktop"
+cp "$src/io.github.ANI-CPU-tech.LatchVerify.svg" "$data/icons/hicolor/scalable/apps/"
 
 echo "Installed LatchVerify $("$lib/latch" --version) in $lib"
 if [ "${LATCH_SKIP_SETUP:-}" = 1 ]; then

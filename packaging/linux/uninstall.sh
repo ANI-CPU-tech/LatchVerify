@@ -24,5 +24,5 @@ done
 # The login start the app wrote, only when it starts this install.
 if [ -f "$autostart" ] && grep -q "$lib/desktop/" "$autostart"; then rm -f "$autostart"; fi
 rm -rf "$lib"
-rm -f "$data/applications/io.github.vinayakkam.LatchVerify.desktop" "$data/icons/hicolor/scalable/apps/io.github.vinayakkam.LatchVerify.svg"
+rm -f "$data/applications/io.github.ANI-CPU-tech.LatchVerify.desktop" "$data/icons/hicolor/scalable/apps/io.github.ANI-CPU-tech.LatchVerify.svg"
 echo "LatchVerify removed. Your latch.lock was kept."
