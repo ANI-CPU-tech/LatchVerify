@@ -141,13 +141,60 @@ export function installCommand(kind: InstallKind, file: string, root: string): {
       // Closes the running app (and proxies) and restarts it afterwards; the installer's own [Run] relaunches.
       return { command: file, args: ["/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTART", "/RELAUNCH=1"] };
     case "deb":
-      return { command: "pkexec", args: ["apt-get", "install", "-y", file] };
+      // pkexec clears the environment: debconf must not wait for a terminal nobody sees.
+      return { command: "pkexec", args: ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", file] };
     case "pacman":
       return { command: "pkexec", args: ["pacman", "-U", "--noconfirm", file] };
     case "tarball":
       // The new archive's own install.sh, into the same prefix (<prefix>/lib/latchverify is `root`).
       return { command: "sh", args: ["-c", 'set -e; d=$(mktemp -d); tar -xzf "$1" -C "$d"; LATCH_SKIP_SETUP=1 PREFIX="$2" "$d"/*/install.sh; rm -rf "$d"', "latch-update", file, dirname(dirname(root))] };
   }
+}
+
+/** The package names the Linux packages install under (packaging/debian/control.in, packaging/arch/PKGBUILD). */
+export const PACKAGE_NAMES = { deb: "latchverify", pacman: "latchverify-bin" } as const;
+
+/**
+ * How each install kind removes LatchVerify: its own uninstaller, which first gives every MCP
+ * client its original server commands back, then stops the app. latch.lock is kept.
+ */
+export function uninstallCommand(kind: InstallKind, root: string): { command: string; args: string[]; env?: NodeJS.ProcessEnv } {
+  switch (kind) {
+    case "inno":
+      // The uninstaller asks before it removes anything.
+      return { command: join(root, "unins000.exe"), args: [] };
+    case "deb":
+      return { command: "pkexec", args: ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "remove", "-y", PACKAGE_NAMES.deb] };
+    case "pacman":
+      return { command: "pkexec", args: ["pacman", "-R", "--noconfirm", PACKAGE_NAMES.pacman] };
+    case "tarball":
+      // install.sh copies uninstall.sh into <prefix>/lib/latchverify (`root`).
+      return { command: "sh", args: [join(root, "uninstall.sh")], env: { ...process.env, PREFIX: dirname(dirname(root)) } };
+  }
+}
+
+/**
+ * Runs the uninstall and resolves its exit code. Detached: the uninstallers stop the app, and the
+ * removal must go on after it. The Windows uninstaller is left running (it shows its own window).
+ */
+export function runUninstall(kind: InstallKind, root: string): Promise<number> {
+  const { command, args, env } = uninstallCommand(kind, root);
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: "inherit", env: env ?? process.env, detached: true, windowsHide: false });
+    child.once("error", reject);
+    if (kind === "inno") {
+      child.unref();
+      resolve(0);
+    } else child.once("exit", (code) => resolve(code ?? 1));
+  });
+}
+
+/** A plain-language reason for a failed pkexec install or removal, from its exit code. */
+export function privilegeFailure(kind: InstallKind, code: number): string | undefined {
+  if (kind !== "deb" && kind !== "pacman") return undefined;
+  if (code === 126) return "the administrator password was not given, so nothing was changed";
+  if (code === 127) return "no polkit authentication agent answered, so nothing was changed; run the command in a terminal with sudo instead";
+  return undefined;
 }
 
 /**

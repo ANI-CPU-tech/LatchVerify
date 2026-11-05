@@ -70,6 +70,8 @@ describe("the Linux install hooks", () => {
   it("ship and launch the desktop app, never the old terminal launcher", () => {
     expect(existsSync(new URL("packaging/linux/latchverify-review", root))).toBe(false);
     const entry = read("linux/io.github.ANI-CPU-tech.LatchVerify.desktop");
+    expect(entry).toContain("Exec=latchverify-desktop --uninstall");
+    expect(read("linux/install.sh")).toContain('s|^Exec=latchverify-desktop|');
     expect(entry).toContain("Exec=latchverify-desktop");
     expect(entry).toContain("Terminal=false");
     for (const script of ["linux/build-deb.sh", "linux/build-tarball.sh", "linux/install.sh"]) {
@@ -81,7 +83,7 @@ describe("the Linux install hooks", () => {
     expect(read("linux/build-deb.sh")).toContain('chmod -R go+rX,go-w "$root"');
     expect(read("linux/build-tarball.sh")).toContain('chmod -R go+rX,go-w "$dir"');
     expect(read("../packaging/build-desktop.ts")).toContain("chmodSync(desktop, 0o755)");
-    expect(read("linux/install.sh")).toContain('"$src/install-kind"');
+    expect(read("linux/install.sh")).toContain('"$src/install-kind" "$src/uninstall.sh"');
   });
 
   it("stop the app and remove its login start before unlinking", () => {

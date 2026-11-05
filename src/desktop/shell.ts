@@ -13,10 +13,12 @@ export interface AppFlags {
   smoke: boolean;
   /** Development mode, as LATCH_DEV. */
   dev: boolean;
+  /** Ask to uninstall LatchVerify (the Linux menu entry's Uninstall action). */
+  uninstall: boolean;
 }
 
 export function parseFlags(argv: readonly string[]): AppFlags {
-  return { hidden: argv.includes("--hidden"), smoke: argv.includes("--smoke"), dev: argv.includes("--dev") };
+  return { hidden: argv.includes("--hidden"), smoke: argv.includes("--smoke"), dev: argv.includes("--dev"), uninstall: argv.includes("--uninstall") };
 }
 
 /** True when the window may load `url`: only the app's own review server, never another origin. */

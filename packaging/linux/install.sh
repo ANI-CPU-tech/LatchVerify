@@ -21,7 +21,7 @@ data=${XDG_DATA_HOME:-$HOME/.local/share}
 # Copy next to the old install, then swap, so a failed copy leaves the old one working.
 rm -rf "$lib.new"
 mkdir -p "$lib.new" "$bin"
-cp -a "$src/app" "$src/node" "$src/desktop" "$src/latch" "$src/install-kind" "$lib.new/"
+cp -a "$src/app" "$src/node" "$src/desktop" "$src/latch" "$src/install-kind" "$src/uninstall.sh" "$lib.new/"
 rm -rf "$lib"
 mv "$lib.new" "$lib"
 ln -sfn "$lib/latch" "$bin/latch"
@@ -31,7 +31,7 @@ if [ -L "$bin/latchverify-review" ] && [ "$(readlink "$bin/latchverify-review")"
 
 # The menu entry runs the app by absolute path: desktop sessions may not have ~/.local/bin on PATH.
 mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps"
-sed "s|^Exec=.*|Exec=\"$lib/desktop/latchverify-desktop\"|" "$src/io.github.ANI-CPU-tech.LatchVerify.desktop" > "$data/applications/io.github.ANI-CPU-tech.LatchVerify.desktop"
+sed "s|^Exec=latchverify-desktop|Exec=\"$lib/desktop/latchverify-desktop\"|" "$src/io.github.ANI-CPU-tech.LatchVerify.desktop" > "$data/applications/io.github.ANI-CPU-tech.LatchVerify.desktop"
 cp "$src/io.github.ANI-CPU-tech.LatchVerify.svg" "$data/icons/hicolor/scalable/apps/"
 
 echo "Installed LatchVerify $("$lib/latch" --version) in $lib"
