@@ -70,11 +70,15 @@ jobs:
           pnpm -s exec tsx packaging/stage.ts build/stage
           pnpm -s exec tsx packaging/build-desktop.ts build/stage win32 x64
           ./packaging/windows/fetch-node.ps1 -Destination "$env:GITHUB_WORKSPACE\build\stage" -Arch x64
-      - name: Inno Setup 6.3 or newer
+      - name: Draw the installer's landscape (light and dark)
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm -s exec tsx packaging/windows/wizard-art.ts build/wizard
+      - name: Inno Setup 6.6 or newer
         run: |
           $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
-          # ArchitecturesAllowed=x64compatible needs Inno Setup 6.3.
-          if (-not (Test-Path $iscc) -or [version](Get-Item $iscc).VersionInfo.ProductVersion -lt [version]"6.3") {
+          # ArchitecturesAllowed=x64compatible needs 6.3; the light and dark wizard art (WizardStyle=modern dynamic) 6.6.
+          if (-not (Test-Path $iscc) -or [version](Get-Item $iscc).VersionInfo.ProductVersion -lt [version]"6.6") {
             choco upgrade innosetup -y --no-progress
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
@@ -89,7 +93,8 @@ jobs:
             "/DAppVersion=$env:VERSION",
             "/DFileVersion=$env:FILE_VERSION",
             "/DStageDir=$env:GITHUB_WORKSPACE\build\stage",
-            "/DOutputDir=$env:GITHUB_WORKSPACE\build\out"
+            "/DOutputDir=$env:GITHUB_WORKSPACE\build\out",
+            "/DWizardArtDir=$env:GITHUB_WORKSPACE\build\wizard"
           )
           if ($env:WINDOWS_CERTIFICATE) {
             $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"

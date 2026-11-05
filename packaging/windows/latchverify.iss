@@ -3,7 +3,9 @@
 ;   ISCC /DAppVersion=1.2.3 /DFileVersion=1.2.3.0 /DStageDir=<stage> /DOutputDir=<out> packaging\windows\latchverify.iss
 ;
 ; <stage> holds app\ (packaging/stage.ts), node\ (fetch-node.ps1) and desktop\ (packaging/build-desktop.ts). Add /DSignTool=1 together with
-; /Slatchsign=<command> to Authenticode-sign the installer and uninstaller.
+; /Slatchsign=<command> to Authenticode-sign the installer and uninstaller. Add /DWizardArtDir=<dir> after
+; `tsx packaging/windows/wizard-art.ts <dir>` for the app's landscape in the wizard: Default Light's sunset
+; in Windows light mode, Terminal Dark's night in dark mode (Inno Setup 6.6 or newer).
 ;
 ; Per-user install: no administrator rights, nothing written outside the user's profile. Installing
 ; connects no MCP client unless the user ticks that task or passes /TASKS=linkclients, as on Linux; an
@@ -58,7 +60,15 @@ OutputDir={#OutputDir}
 OutputBaseFilename=latchverify-{#AppVersion}-windows-x64-setup
 Compression=lzma2/max
 SolidCompression=yes
+#if defined(WizardArtDir) && Ver >= EncodeVer(6,6,0)
+; Follows Windows light or dark mode, with the matching landscape on the Welcome and Finished pages.
+WizardStyle=modern dynamic
+DisableWelcomePage=no
+#include AddBackslash(WizardArtDir) + "wizard-art.iss"
+#include AddBackslash(WizardArtDir) + "wizard-art-dark.iss"
+#else
 WizardStyle=modern
+#endif
 #ifdef SignTool
 SignTool=latchsign
 SignedUninstaller=yes
@@ -66,6 +76,11 @@ SignedUninstaller=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Messages]
+WelcomeLabel1=Welcome to LatchVerify
+WelcomeLabel2=LatchVerify keeps your MCP servers honest: it pins each tool's capabilities and holds any tool that gains new ones until you review it.%n%nIt installs for you alone, with no administrator rights, and connects no MCP client unless you choose to.
+FinishedHeadingLabel=LatchVerify is installed
 
 [Tasks]
 Name: linkclients; Description: "Link every MCP client found now (Claude Code, Cursor, VS Code and others): their servers start behind latch and their tools are pinned in your latch.lock. You can also choose later with latch setup, or in the LatchVerify app."; Flags: unchecked
