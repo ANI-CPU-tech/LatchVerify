@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ani-cpu-tech.github.io/LatchVerify/sitemap.xml

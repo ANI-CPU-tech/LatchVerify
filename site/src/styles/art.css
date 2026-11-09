@@ -1,0 +1,140 @@
+/*
+ * The hero scene (src/art/scene.ts): which copy of a layer shows in each theme, and the ambient
+ * motion. The message timeline is generated (src/art/motion.ts) and inlined in the page's head.
+ * Second poses are hidden here, so the still scene is complete without any animation.
+ */
+[data-theme="dark"] .hero-art .art-day,
+[data-theme="light"] .hero-art .art-night {
+  display: none;
+}
+
+.hero-art .art-birds-b,
+.hero-art .art-smoke-b,
+.hero-art .art-lamps-b,
+.hero-art .art-flag-b,
+.hero-art .art-fireflies-b {
+  opacity: 0;
+}
+
+/* Paused while the hero is off screen (src/ui/effects.ts). */
+.hero-art.is-paused * {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-art .art-clouds {
+    animation: art-drift 80s ease-in-out infinite alternate;
+  }
+  .hero-art .art-birds-a,
+  .hero-art .art-birds-b {
+    animation:
+      art-fly 46s linear -12s infinite,
+      art-swap 0.7s steps(1) infinite;
+  }
+  .hero-art .art-birds-b {
+    animation-delay: -12s, -0.35s;
+  }
+  .hero-art .art-smoke-a,
+  .hero-art .art-smoke-b {
+    animation: art-rise 7s linear infinite;
+  }
+  .hero-art .art-smoke-b {
+    animation-delay: -3.5s;
+  }
+  .hero-art .art-lamps-a,
+  .hero-art .art-lamps-b {
+    animation: art-swap 0.9s steps(1) infinite;
+  }
+  .hero-art .art-lamps-b {
+    animation-delay: -0.45s;
+  }
+  .hero-art .art-flag-a,
+  .hero-art .art-flag-b {
+    animation: art-swap 1.2s steps(1) infinite;
+  }
+  .hero-art .art-flag-b {
+    animation-delay: -0.6s;
+  }
+  .hero-art .art-beacon {
+    animation: art-blink 2.4s steps(1) infinite;
+  }
+  .hero-art .art-stars-a {
+    animation: art-twinkle 3.2s ease-in-out infinite;
+  }
+  .hero-art .art-stars-b {
+    animation: art-twinkle 4.4s ease-in-out -1.3s infinite;
+  }
+  .hero-art .art-stars-c {
+    animation: art-twinkle 5.8s ease-in-out -2.6s infinite;
+  }
+  .hero-art .art-fireflies-a {
+    animation: art-glow 3.4s ease-in-out infinite;
+  }
+  .hero-art .art-fireflies-b {
+    animation: art-glow 4.6s ease-in-out -2s infinite;
+  }
+}
+
+@keyframes art-drift {
+  to {
+    transform: translateX(24px);
+  }
+}
+@keyframes art-fly {
+  from {
+    transform: translateX(-180px);
+  }
+  to {
+    transform: translateX(420px);
+  }
+}
+/* Shows one of two poses half the time: the other copy runs half a cycle behind. */
+@keyframes art-swap {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes art-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-6px, -9px);
+  }
+}
+@keyframes art-blink {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  71%,
+  100% {
+    opacity: 0.25;
+  }
+}
+@keyframes art-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes art-glow {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}

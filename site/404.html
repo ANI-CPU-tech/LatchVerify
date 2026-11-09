@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Page not found · LatchVerify</title>
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#f7f0e4" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // Apply the theme before first paint. Mirrors src/lib/theme.ts: the saved choice, else the system setting.
+      (function () {
+        var theme = null;
+        try {
+          theme = localStorage.getItem("latchverify.site.theme");
+        } catch (e) {}
+        if (theme !== "light" && theme !== "dark") theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        var root = document.documentElement;
+        root.setAttribute("data-theme", theme);
+        root.classList.add("js");
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#1a1714" : "#f7f0e4");
+      })();
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body class="page-404">
+    <main id="main" class="not-found">
+      <a class="brand" href="%BASE_URL%">
+        <img class="brand-mark" src="/favicon.svg" width="24" height="24" alt="" />
+        <span class="brand-name">LatchVerify</span>
+      </a>
+      <p class="section-index">404</p>
+      <h1>This page is behind a latch.</h1>
+      <p class="lead">Nothing lives at this address. The pages that do are one click away.</p>
+      <p class="not-found-actions">
+        <a class="btn btn-primary" href="%BASE_URL%">Home</a>
+        <a class="btn btn-secondary" href="%BASE_URL%download/"><i data-icon="download"></i>Download</a>
+      </p>
+    </main>
+  </body>
+</html>

@@ -118,12 +118,19 @@ value from your shell, so tokens stay out of the command line.
 
 ```sh
 pnpm dev          # watch-run the CLI with tsx
-pnpm typecheck    # tsc over src/, tests/, demo/ and web/
+pnpm typecheck    # tsc over src/, tests/, demo/, web/ and site/
 pnpm test         # vitest
 pnpm build        # emit dist/ (CLI and desktop app code) and dist/web/ (review UI)
 pnpm desktop      # build, then run the LatchVerify app (Electron) from the checkout
 pnpm ui           # dev: hono API + Vite review UI with hot reload on http://localhost:5173
+pnpm site:dev     # the showcase website with hot reload on http://localhost:5180/LatchVerify/
+pnpm site:build   # build it into site/dist (SITE_OFFLINE=1 skips asking GitHub for the latest release)
 ```
+
+The showcase website lives in `site/` and is published to
+[ani-cpu-tech.github.io/LatchVerify](https://ani-cpu-tech.github.io/LatchVerify/) by the **Site**
+workflow (`.github/workflows/site.yml`; enable it once under Settings → Pages → Source: GitHub
+Actions).
 
 Copy `.env.example` to `.env` to change ports, paths or the reviewer name, or to
 enable the optional LLM advisory pass (any OpenAI-compatible API, such as Groq or
@@ -156,6 +163,7 @@ src/desktop/   the LatchVerify app (Electron main process, tray, preload)
 src/update/    signed update manifest, download and install per package kind
 src/ui/        hono review API
 web/           Vite + React review UI
+site/          the showcase website (static pages built by Vite, pixel-art hero, download links)
 demo/          benign and evil demo servers (development only)
 docs/          design docs
 packaging/     installers (Windows Inno Setup, deb, Arch, portable tar.gz), the app build, latest.json
