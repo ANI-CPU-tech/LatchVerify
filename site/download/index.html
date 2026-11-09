@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Download LatchVerify for Windows and Linux</title>
+    <meta
+      name="description"
+      content="Download LatchVerify for Windows 10 and 11, Debian and Ubuntu, Arch and CachyOS, or any x64 Linux. Install steps, checksums, updates and building from source."
+    />
+    <link rel="canonical" href="https://ani-cpu-tech.github.io/LatchVerify/download/" />
+    <meta name="theme-color" content="#f7f0e4" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="LatchVerify" />
+    <meta property="og:title" content="Download LatchVerify" />
+    <meta property="og:description" content="Installers for Windows, Debian and Ubuntu, Arch and CachyOS, and a portable Linux archive. Each brings its own Node.js 22." />
+    <meta property="og:url" content="https://ani-cpu-tech.github.io/LatchVerify/download/" />
+    <meta property="og:image" content="https://ani-cpu-tech.github.io/LatchVerify/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="LatchVerify: a pixel-art gatehouse stopping a poisoned message on its way to an MCP server." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <link rel="preload" href="%BASE_URL%fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <script>
+      // Apply the theme before first paint. Mirrors src/lib/theme.ts: the saved choice, else the system setting.
+      (function () {
+        var theme = null;
+        try {
+          theme = localStorage.getItem("latchverify.site.theme");
+        } catch (e) {}
+        if (theme !== "light" && theme !== "dark") theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        var root = document.documentElement;
+        root.setAttribute("data-theme", theme);
+        root.classList.add("js");
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#1a1714" : "#f7f0e4");
+      })();
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body class="page-download">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header" data-header>
+      <div class="container nav">
+        <a class="brand" href="../" aria-label="LatchVerify home">
+          <img class="brand-mark" src="%BASE_URL%favicon.svg" width="24" height="24" alt="" />
+          <span class="brand-name">LatchVerify</span>
+        </a>
+        <nav class="nav-menu" id="nav-menu" aria-label="Main" data-nav-menu>
+          <ul class="nav-links">
+            <li><a href="../#problem">Why</a></li>
+            <li><a href="../#how">How it works</a></li>
+            <li><a href="../#walkthrough">Walkthrough</a></li>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../#faq">FAQ</a></li>
+            <li>
+              <a href="https://github.com/ANI-CPU-tech/LatchVerify/tree/main/docs" rel="noopener" target="_blank">Docs <i data-icon="external"></i><span class="sr-only">(opens in a new tab)</span></a>
+            </li>
+          </ul>
+          <div class="nav-menu-extra">
+            <a class="btn btn-secondary" href="https://github.com/ANI-CPU-tech/LatchVerify" rel="noopener" target="_blank">Source on GitHub <i data-icon="external"></i><span class="sr-only">(opens in a new tab)</span></a>
+          </div>
+        </nav>
+        <div class="nav-actions">
+          <button class="icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Switch to dark theme" title="Switch theme">
+            <i data-icon="moon" class="when-light"></i>
+            <i data-icon="sun" class="when-dark"></i>
+          </button>
+          <a class="btn btn-ghost nav-github" href="https://github.com/ANI-CPU-tech/LatchVerify" rel="noopener" target="_blank">GitHub<span class="sr-only"> (opens in a new tab)</span></a>
+          <a class="btn btn-primary btn-sm" href="./" aria-current="page"><i data-icon="download"></i><span class="nav-download-label">Download</span></a>
+          <button class="icon-btn nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="nav-menu" aria-label="Open menu">
+            <i data-icon="menu" class="when-closed"></i>
+            <i data-icon="close" class="when-open"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <section class="page-hero" aria-labelledby="page-title">
+        <div class="container">
+          <p class="section-index">Download</p>
+          <h1 id="page-title">Get LatchVerify.</h1>
+          <p class="lead">
+            Version <strong data-release="version">{{release.version}}</strong><span class="release-date" data-release-date-wrap>, released <span data-release="date">{{release.date}}</span></span>.
+            Every installer is x64, brings its own Node.js 22 and includes the LatchVerify app. Installing connects no MCP
+            client until you choose one.
+          </p>
+          <p class="page-hero-links">
+            <a class="link-arrow" href="{{release.url}}" data-release="url" rel="noopener" target="_blank">Release notes <i data-icon="arrow-right"></i></a>
+            <a class="link-arrow" href="https://github.com/ANI-CPU-tech/LatchVerify/releases" rel="noopener" target="_blank">All releases <i data-icon="arrow-right"></i></a>
+          </p>
+          <p class="suggestion" data-suggestion hidden></p>
+        </div>
+      </section>
+
+      <section class="section section-tight" aria-labelledby="packages-title">
+        <div class="container">
+          <h2 id="packages-title" class="sr-only">Packages</h2>
+          <ul class="package-grid">
+            <li class="card package reveal" data-package="windows">
+              <div class="package-head">
+                <i data-icon="monitor"></i>
+                <div>
+                  <h3>Windows</h3>
+                  <p class="os-sub">10 and 11. Installs for your user, no administrator rights.</p>
+                </div>
+              </div>
+              <dl class="package-meta">
+                <div><dt>File</dt><dd><code data-file="windows" data-field="name">{{file.windows.name}}</code></dd></div>
+                <div class="meta-optional"><dt>Size</dt><dd data-file="windows" data-field="size">{{file.windows.size}}</dd></div>
+                <div class="meta-optional">
+                  <dt>SHA-256</dt>
+                  <dd class="sha">
+                    <code id="sha-windows" data-file="windows" data-field="sha">{{file.windows.sha}}</code>
+                    <button class="copy-btn" type="button" data-copy="sha-windows" aria-label="Copy the SHA-256 of the Windows installer"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+                  </dd>
+                </div>
+              </dl>
+              <a class="btn btn-primary btn-block" href="{{file.windows.url}}" data-file="windows" data-field="url"><i data-icon="download"></i>Download for Windows</a>
+            </li>
+            <li class="card package reveal" data-package="deb">
+              <div class="package-head">
+                <i data-icon="box"></i>
+                <div>
+                  <h3>Debian and Ubuntu</h3>
+                  <p class="os-sub">Also Linux Mint and Pop!_OS.</p>
+                </div>
+              </div>
+              <dl class="package-meta">
+                <div><dt>File</dt><dd><code data-file="deb" data-field="name">{{file.deb.name}}</code></dd></div>
+                <div class="meta-optional"><dt>Size</dt><dd data-file="deb" data-field="size">{{file.deb.size}}</dd></div>
+                <div class="meta-optional">
+                  <dt>SHA-256</dt>
+                  <dd class="sha">
+                    <code id="sha-deb" data-file="deb" data-field="sha">{{file.deb.sha}}</code>
+                    <button class="copy-btn" type="button" data-copy="sha-deb" aria-label="Copy the SHA-256 of the deb package"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+                  </dd>
+                </div>
+              </dl>
+              <a class="btn btn-primary btn-block" href="{{file.deb.url}}" data-file="deb" data-field="url"><i data-icon="download"></i>Download .deb</a>
+            </li>
+            <li class="card package reveal" data-package="arch">
+              <div class="package-head">
+                <i data-icon="cube"></i>
+                <div>
+                  <h3>Arch and CachyOS</h3>
+                  <p class="os-sub">Also EndeavourOS, Manjaro and Garuda.</p>
+                </div>
+              </div>
+              <dl class="package-meta">
+                <div><dt>File</dt><dd><code data-file="arch" data-field="name">{{file.arch.name}}</code></dd></div>
+                <div class="meta-optional"><dt>Size</dt><dd data-file="arch" data-field="size">{{file.arch.size}}</dd></div>
+                <div class="meta-optional">
+                  <dt>SHA-256</dt>
+                  <dd class="sha">
+                    <code id="sha-arch" data-file="arch" data-field="sha">{{file.arch.sha}}</code>
+                    <button class="copy-btn" type="button" data-copy="sha-arch" aria-label="Copy the SHA-256 of the Arch package"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+                  </dd>
+                </div>
+              </dl>
+              <a class="btn btn-primary btn-block" href="{{file.arch.url}}" data-file="arch" data-field="url"><i data-icon="download"></i>Download .pkg.tar.zst</a>
+            </li>
+            <li class="card package reveal" data-package="tarball">
+              <div class="package-head">
+                <i data-icon="archive"></i>
+                <div>
+                  <h3>Any Linux</h3>
+                  <p class="os-sub">Portable archive. Installs to your home folder, no root.</p>
+                </div>
+              </div>
+              <dl class="package-meta">
+                <div><dt>File</dt><dd><code data-file="tarball" data-field="name">{{file.tarball.name}}</code></dd></div>
+                <div class="meta-optional"><dt>Size</dt><dd data-file="tarball" data-field="size">{{file.tarball.size}}</dd></div>
+                <div class="meta-optional">
+                  <dt>SHA-256</dt>
+                  <dd class="sha">
+                    <code id="sha-tarball" data-file="tarball" data-field="sha">{{file.tarball.sha}}</code>
+                    <button class="copy-btn" type="button" data-copy="sha-tarball" aria-label="Copy the SHA-256 of the portable archive"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+                  </dd>
+                </div>
+              </dl>
+              <a class="btn btn-primary btn-block" href="{{file.tarball.url}}" data-file="tarball" data-field="url"><i data-icon="download"></i>Download .tar.gz</a>
+            </li>
+          </ul>
+          <p class="package-foot">
+            On a Mac? There is no macOS package yet; <a href="#source">build from source</a>. Checking a download:
+            <a href="#verify">see below</a>.
+          </p>
+        </div>
+      </section>
+
+      <section id="install" class="section section-alt" aria-labelledby="install-title">
+        <div class="container">
+          <header class="section-head reveal">
+            <p class="section-index">Install</p>
+            <h2 id="install-title">Install steps for your system.</h2>
+          </header>
+          <div class="os-tabs" data-tabs data-tabs-orientation="horizontal">
+            <div class="tab-list" role="tablist" aria-label="Operating system">
+              <button class="tab" type="button" role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="true" data-tab-package="windows">Windows</button>
+              <button class="tab" type="button" role="tab" id="tab-deb" aria-controls="panel-deb" aria-selected="false" tabindex="-1" data-tab-package="deb">Debian, Ubuntu</button>
+              <button class="tab" type="button" role="tab" id="tab-arch" aria-controls="panel-arch" aria-selected="false" tabindex="-1" data-tab-package="arch">Arch, CachyOS</button>
+              <button class="tab" type="button" role="tab" id="tab-tarball" aria-controls="panel-tarball" aria-selected="false" tabindex="-1" data-tab-package="tarball">Any Linux</button>
+              <button class="tab" type="button" role="tab" id="tab-source" aria-controls="panel-source" aria-selected="false" tabindex="-1" data-tab-package="source">macOS and source</button>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-windows" aria-labelledby="tab-windows" tabindex="0">
+              <ol class="install-steps">
+                <li>
+                  <h3>Run the setup</h3>
+                  <p>Double-click <code data-file="windows" data-field="name">{{file.windows.name}}</code>. It installs for your user only, so it does not ask for administrator rights.</p>
+                </li>
+                <li>
+                  <h3>If SmartScreen stops it</h3>
+                  <p>Windows may show <strong>"Windows protected your PC"</strong> for an installer that is not code-signed. Choose <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
+                </li>
+                <li>
+                  <h3>Choose what to link</h3>
+                  <p>
+                    Tick <strong>Link every MCP client found</strong> to connect them now; it is off by default. Otherwise connect
+                    clients later on the app's MCP Servers page, or with <code>latch setup</code>. The setup can also add
+                    <code>latch</code> to your PATH for new terminals.
+                  </p>
+                </li>
+                <li>
+                  <h3>Restart your MCP clients</h3>
+                  <p>Restart each client you connected. LatchVerify starts in the tray and from the Start menu.</p>
+                </li>
+              </ol>
+              <div class="term term-copy" data-term>
+                <div class="term-bar">
+                  <span class="term-title">Silent install, for scripts (PowerShell)</span>
+                  <button class="copy-btn" type="button" data-copy="cmd-windows-silent" aria-label="Copy the silent install command"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+                </div>
+                <pre class="term-body"><code id="cmd-windows-silent">.\<span data-file="windows" data-field="name">{{file.windows.name}}</span> /VERYSILENT /SUPPRESSMSGBOXES /TASKS="linkclients,addtopath"</code></pre>
+              </div>
+              <p class="tab-note">Without <code>/TASKS</code> a silent install links nothing. If linking does not finish, the details are in <code>%LOCALAPPDATA%\Programs\LatchVerify\setup.log</code>.</p>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-deb" aria-labelledby="tab-deb" tabindex="0" hidden>
+              <ol class="install-steps">
+                <li>
+                  <h3>Install the package</h3>
+                  <p>In the folder you downloaded it to:</p>
+                  <div class="term term-copy" data-term>
+                    <div class="term-bar">
+                      <span class="term-title">bash</span>
+                      <button class="copy-btn" type="button" data-copy="cmd-deb" aria-label="Copy the install command"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+                    </div>
+                    <pre class="term-body"><code id="cmd-deb" data-file="deb" data-field="cmd">{{file.deb.cmd}}</code></pre>
+                  </div>
+                  <p>The package creates the <code>latch.lock</code> of the user who ran <code>sudo</code> and lists their MCP clients. It connects none.</p>
+                </li>
+                <li>
+                  <h3>Connect your clients</h3>
+                  <p>As yourself, not root, run <code>latch setup</code> and choose which clients to connect. Then restart them.</p>
+                </li>
+              </ol>
+              <p class="tab-note">To uninstall: <code>sudo apt remove latchverify</code>. Every client gets its original commands back first.</p>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-arch" aria-labelledby="tab-arch" tabindex="0" hidden>
+              <ol class="install-steps">
+                <li>
+                  <h3>Install the package</h3>
+                  <p>In the folder you downloaded it to:</p>
+                  <div class="term term-copy" data-term>
+                    <div class="term-bar">
+                      <span class="term-title">bash</span>
+                      <button class="copy-btn" type="button" data-copy="cmd-arch" aria-label="Copy the install command"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+                    </div>
+                    <pre class="term-body"><code id="cmd-arch" data-file="arch" data-field="cmd">{{file.arch.cmd}}</code></pre>
+                  </div>
+                  <p>
+                    Name the one file rather than a pattern such as <code>latchverify-bin-*.pkg.tar.zst</code>: with an older
+                    download in the same folder, the pattern matches both and pacman stops with <code>duplicate target</code>.
+                  </p>
+                </li>
+                <li>
+                  <h3>Connect your clients</h3>
+                  <p>As yourself, not root, run <code>latch setup</code> and choose which clients to connect. Then restart them.</p>
+                </li>
+              </ol>
+              <p class="tab-note">
+                To uninstall: <code>sudo pacman -R latchverify-bin</code>. Prefer to build it yourself? The
+                <a href="https://github.com/ANI-CPU-tech/LatchVerify/blob/main/INSTALL.md#option-b--build-the-package-yourself-with-makepkg" rel="noopener" target="_blank">install guide</a>
+                has the <code>makepkg</code> steps.
+              </p>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-tarball" aria-labelledby="tab-tarball" tabindex="0" hidden>
+              <ol class="install-steps">
+                <li>
+                  <h3>Unpack and run the installer</h3>
+                  <div class="term term-copy" data-term>
+                    <div class="term-bar">
+                      <span class="term-title">bash</span>
+                      <button class="copy-btn" type="button" data-copy="cmd-tarball" aria-label="Copy the install command"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+                    </div>
+                    <pre class="term-body"><code id="cmd-tarball" data-file="tarball" data-field="cmd">{{file.tarball.cmd}}</code></pre>
+                  </div>
+                  <p>
+                    It installs to <code>~/.local/lib/latchverify</code>, puts <code>latch</code> in <code>~/.local/bin</code>,
+                    adds a menu entry and runs <code>latch setup</code>, which asks in your terminal which clients to connect.
+                    Set <code>PREFIX=/some/dir</code> to install somewhere else.
+                  </p>
+                </li>
+                <li>
+                  <h3>Restart the clients you connected</h3>
+                  <p>Run <code>install.sh</code> from a newer archive to update.</p>
+                </li>
+              </ol>
+              <p class="tab-note">
+                The bundled Node.js needs glibc 2.28 or newer (Debian 10, Ubuntu 20.04, RHEL 8 and later). The app needs
+                unprivileged user namespaces, since the archive has no setuid sandbox helper. To uninstall:
+                <code>~/.local/lib/latchverify/uninstall.sh</code>.
+              </p>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-source" aria-labelledby="tab-source" tabindex="0" hidden>
+              <p id="source" class="tab-lead">
+                There is no macOS package yet. On macOS, or anywhere you would rather build it, you need Node.js 22 or newer,
+                pnpm and git.
+              </p>
+              <div class="term term-copy" data-term>
+                <div class="term-bar">
+                  <span class="term-title">bash</span>
+                  <button class="copy-btn" type="button" data-copy="cmd-source" aria-label="Copy the build commands"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+                </div>
+                <pre class="term-body"><code id="cmd-source">git clone https://github.com/ANI-CPU-tech/LatchVerify.git
+cd LatchVerify
+corepack enable
+pnpm install
+pnpm build
+pnpm link --global
+latch setup</code></pre>
+              </div>
+              <p class="tab-note">
+                <code>pnpm link --global</code> puts <code>latch</code> on your PATH. A source checkout never updates itself:
+                <code>git pull</code> and build again. More in the
+                <a href="https://github.com/ANI-CPU-tech/LatchVerify/blob/main/SETUP.md" rel="noopener" target="_blank">setup guide</a>.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="after" class="section" aria-labelledby="after-title">
+        <div class="container">
+          <header class="section-head reveal">
+            <p class="section-index">After installing</p>
+            <h2 id="after-title">Connect the clients you want protected.</h2>
+            <p>
+              Connect from the app's MCP Servers page, or from a terminal. A connected client's stdio servers start behind the
+              proxy, and their tools are pinned the first time the client starts them.
+            </p>
+          </header>
+          <div class="table-scroll reveal" tabindex="0" role="region" aria-labelledby="setup-caption">
+            <table class="cli-table">
+              <caption id="setup-caption" class="sr-only">Linking commands</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Command</th>
+                  <th scope="col">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td><code>latch setup</code></td><td>List the clients found and ask which to connect. Without a terminal it only lists them.</td></tr>
+                <tr><td><code>latch setup --client cursor</code></td><td>Connect one client without asking.</td></tr>
+                <tr><td><code>latch setup --all</code></td><td>Connect every client found.</td></tr>
+                <tr><td><code>latch setup --dry-run</code></td><td>Show what would change, without writing anything.</td></tr>
+                <tr><td><code>latch setup --remove --client cursor</code></td><td>Disconnect a client: its servers get their original commands back. <code>--remove --all</code> for every client.</td></tr>
+                <tr><td><code>latch watch</code></td><td>Keep connected clients linked and show desktop notifications, on a machine without the app.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="split">
+            <div class="table-scroll reveal" tabindex="0" role="region" aria-labelledby="clients-caption">
+              <table class="paths-table">
+                <caption id="clients-caption">Client ids and the files LatchVerify reads</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Client</th>
+                    <th scope="col"><code>--client</code></th>
+                    <th scope="col">Config file on Linux</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>Claude Desktop</td><td><code>claude-desktop</code></td><td><code>~/.config/Claude/claude_desktop_config.json</code></td></tr>
+                  <tr><td>Claude Code</td><td><code>claude-code</code></td><td><code>~/.claude.json</code>, with each project's servers</td></tr>
+                  <tr><td>Cursor</td><td><code>cursor</code></td><td><code>~/.cursor/mcp.json</code></td></tr>
+                  <tr><td>VS Code</td><td><code>vscode</code></td><td><code>~/.config/Code/User/mcp.json</code></td></tr>
+                  <tr><td>VS Code Insiders</td><td><code>vscode-insiders</code></td><td><code>~/.config/Code - Insiders/User/mcp.json</code></td></tr>
+                  <tr><td>VSCodium</td><td><code>vscodium</code></td><td><code>~/.config/VSCodium/User/mcp.json</code></td></tr>
+                  <tr><td>Cline (VS Code)</td><td><code>cline</code></td><td><code>~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json</code></td></tr>
+                  <tr><td>Cline CLI</td><td><code>cline-cli</code></td><td><code>~/.cline/data/settings/cline_mcp_settings.json</code></td></tr>
+                  <tr><td>Gemini CLI</td><td><code>gemini-cli</code></td><td><code>~/.gemini/settings.json</code></td></tr>
+                  <tr><td>Zed</td><td><code>zed</code></td><td><code>~/.config/zed/settings.json</code></td></tr>
+                  <tr><td>LM Studio</td><td><code>lm-studio</code></td><td><code>~/.lmstudio/mcp.json</code></td></tr>
+                  <tr><td>Amazon Q Developer</td><td><code>amazon-q</code></td><td><code>~/.aws/amazonq/mcp.json</code> and <code>default.json</code></td></tr>
+                  <tr><td>OpenCode</td><td><code>opencode</code></td><td><code>~/.config/opencode/opencode.json</code> or <code>.jsonc</code></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <aside class="card note-card reveal">
+              <h3>Where your <code>latch.lock</code> lives</h3>
+              <dl class="lock-paths">
+                <div><dt>Windows</dt><dd><code>%APPDATA%\LatchVerify\latch.lock</code></dd></div>
+                <div><dt>Linux</dt><dd><code>~/.config/latchverify/latch.lock</code></dd></div>
+                <div><dt>macOS</dt><dd><code>~/Library/Application Support/LatchVerify/latch.lock</code></dd></div>
+              </dl>
+              <p>
+                <code>latch review</code> and <code>latch verify</code> open it from any directory. Inside a project with its
+                own committed <code>latch.lock</code>, they use the project's file instead.
+              </p>
+              <p>
+                On Windows, the files shown under <code>~/.config</code> are under <code>%APPDATA%</code> instead, except
+                OpenCode's; the rest are in your user folder.
+              </p>
+              <p>
+                A config that exists but cannot be read is reported and left untouched. Project files teams commit, such as
+                <code>.mcp.json</code>, are never rewritten.
+              </p>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section id="verify" class="section section-alt" aria-labelledby="verify-title">
+        <div class="container two-col">
+          <div class="reveal">
+            <p class="section-index">Checksums</p>
+            <h2 id="verify-title">Check a download.</h2>
+            <p>
+              Every release publishes a <a href="{{release.sums}}" data-release="sums"><code>SHA256SUMS</code></a> file. Put
+              it next to your download and run the check; it should print <code>OK</code> for your file. The SHA-256 of each
+              file is also listed above.
+            </p>
+          </div>
+          <div class="stack reveal">
+            <div class="term term-copy" data-term>
+              <div class="term-bar">
+                <span class="term-title">Linux</span>
+                <button class="copy-btn" type="button" data-copy="cmd-sums" aria-label="Copy the Linux checksum command"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+              </div>
+              <pre class="term-body"><code id="cmd-sums">sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+            </div>
+            <div class="term term-copy" data-term>
+              <div class="term-bar">
+                <span class="term-title">Windows (PowerShell)</span>
+                <button class="copy-btn" type="button" data-copy="cmd-hash" aria-label="Copy the PowerShell checksum command"><i data-icon="copy" class="when-idle"></i><i data-icon="check" class="when-copied"></i></button>
+              </div>
+              <pre class="term-body"><code id="cmd-hash">Get-FileHash .\<span data-file="windows" data-field="name">{{file.windows.name}}</span></code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="update" class="section" aria-labelledby="update-title">
+        <div class="container two-col">
+          <div class="reveal">
+            <p class="section-index">Updates</p>
+            <h2 id="update-title">It updates itself, with your say-so.</h2>
+            <p>
+              The app checks once a day. <strong>Settings &rarr; Updates</strong> shows the release notes and installs on one
+              click; on the deb and Arch packages your system asks for your password. Each update is checked against the
+              release's ed25519 signature and its SHA-256 before it runs. Your <code>latch.lock</code> and approvals are kept.
+            </p>
+          </div>
+          <dl class="howto reveal">
+            <div><dt>From a terminal</dt><dd><code>latch update</code>, or <code>latch update --check</code> to only report</dd></div>
+            <div><dt>Windows, by hand</dt><dd>Run the newer setup</dd></div>
+            <div><dt>Debian, Ubuntu</dt><dd><code>sudo apt install ./latchverify_&lt;new-version&gt;_amd64.deb</code></dd></div>
+            <div><dt>Arch, CachyOS</dt><dd><code>sudo pacman -U latchverify-bin-&lt;new-version&gt;-1-x86_64.pkg.tar.zst</code></dd></div>
+            <div><dt>Portable archive</dt><dd>Run <code>install.sh</code> from the new archive</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section id="uninstall" class="section section-alt" aria-labelledby="uninstall-title">
+        <div class="container two-col">
+          <div class="reveal">
+            <p class="section-index">Uninstall</p>
+            <h2 id="uninstall-title">Leaving puts everything back.</h2>
+            <p>
+              Every way of uninstalling gives each MCP client its original server commands back first. Your
+              <code>latch.lock</code> and settings stay, so a reinstall keeps your approvals.
+            </p>
+          </div>
+          <dl class="howto reveal">
+            <div><dt>Windows</dt><dd>Settings &rarr; Apps &rarr; Installed apps &rarr; LatchVerify</dd></div>
+            <div><dt>Debian, Ubuntu</dt><dd><code>sudo apt remove latchverify</code></dd></div>
+            <div><dt>Arch, CachyOS</dt><dd><code>sudo pacman -R latchverify-bin</code></dd></div>
+            <div><dt>Portable archive</dt><dd><code>~/.local/lib/latchverify/uninstall.sh</code></dd></div>
+            <div><dt>Any Linux install</dt><dd>The app's Settings &rarr; Uninstall LatchVerify, or <code>latch uninstall --yes</code></dd></div>
+          </dl>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="../">
+            <img class="brand-mark" src="%BASE_URL%favicon.svg" width="24" height="24" alt="" />
+            <span class="brand-name">LatchVerify</span>
+          </a>
+          <p>Pin what your MCP tools can do, and block them when that changes.</p>
+        </div>
+        <nav class="footer-nav" aria-label="Footer">
+          <div>
+            <h2>Product</h2>
+            <ul>
+              <li><a href="./">Download</a></li>
+              <li><a href="../#walkthrough">Walkthrough</a></li>
+              <li><a href="https://github.com/ANI-CPU-tech/LatchVerify/releases" rel="noopener" target="_blank">Releases</a></li>
+              <li><a href="https://github.com/ANI-CPU-tech/LatchVerify/blob/main/CHANGELOG.md" rel="noopener" target="_blank">Changelog</a></li>
+            </ul>
+          </div>
+          <div>
+            <h2>Docs</h2>
+            <ul>
+              <li><a href="https://github.com/ANI-CPU-tech/LatchVerify/blob/main/INSTALL.md" rel="noopener" target="_blank">Install guide</a></li>
+              <li><a href="https://github.com/ANI-CPU-tech/LatchVerify/blob/main/docs/ARCHITECTURE.md" rel="noopener" target="_blank">Architecture</a></li>
+              <li><a href="https://github.com/ANI-CPU-tech/LatchVerify/blob/main/docs/CAPABILITIES.md" rel="noopener" target="_blank">Capability model</a></li>
+              <li><a href="https://github.com/ANI-CPU-tech/LatchVerify/blob/main/docs/LOCKFILE.md" rel="noopener" target="_blank">latch.lock format</a></li>
+            </ul>
+          </div>
+          <div>
+            <h2>Project</h2>
+            <ul>
+              <li><a href="https://github.com/ANI-CPU-tech/LatchVerify" rel="noopener" target="_blank">Source code</a></li>
+              <li><a href="https://github.com/ANI-CPU-tech/LatchVerify/issues" rel="noopener" target="_blank">Issues</a></li>
+              <li><a href="https://github.com/ANI-CPU-tech/LatchVerify/blob/main/LICENSE" rel="noopener" target="_blank">MIT License</a></li>
+            </ul>
+          </div>
+        </nav>
+      </div>
+      <div class="container footer-bottom">
+        <p>
+          Built by <a href="https://github.com/vinayakkam" rel="noopener" target="_blank">Vinayak Kamath</a> and
+          <a href="https://github.com/ANI-CPU-tech" rel="noopener" target="_blank">Anirudh Rao B</a>. Released under the MIT
+          License.
+        </p>
+        <p class="footer-legal">MCP client names belong to their owners. LatchVerify is not affiliated with them.</p>
+      </div>
+    </footer>
+  </body>
+</html>
