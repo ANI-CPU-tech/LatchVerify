@@ -17,7 +17,8 @@
 }
 
 :root {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  /* Named faces before system-ui: Firefox maps system-ui to the desktop's UI font, which some Linux setups set to a monospace. */
+  --font-sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Noto Sans", Ubuntu, Cantarell, "Helvetica Neue", Arial, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --radius: 8px;
   --radius-sm: 6px;
@@ -751,6 +752,70 @@ main:focus {
 .hero-art {
   position: relative;
   margin: clamp(28px, 5vw, 48px) 0 0;
+}
+
+/*
+ * From tablet width up, the scene is the hero's background: the hero fills the first screen, the
+ * scene sits on its bottom edge at full width, and the copy floats over its sky. The bottom padding
+ * keeps the lower two thirds of the scene (hills, gatehouse, road) clear of the copy; only the sky
+ * and the peaks may run behind it, softened there by a fade in the sky's color.
+ */
+@media (min-width: 720px) {
+  .hero {
+    padding-top: clamp(32px, 6vh, 80px);
+    padding-bottom: calc(100vw * 128 / 480 * 0.66);
+  }
+  .hero-art {
+    position: absolute;
+    inset: auto 0 0;
+    /* Its own layer, under the copy (z-index 1): the fade inside it never covers the buttons. */
+    z-index: 0;
+    margin: 0;
+  }
+  .hero-art::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 45% 0;
+    z-index: 1;
+    background: linear-gradient(to right, hsl(var(--art-sky)) 0%, hsl(var(--art-sky) / 0.8) 40%, hsl(var(--art-sky) / 0) 72%);
+    /* Fades in and out vertically too, so it has no edge against the hero's own sky. */
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 30%, black 45%, transparent);
+    mask-image: linear-gradient(to bottom, transparent, black 30%, black 45%, transparent);
+    pointer-events: none;
+  }
+}
+
+/* Landscape screens: the hero fills the first screen, so the scene sits on its bottom edge. On a
+   portrait tablet that would leave a tall empty sky above a small scene, so it does not. */
+@media (min-width: 720px) and (min-aspect-ratio: 4 / 3) {
+  .hero {
+    min-height: calc(100svh - var(--header-h));
+  }
+}
+
+/* Short screens (laptops): a tighter copy and more of the sky behind it, so the road stays in view. */
+@media (min-width: 720px) and (max-height: 820px) {
+  .hero {
+    padding-top: 24px;
+    padding-bottom: calc(100vw * 128 / 480 * 0.5);
+  }
+  .eyebrow {
+    margin-bottom: 16px;
+  }
+  .hero h1 {
+    font-size: min(3.6rem, 6.4vh);
+  }
+  .hero .lead {
+    max-width: 70ch;
+    margin-top: 16px;
+    font-size: 1.0625rem;
+  }
+  .hero-actions {
+    margin-top: 20px;
+  }
+  .hero-note {
+    display: none;
+  }
 }
 
 .hero-art-svg {
