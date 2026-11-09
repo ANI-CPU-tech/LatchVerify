@@ -1,0 +1,77 @@
+# Builds the showcase site (site/) and publishes it on GitHub Pages:
+# https://ani-cpu-tech.github.io/LatchVerify/
+#
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+#
+# The download buttons are filled in at build time from the latest release, and the page refreshes
+# them from the GitHub API in the visitor's browser, so a new release shows up without a rebuild.
+# The daily run keeps the built-in fallback current too: a release published by build-installers.yml
+# uses the workflow token, and GitHub does not start other workflows for events that token causes.
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "tests/site/**"
+      - "web/public/favicon.svg"
+      - "packaging/version.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/site.yml"
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time; a newer run waits rather than cancelling one that is publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          # The site needs Vite, not the desktop app's Electron binary.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Typecheck and test the site
+        run: |
+          pnpm -s exec tsc --noEmit -p site
+          pnpm -s exec vitest run tests/site
+      - name: Build
+        run: pnpm -s site:build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    name: Publish to GitHub Pages
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
