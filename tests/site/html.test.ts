@@ -108,6 +108,14 @@ describe("site pages", () => {
     }
   });
 
+  it("reference public files by root path, so Vite adds the base once in dev and in the build", () => {
+    // %BASE_URL% in an asset's src or href gets the base twice under the dev server (/LatchVerify/LatchVerify/...).
+    for (const [path, html] of Object.entries(PAGES)) {
+      for (const [tag] of html.matchAll(/<(?:img|link|script)\s[^>]*>/g)) expect(tag, path).not.toContain("%BASE_URL%");
+      expect(html, path).toContain('src="/favicon.svg"');
+    }
+  });
+
   it("ship the app's own favicon", () => {
     expect(read("public/favicon.svg")).toBe(readFileSync(new URL("../../web/public/favicon.svg", import.meta.url), "utf8"));
   });
