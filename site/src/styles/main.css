@@ -653,18 +653,15 @@ main:focus {
   background: linear-gradient(to bottom, hsl(var(--art-sky)) 0%, hsl(var(--art-sky)) 35%, hsl(var(--art-horizon)) 100%);
 }
 
-/* A starry sky above the night scene, thinning out toward it. */
+/* A starry sky over the whole hero; the scene's own stars, behind its transparent sky, continue it. */
 [data-theme="dark"] .hero::before {
   content: "";
   position: absolute;
-  /* To the right of the copy, fading in from its edge, so the text stays on a plain sky. */
-  inset: 0 0 30% 55%;
+  /* The whole night sky, behind the copy too, down into the scene's own sky. */
+  inset: 0;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 96' shape-rendering='crispEdges'%3E%3Cg fill='%23d8c097'%3E%3Crect x='7' y='9' width='1' height='1'/%3E%3Crect x='31' y='41' width='1' height='1'/%3E%3Crect x='58' y='14' width='1' height='1'/%3E%3Crect x='83' y='63' width='1' height='1'/%3E%3Crect x='112' y='27' width='1' height='1'/%3E%3Crect x='139' y='77' width='1' height='1'/%3E%3Crect x='151' y='6' width='1' height='1'/%3E%3Crect x='20' y='84' width='1' height='1'/%3E%3Crect x='96' y='88' width='1' height='1'/%3E%3C/g%3E%3Cg fill='%2396815f'%3E%3Crect x='44' y='70' width='1' height='1'/%3E%3Crect x='71' y='33' width='1' height='1'/%3E%3Crect x='126' y='52' width='1' height='1'/%3E%3Crect x='3' y='55' width='1' height='1'/%3E%3Crect x='103' y='4' width='1' height='1'/%3E%3C/g%3E%3Cg fill='%23d8c097'%3E%3Crect x='66' y='50' width='1' height='3'/%3E%3Crect x='65' y='51' width='3' height='1'/%3E%3Crect x='145' y='40' width='1' height='3'/%3E%3Crect x='144' y='41' width='3' height='1'/%3E%3C/g%3E%3C/svg%3E");
   background-size: 480px 288px;
-  -webkit-mask-image: linear-gradient(to bottom, black 40%, transparent), linear-gradient(to right, transparent, black 45%);
-  -webkit-mask-composite: source-in;
-  mask-image: linear-gradient(to bottom, black 40%, transparent), linear-gradient(to right, transparent, black 45%);
-  mask-composite: intersect;
+  opacity: 0.85;
   pointer-events: none;
 }
 

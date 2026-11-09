@@ -213,11 +213,12 @@ type Rect = (paint: Paint, x0: number, y0: number, x1: number, y1: number, color
 function sky(on: On, night: boolean) {
   const paint = on("sky");
   if (night) {
-    // Stars in three sets that twinkle out of step, thicker toward the top.
-    for (let i = 0; i < 150; i++) {
+    // Stars in three sets that twinkle out of step, spread evenly so they carry on into the page's
+    // own starry sky above the scene (site/src/styles/main.css) without a band at the top edge.
+    for (let i = 0; i < 70; i++) {
       const star = on((["stars-a", "stars-b", "stars-c"] as const)[i % 3]!);
       const x = Math.floor(hash(i, 100) * WIDTH);
-      const y = 1 + Math.floor(hash(i, 101) ** 1.5 * 60);
+      const y = 1 + Math.floor(hash(i, 101) * 60);
       const bright = hash(i, 102) > 0.88;
       star(x, y, bright || hash(i, 103) > 0.5 ? "snow" : "snow-shade");
       if (bright) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) star(x + dx, y + dy, "snow-shade");
