@@ -163,6 +163,18 @@ that blocks on every reword gets disabled by its users.
   "Review UI" below.
 - Fixtures: `tests/fixtures/benign-tools.json` and `poisoned-tools.json`, which
   the demo servers also serve.
+- Showcase website: `site/`, static pages (`index.html`, `download/index.html`, `404.html`) built by
+  Vite with no framework, published to GitHub Pages under `/LatchVerify/` by `.github/workflows/site.yml`.
+  `plugin/template.ts` inlines at build time the hero scene (`src/art/scene.ts`, a gatehouse on a road
+  from a client's cottage to a server's tower; `motion.ts` times the messages and the portcullis),
+  the pixel icons (`<i data-icon="name"></i>`, `src/art/icons.ts`) and the latest release
+  (`{{file.deb.url}}`, ...), from the GitHub API or, failing that, from package.json's version with
+  the release workflow's file names (`src/lib/release.ts`). In the browser, `src/ui/downloads.ts`
+  refreshes the same fields from the API and suggests the package for the visitor's system. Two
+  themes, light (the app's Default Light) and dark (its Terminal Dark), in `src/styles/tokens.css`;
+  the screenshots in `src/assets/` are the real app on the demo rug pull. `tests/site/` checks the
+  release names against `packaging/`, the art's timeline, AA contrast, the pages' links and ids,
+  and that no emoji appears. The site never ships in a package: it is outside `dist/`.
 
 ## Review UI
 
@@ -302,6 +314,7 @@ pnpm typecheck   # must stay at zero errors
 pnpm test
 pnpm build      # CLI into dist/, web UI into dist/web (latch review --ui)
 pnpm ui         # API on 7777, Vite on 5173; set LATCH_LOCKFILE_PATH / LATCH_STATE_DIR
+pnpm site:dev   # the showcase website on 5180; pnpm site:build writes site/dist
 ```
 
 In the workflow and packaging scripts, use `pnpm -s exec`: pnpm 11 prints its install check on
