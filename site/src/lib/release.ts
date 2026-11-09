@@ -141,7 +141,7 @@ export function installCommand(kind: PackageKind, name: string): string | null {
 
 /**
  * What the page shows for a release, by field name: "release.version", "file.deb.url", ... The
- * build fills {{field}} placeholders with it (site/build/template.ts) and the browser refreshes
+ * build fills {{field}} placeholders with it (site/plugin/template.ts) and the browser refreshes
  * the elements marked with the same names (src/ui/downloads.ts). Unknown data is an empty string;
  * a link to a file that is missing falls back to the release page.
  */
