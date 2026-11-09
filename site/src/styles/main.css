@@ -2648,3 +2648,8 @@ thead th {
   gap: 12px;
   margin-top: 12px;
 }
+
+/* Names that must not break, such as Pop!_OS (browsers may wrap after the "!"). */
+.nowrap {
+  white-space: nowrap;
+}
