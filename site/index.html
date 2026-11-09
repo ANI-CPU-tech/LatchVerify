@@ -36,6 +36,10 @@
         var root = document.documentElement;
         root.setAttribute("data-theme", theme);
         root.classList.add("js");
+        // The loading screen, once per tab (src/ui/splash.ts), and never for reduced motion.
+        try {
+          if (!sessionStorage.getItem("latchverify.site.splash") && !matchMedia("(prefers-reduced-motion: reduce)").matches) root.classList.add("splash-on");
+        } catch (e) {}
         var meta = document.querySelector('meta[name="theme-color"]');
         if (meta) meta.setAttribute("content", theme === "dark" ? "#1a1714" : "#f7f0e4");
       })();
@@ -44,6 +48,7 @@
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
+    <!--lv:splash-->
     <a class="skip-link" href="#main">Skip to content</a>
 
     <header class="site-header" data-header>

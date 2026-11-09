@@ -2,6 +2,7 @@
  * Build-time HTML for the site (site/vite.config.ts runs it on every page):
  *
  * - <!--lv:hero-art--> becomes the hero scene's SVG and <!--lv:hero-motion--> its message timeline,
+ * - <!--lv:splash--> becomes the loading screen (src/art/padlock.ts),
  * - <i data-icon="name"></i> becomes that pixel icon,
  * - {{release.*}} and {{file.<kind>.*}} become the release's data, so the download links work
  *   before, and without, any script. src/ui/downloads.ts refreshes the same fields in the browser.
@@ -11,6 +12,7 @@
 import { heroSvg } from "../src/art/svg.js";
 import { sceneStyles } from "../src/art/motion.js";
 import { iconSvg, isIconName } from "../src/art/icons.js";
+import { splashHtml } from "../src/art/padlock.js";
 import { releaseFields, type Release } from "../src/lib/release.js";
 
 const escapeHtml = (text: string): string =>
@@ -39,6 +41,7 @@ export function renderPage(html: string, release: Release): string {
   return page
     .replace("<!--lv:hero-art-->", () => svg)
     .replace("<!--lv:hero-motion-->", () => motion)
+    .replace("<!--lv:splash-->", () => splashHtml())
     .replace("</body>", () => `${releaseScript(release)}</body>`);
 }
 

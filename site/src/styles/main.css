@@ -2718,3 +2718,110 @@ thead th {
 .nowrap {
   white-space: nowrap;
 }
+
+/* ---------- Loading screen (src/ui/splash.ts) ---------- */
+
+.splash {
+  display: none;
+}
+
+/*
+ * Shown only while the inline script in <head> has set html.splash-on. If no script ever removes it,
+ * the screen still fades out on its own after a few seconds, so it can never hold the page.
+ */
+.splash-on .splash {
+  display: grid;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  place-items: center;
+  background: hsl(var(--background));
+  animation: splash-failsafe 0.3s ease 6s forwards;
+  transition: opacity 320ms ease;
+}
+
+.splash-on .splash.is-leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.splash-inner {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+}
+
+.splash-lock {
+  width: 96px;
+  height: 114px;
+  /* The outline is the theme's foreground; a faint glow keeps the shackle crisp on dark. */
+  filter: drop-shadow(0 0 1px hsl(var(--foreground) / 0.35));
+}
+
+.splash-name {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.splash-bar {
+  width: 168px;
+  height: 14px;
+  padding: 2px;
+  border: 2px solid hsl(var(--foreground));
+}
+
+.splash-fill {
+  height: 100%;
+  background: hsl(var(--accent));
+  transform: scaleX(var(--fill, 0));
+  transform-origin: left;
+}
+
+/* While loading, the open shackle bobs a pixel; locking drops it three pixels into the body, where
+   it is the logo's closed shackle, and the body takes the knock. */
+.splash-shackle-open {
+  animation: splash-bob 0.7s steps(1) infinite;
+}
+
+.splash.is-locked .splash-shackle-open {
+  animation: splash-drop 150ms steps(3, end) forwards;
+}
+
+.splash.is-locked .splash-body {
+  animation: splash-knock 160ms steps(1) 150ms;
+}
+
+.splash.is-locked .splash-fill {
+  background: hsl(var(--success));
+}
+
+@keyframes splash-bob {
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes splash-drop {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(3px);
+  }
+}
+
+@keyframes splash-knock {
+  0% {
+    transform: translateY(1px);
+  }
+}
+
+@keyframes splash-failsafe {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
