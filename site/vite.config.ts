@@ -48,8 +48,9 @@ function sitePages(): Plugin {
 
 export default defineConfig({
   root: here("."),
-  // GitHub Pages serves the repository's site under /LatchVerify/; SITE_BASE overrides it (for a custom domain, "/").
-  base: process.env.SITE_BASE ?? "/LatchVerify/",
+  // GitHub Pages serves the site at the root of its custom domain, latchverify.olittechnologies.co.in.
+  // SITE_BASE overrides it, e.g. "/LatchVerify/" to serve it from ani-cpu-tech.github.io again.
+  base: process.env.SITE_BASE ?? "/",
   publicDir: here("public"),
   plugins: [sitePages()],
   server: { port: 5180 },

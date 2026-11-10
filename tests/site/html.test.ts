@@ -42,7 +42,7 @@ describe("site pages", () => {
       if (path === "404.html") expect(html).toContain('name="robots" content="noindex"');
       else {
         expect(html, path).toMatch(/<meta\s+name="description"\s+content="[^"]{50,}"/);
-        expect(html, path).toContain(`<link rel="canonical" href="https://ani-cpu-tech.github.io/LatchVerify/${path.replace("index.html", "")}" />`);
+        expect(html, path).toContain(`<link rel="canonical" href="https://latchverify.olittechnologies.co.in/${path.replace("index.html", "")}" />`);
       }
     }
   });

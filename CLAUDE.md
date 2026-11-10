@@ -164,7 +164,7 @@ that blocks on every reword gets disabled by its users.
 - Fixtures: `tests/fixtures/benign-tools.json` and `poisoned-tools.json`, which
   the demo servers also serve.
 - Showcase website: `site/`, static pages (`index.html`, `download/index.html`, `404.html`) built by
-  Vite with no framework, published to GitHub Pages under `/LatchVerify/` by `.github/workflows/site.yml`.
+  Vite with no framework, published to GitHub Pages at the custom domain `latchverify.olittechnologies.co.in` (Vite `base` "/") by `.github/workflows/site.yml`.
   `plugin/template.ts` inlines at build time the hero scene (`src/art/scene.ts`, a gatehouse on a road
   from a client's cottage to a server's tower; `motion.ts` times the messages and the portcullis),
   the pixel icons (`<i data-icon="name"></i>`, `src/art/icons.ts`) and the latest release

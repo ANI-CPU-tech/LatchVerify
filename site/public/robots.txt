@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ani-cpu-tech.github.io/LatchVerify/sitemap.xml
+Sitemap: https://latchverify.olittechnologies.co.in/sitemap.xml

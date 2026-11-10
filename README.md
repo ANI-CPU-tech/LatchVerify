@@ -123,14 +123,14 @@ pnpm test         # vitest
 pnpm build        # emit dist/ (CLI and desktop app code) and dist/web/ (review UI)
 pnpm desktop      # build, then run the LatchVerify app (Electron) from the checkout
 pnpm ui           # dev: hono API + Vite review UI with hot reload on http://localhost:5173
-pnpm site:dev     # the showcase website with hot reload on http://localhost:5180/LatchVerify/
+pnpm site:dev     # the showcase website with hot reload on http://localhost:5180/
 pnpm site:build   # build it into site/dist (SITE_OFFLINE=1 skips asking GitHub for the latest release)
 ```
 
 The showcase website lives in `site/` and is published to
-[ani-cpu-tech.github.io/LatchVerify](https://ani-cpu-tech.github.io/LatchVerify/) by the **Site**
+[latchverify.olittechnologies.co.in](https://latchverify.olittechnologies.co.in/) by the **Site**
 workflow (`.github/workflows/site.yml`; enable it once under Settings → Pages → Source: GitHub
-Actions).
+Actions, with the custom domain set on the same page).
 
 Copy `.env.example` to `.env` to change ports, paths or the reviewer name, or to
 enable the optional LLM advisory pass (any OpenAI-compatible API, such as Groq or

@@ -1,5 +1,5 @@
 # Builds the showcase site (site/) and publishes it on GitHub Pages:
-# https://ani-cpu-tech.github.io/LatchVerify/
+# https://latchverify.olittechnologies.co.in/ (custom domain: Settings -> Pages -> Custom domain)
 #
 # One-time setup: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
 #
